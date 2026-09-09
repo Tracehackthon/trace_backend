@@ -245,8 +245,8 @@
     },
     {
       "path": "packages/core/instance/src/index.ts",
-      "sha256": "16cf9264ae4878403159f1cfff7626fe8f9b80f19799cdb707d223e6b686f90f",
-      "bytes": 8830
+      "sha256": "a9da4ecafdab3c8397f13aa25e5e23cb1149343453f893a388786d230bb3c1a3",
+      "bytes": 9395
     },
     {
       "path": "packages/core/migration/package.json",
@@ -839,5 +839,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T12:28:22.281Z"
+  "created_at": "2026-09-09T12:34:33.889Z"
 }

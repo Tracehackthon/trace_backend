@@ -82,7 +82,12 @@ function profileFor(input: ProjectInitInput, traceDir: string): {profile: Projec
   const sourceRoot = absolute(supplied?.root ?? input.source_root, 'source_root');
   const sourceId = text(supplied?.source_id ?? input.source_id, 'source_id', 240);
   if (input.source_id !== undefined && input.source_id !== sourceId) throw new ProtocolError('INVALID_INPUT', '--source-id does not match source profile');
-  const profile: ProjectSourceProfileInput = {source_id: sourceId, root: sourceRoot, formal_prefix: supplied?.formal_prefix ?? 'wiki', read_enabled: supplied?.read_enabled ?? true, write_enabled: supplied?.write_enabled ?? false, user_id: supplied?.user_id ?? input.user_id, scope_type: scope, source_mode: mode};
+  const formalPrefix = text(supplied?.formal_prefix ?? 'wiki', 'formal_prefix', 200);
+  const profileUserId = text(supplied?.user_id ?? input.user_id, 'source_profile.user_id', 240);
+  const readEnabled = supplied?.read_enabled ?? true;
+  const writeEnabled = supplied?.write_enabled ?? false;
+  if (typeof readEnabled !== 'boolean' || typeof writeEnabled !== 'boolean') throw new ProtocolError('INVALID_INPUT', 'source profile read_enabled/write_enabled must be boolean');
+  const profile: ProjectSourceProfileInput = {source_id: sourceId, root: sourceRoot, formal_prefix: formalPrefix, read_enabled: readEnabled, write_enabled: writeEnabled, user_id: profileUserId, scope_type: scope, source_mode: mode};
   return {profile, sourceRoot, scope};
 }
 
@@ -91,6 +96,7 @@ export function initializeProject(input: ProjectInitInput): ProjectInitResult {
   const projectDir = absolute(input.project_dir, 'project_dir');
   if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) throw new ProtocolError('INVALID_INPUT', `project_dir must exist and be a directory: ${projectDir}`);
   const userId = text(input.user_id, 'user_id', 240);
+  if (!['local', 'external', 'team', 'empty'].includes(input.source_mode)) throw new ProtocolError('INVALID_INPUT', 'source_mode must be local, external, team, or empty');
   const runtimeVersion = text(input.runtime_version, 'runtime_version', 64);
   const instanceId = text(input.instance_id, 'instance_id', 200);
   const manifest = validateTemplateManifest(input.manifest);

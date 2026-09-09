@@ -12,7 +12,9 @@ const cli = path.join(root, 'dist', 'apps', 'cli', 'src', 'main.js');
 test('CLI help is a successful discovery path rather than an input error', () => {
   const result = spawnSync(process.execPath, [cli, '--help'], {encoding: 'utf8'});
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /trace-runtime doctor run/);
+  assert.match(result.stdout, /trace init/);
+  assert.match(result.stdout, /trace doctor/);
+  assert.doesNotMatch(result.stdout, /change create/);
   assert.equal(result.stdout.includes('"ok":false'), false);
 });
 

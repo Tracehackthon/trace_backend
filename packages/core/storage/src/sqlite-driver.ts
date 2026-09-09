@@ -156,9 +156,9 @@ class SqlJsFileCore {
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         // Windows can surface an in-flight create/remove of this lock as EPERM
-        // instead of EEXIST. It is the same bounded contention condition when
-        // the lock path is present; do not turn it into a spurious writer loss.
-        if (code !== 'EEXIST' && !(code === 'EPERM' && fs.existsSync(lock))) throw error;
+        // instead of EEXIST. Treat both as bounded lock contention: checking
+        // existsSync here races with unlink and reintroduces a false failure.
+        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
         try {
           const prior = JSON.parse(fs.readFileSync(lock, 'utf8')) as {acquired_at?: number};
           if (typeof prior.acquired_at === 'number' && Date.now() - prior.acquired_at > SQLJS_LOCK_STALE_MS) fs.unlinkSync(lock);

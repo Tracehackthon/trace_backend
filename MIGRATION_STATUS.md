@@ -31,7 +31,8 @@
 | 用户级 Skill 替换 | `packages/host/codex-skill` + `apps/cli` | 已迁移并验证 | preview、显式 approval、staging 原子替换、备份、rollback；不把旧 Skill 放进 discovery 目录 |
 | Codex hooks 切换 | `packages/host/codex-hooks` + `apps/cli` | 已迁移并验证 | 读写真实 `hooks.json` 形状，移除旧 Python Trace command、保留无关 hooks、备份、CAS preview、rollback；默认不静默修改用户配置 |
 | 可选择认知源模板 | `packages/template/catalog` + `templates/*` | 已迁移并验证 | `trace.codex-starter`/`empty`/`team`；模板只提供结构/权限/source-pack，语义源由用户选择并写入 instance lock |
-| 项目实例初始化与本地认知源边界 | `packages/core/instance` + `apps/cli project init` | 已迁移并验证 | create-only `.trace/`；local/empty 使用项目源，external/team 使用 profile；lock 只记录 source id、hash 和 scope，不把外部绝对路径写入 project descriptor |
+| 项目实例初始化与本地认知源边界 | `packages/core/instance` + `apps/cli` | 已迁移并验证 | 默认产品命令 `trace init` create-only `.trace/`；local/empty 使用项目源，external/team 使用 profile；高级兼容入口仍为 `trace internal project init`；lock 只记录 source id、hash 和 scope，不把外部绝对路径写入 project descriptor |
+| 产品 CLI 与文档导航 | pps/cli + README.md + docs/ | 已迁移并验证 | 默认帮助只暴露 init/status/inbox/review/sources/abilities/codex/doctor/backup；协议参数收进 	race internal / --help --advanced；用户文档不依赖个人路径，所有项目状态从当前项目 .trace/ 发现 |
 | Desktop shell | `apps/desktop` | 明确保留，未实现 | 无真实 desktop event/permission/replay contract；目录只记录准入条件，不能标记完成 |
 | DeepSeek Harness adapter | `packages/integration/deepseek-harness` | 明确保留，未实现 | 无真实 host lifecycle/event contract；目录只记录插件边界和验收条件，不能伪造集成 |
 | 旧 Python `tools/trace_core` | `tmp/trace-python-runtime-legacy-20260909/` | 已移出 active tree | 不参与 build、package、CLI、RPC 或测试；归档仅用于显式恢复，不作为产品 runtime |

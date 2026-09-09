@@ -41,6 +41,7 @@ test('source export preserves local state and rotates only managed source backup
     assert.equal(fs.existsSync(path.join(legacy, 'keep.txt')), true);
     assert.equal(fs.existsSync(path.join(target, '.workbuddy-ai', 'local-state.txt')), true);
     assert.equal(fs.existsSync(path.join(target, 'node_modules')), false);
+    assert.equal(fs.existsSync(path.join(target, 'docs', 'getting-started.md')), true);
     assert.equal(final.keep_backups, 2);
     assert.equal(final.pruned_backups.length >= 1, true);
   } finally {

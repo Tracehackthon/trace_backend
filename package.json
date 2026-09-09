@@ -11,6 +11,7 @@
     "apps/*"
   ],
   "bin": {
+    "trace": "dist/apps/cli/src/main.js",
     "trace-runtime": "dist/apps/cli/src/main.js",
     "trace-runtime-rpc": "dist/packages/sdk/server/src/main.js"
   },

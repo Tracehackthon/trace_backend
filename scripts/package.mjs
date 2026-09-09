@@ -45,6 +45,7 @@ copy('node_modules/sql.js', 'node_modules/sql.js');
 const sqlJsPackage = path.join(root, 'node_modules', 'sql.js', 'package.json');
 const sqlJsInfo = JSON.parse(fs.readFileSync(sqlJsPackage, 'utf8'));
 copy('README.md', 'README.md');
+copy('docs', 'docs');
 copy('MIGRATION_STATUS.md', 'MIGRATION_STATUS.md');
 copy('AUDIT_20260909.md', 'AUDIT_20260909.md');
 

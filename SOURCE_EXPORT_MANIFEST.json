@@ -7,6 +7,7 @@
     ".gitignore",
     "apps",
     "AUDIT_20260909.md",
+    "docs",
     "GIT_REMOTE_SETUP.md",
     "MIGRATION_STATUS.md",
     "README.md",
@@ -53,8 +54,8 @@
     },
     {
       "path": "apps/cli/src/main.ts",
-      "sha256": "458ee521c1abf702d744011a35ce7540dc59917a0051b626c86c8e73b833621f",
-      "bytes": 40269
+      "sha256": "1470f84f929a0334a323a3a4de3f34847e46edbfb369afd3cc27cfb871f247eb",
+      "bytes": 62553
     },
     {
       "path": "apps/codex/package.json",
@@ -63,8 +64,8 @@
     },
     {
       "path": "apps/codex/README.md",
-      "sha256": "a62a849e91cef34175f90a496b2f0867e0a0b882e70cf34f3b2155913bb4ecc6",
-      "bytes": 1697
+      "sha256": "f1907f1b2fddb2c99783bb34ed4fe5292c96bc5c387c087aa387f7663dff384d",
+      "bytes": 1970
     },
     {
       "path": "apps/codex/src/index.ts",
@@ -83,13 +84,38 @@
     },
     {
       "path": "apps/README.md",
-      "sha256": "b62cfee31115252c09e1e050ba53f73c0b9a444ad336f4523986eeb741d99405",
-      "bytes": 763
+      "sha256": "504501fa5d6b2d9ef0530526b4907f5a5ee9843b36832006cab1caa5b30d15b2",
+      "bytes": 1288
     },
     {
       "path": "AUDIT_20260909.md",
-      "sha256": "732fd3df512aa79aac6fb0da16551c50322bb71a150aab479c1e1c8332e822a4",
-      "bytes": 6710
+      "sha256": "4b6e1178dd624154e8d895dbc67f6bd403507a14a39b0b5538d29799e1c0d2b6",
+      "bytes": 6898
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "441abfd3e97dffe9d7a4d4a83c86a788974bafa58566885feb5fe18138592f95",
+      "bytes": 1630
+    },
+    {
+      "path": "docs/daily-workflow.md",
+      "sha256": "bfaaf8112d71fbf29b772d10da393d81a1fba817f4f55f9f8d19cfd06987be88",
+      "bytes": 1793
+    },
+    {
+      "path": "docs/getting-started.md",
+      "sha256": "07ed3b7220cb3034a3cd7707e730ff393be919b575902fb6c564533134994489",
+      "bytes": 1752
+    },
+    {
+      "path": "docs/operations.md",
+      "sha256": "57d12047c49e45c5f3d09dc997b44665a98d34de102b162ae15231367156c403",
+      "bytes": 1272
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "925d5f074f77d4f1b2cabdde3288b52cb81b262543d7d69a7649f62f55f0408a",
+      "bytes": 916
     },
     {
       "path": "GIT_REMOTE_SETUP.md",
@@ -98,8 +124,8 @@
     },
     {
       "path": "MIGRATION_STATUS.md",
-      "sha256": "917429cc43d63de4f88a426af54e6f37e785253a9520e87a15c38eee65e32eb6",
-      "bytes": 8488
+      "sha256": "9da92eed3b9717faabc02b2d0f572c8a1fdd38430affe557dce31148a5335857",
+      "bytes": 8877
     },
     {
       "path": "mise.toml",
@@ -122,14 +148,24 @@
       "bytes": 746
     },
     {
+      "path": "native/launcher/trace.cmd",
+      "sha256": "a1e74cee5bb0e28a33a61a9f4235787e8edfbbf9f6077ee6b8e8753eefbfb956",
+      "bytes": 55
+    },
+    {
+      "path": "native/launcher/trace.mjs",
+      "sha256": "5d6e614f12c4e07f54133169f6246adf20b9d976ff26bbd306adda56e09c1ed7",
+      "bytes": 29
+    },
+    {
       "path": "native/README.md",
-      "sha256": "daba640b97da30a44994a14ef3f85aa1097a2e74e80d49bb00b70b448f12bc63",
-      "bytes": 2270
+      "sha256": "cb41d8475f0d61d5d16aedbea690ac62a530ff1e44878ed1397abe454555373a",
+      "bytes": 2458
     },
     {
       "path": "package.json",
-      "sha256": "8f6685c5a17d37c79a4f3145d5dd5ab77ffa6a8b069bde2603e3e2627eff4633",
-      "bytes": 1364
+      "sha256": "bfc0270cde4eaa1b7a9d9ce4ff4679dbdf76aa77ba26c60fa4b7a5c8c859a0b3",
+      "bytes": 1404
     },
     {
       "path": "packages/bundle/codex/bundle.json",
@@ -433,8 +469,8 @@
     },
     {
       "path": "packages/core/storage/src/sqlite-driver.ts",
-      "sha256": "ad74454f3e4b2f62ba9f7a34ac89b4c8fc94ddb5e4dc3e2ff69f25d6227ef272",
-      "bytes": 12401
+      "sha256": "d10ca921d884d4a7701fbd24b90b53535018681664863342b043fbd0251a6a12",
+      "bytes": 12372
     },
     {
       "path": "packages/core/storage/src/sqlite.ts",
@@ -673,8 +709,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "f6201cb03a930cb6708d2059a2f9eb3c213d8034f5169ab24c63b20843494cea",
-      "bytes": 11424
+      "sha256": "6f421c6ba35600022b46e4888f9c211292f85f9bccc42e7c3146dccef406be0b",
+      "bytes": 3009
     },
     {
       "path": "schemas/README.md",
@@ -793,13 +829,13 @@
     },
     {
       "path": "scripts/export-source.mjs",
-      "sha256": "bbf1a021800b5d479800d48c0749f62aac8c50ca12218280726baac48506d881",
-      "bytes": 8967
+      "sha256": "56e5b6c64ea3b00e45d492a1b18b299cf1b5c98654fbe1f236aceaad32301a0d",
+      "bytes": 8975
     },
     {
       "path": "scripts/package.mjs",
-      "sha256": "afad8594c87ae984d56b65d71ceceeab018a33973f0a73be0402d8c1925080dd",
-      "bytes": 3640
+      "sha256": "ff9596f6e9a79dcca99a8b10ea975514ec527d97da7032bd49ce23c839799fd0",
+      "bytes": 3662
     },
     {
       "path": "scripts/test-python.py",
@@ -893,8 +929,8 @@
     },
     {
       "path": "tests/codex_trigger.test.mjs",
-      "sha256": "86559759b6798cc3534cc6d375e63b0616ae69dc27109871f31ea63a54696658",
-      "bytes": 4508
+      "sha256": "9097847366b7b72005f31899c21ce45d278a61eca2a34181660fd597507f086a",
+      "bytes": 4596
     },
     {
       "path": "tests/data-chain.test.mjs",
@@ -918,8 +954,8 @@
     },
     {
       "path": "tests/native.test.mjs",
-      "sha256": "b4dc12775d42eae59227e7775ee55bc6269d7d24f72c5f5afbea7b1b4d0d2711",
-      "bytes": 2553
+      "sha256": "87c63a755d39038c354d8106394e63b3764a574263a187964fe65fefa24500ab",
+      "bytes": 3621
     },
     {
       "path": "tests/plugin-contract.test.mjs",
@@ -930,6 +966,11 @@
       "path": "tests/productization.test.mjs",
       "sha256": "72002fcebf0ca975f41721ad49175d63d82b342f043e5561123ae58072ce4254",
       "bytes": 5893
+    },
+    {
+      "path": "tests/product_cli.test.mjs",
+      "sha256": "bff1b713d1d7bfa1b426098e0a4f1d8d4eadb2ace9d83efc5fd9e091b7c46cdd",
+      "bytes": 4558
     },
     {
       "path": "tests/product_connectors.test.mjs",
@@ -978,8 +1019,8 @@
     },
     {
       "path": "tests/source_export.test.mjs",
-      "sha256": "31402c9663cc3603b1a9e16f8f5d829652281553a79fd663f7da9591ab3e46e3",
-      "bytes": 2375
+      "sha256": "b5829991faf025c3da195cc2d2a616436ca85e7bbcb6f30e5411df269f58da5e",
+      "bytes": 2463
     },
     {
       "path": "tests/sqlite_concurrency.test.mjs",
@@ -1032,5 +1073,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T14:37:36.936Z"
+  "created_at": "2026-09-09T15:01:53.315Z"
 }

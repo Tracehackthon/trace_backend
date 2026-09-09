@@ -8,6 +8,7 @@ import {createHash} from 'node:crypto';
 
 const root = path.resolve(process.cwd());
 const installer = path.join(root, 'native', 'install.mjs');
+const packager = path.join(root, 'scripts', 'package.mjs');
 const hash = value => createHash('sha256').update(value).digest('hex');
 
 test('native installer validates a release manifest and preserves replaced targets', () => {
@@ -43,4 +44,20 @@ test('native installer validates a release manifest and preserves replaced targe
   assert.ok(previous);
   assert.equal(fs.existsSync(previous), true);
   assert.equal(fs.readFileSync(path.join(target, 'dist', 'runtime.txt'), 'utf8'), 'runtime-v1\n');
+});
+test('distribution retains product documentation and the trace launcher', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-package-'));
+  const output = path.join(directory, 'release');
+  try {
+    const packaged = spawnSync(process.execPath, [packager, '--out', output], {encoding: 'utf8'});
+    assert.equal(packaged.status, 0, packaged.stderr);
+    assert.equal(fs.existsSync(path.join(output, 'docs', 'getting-started.md')), true);
+    assert.equal(fs.existsSync(path.join(output, 'docs', 'daily-workflow.md')), true);
+    assert.equal(fs.existsSync(path.join(output, 'native', 'launcher', 'trace.mjs')), true);
+    assert.equal(fs.existsSync(path.join(output, 'native', 'launcher', 'trace.cmd')), true);
+    const manifest = JSON.parse(fs.readFileSync(path.join(output, 'release-manifest.json'), 'utf8'));
+    assert.equal(manifest.files.some(file => file.path === 'docs/getting-started.md'), true);
+  } finally {
+    fs.rmSync(directory, {recursive: true, force: true});
+  }
 });

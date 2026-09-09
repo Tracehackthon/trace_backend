@@ -16,10 +16,37 @@ import {MyWikiSourceProvider, type MyWikiSourceProfile} from '../../../packages/
 import {CodexSkillInstaller} from '../../../packages/host/codex-skill/src/index.js';
 import {CodexHookInstaller} from '../../../packages/host/codex-hooks/src/index.js';
 import {SELECTABLE_TEMPLATES} from '../../../packages/template/catalog/src/index.js';
-import {initializeProject, type ProjectSourceMode, type ProjectSourceProfileInput} from '../../../packages/core/instance/src/index.js';
+import {initializeProject, validateProjectInstanceDescriptor, type ProjectSourceMode, type ProjectSourceProfileInput, type ProjectInstanceDescriptor} from '../../../packages/core/instance/src/index.js';
 import {hashTransientPrompt} from '../../../packages/core/case-capture/src/index.js';
 
-const USAGE = [
+const PRODUCT_USAGE = [
+    'Trace — 管理当前项目中的 Agent 协作、认知源与可审核沉淀',
+    '',
+    '开始：',
+    '  trace init [--project-dir ABS] [--source local|empty|external|team] [--source-profile ABS]',
+    '  trace codex enable [--hooks-file ABS] [--dry-run]',
+    '  trace status [--project-dir ABS] [--json]',
+    '',
+    '日常：',
+    '  trace inbox [--project-dir ABS] [--json]',
+    '  trace review ID [--project-dir ABS] [--save ABS_CONTENT_FILE] [--json]',
+    '  trace sources [--project-dir ABS] [--json]',
+    '  trace abilities [--project-dir ABS] [--json]',
+    '',
+    '维护：',
+    '  trace doctor [--project-dir ABS] [--json]',
+    '  trace backup create [--project-dir ABS] [--file ABS] [--json]',
+    '  trace backup restore --file ABS [--project-dir ABS] [--replace] [--json]',
+    '',
+    '产品命令会从当前目录向上寻找 .trace/。--project-dir 只在需要切换项目时使用。',
+    '需要给连接器、自动化或协议开发使用的接口：trace --help --advanced',
+  ].join('\n');
+
+const ADVANCED_USAGE = [
+    'Advanced / automation interface:',
+    '  Internal host calls: trace internal <group> <action> ...',
+    '  Legacy direct commands remain compatible during migration.',
+    '',
     'Usage:',
     '  state flags: use --sqlite-state-file ABS, or both --change-state-file ABS --data-state-file ABS; --continuity-state-file ABS is optional for JSONL',
     '  trace-runtime change create [state flags] --change-kind KIND --subject-type TYPE --subject-id ID --base JSON --proposed JSON --impact ITEM [--impact ITEM] --compatibility JSON --requested-by ID --scope-type TYPE --scope-id ID --lineage JSON [--note TEXT]',
@@ -56,23 +83,33 @@ const USAGE = [
   ].join('\n');
 
 function usage(): never {
-  throw new ProtocolError('INVALID_INPUT', USAGE);
+  throw new ProtocolError('INVALID_INPUT', `Use \"trace --help\" for product commands or \"trace --help --advanced\" for automation commands.\n${PRODUCT_USAGE}`);
 }
 
-function printUsage(): void {
-  process.stdout.write(USAGE + '\n');
+function printUsage(advanced = false): void {
+  process.stdout.write((advanced ? ADVANCED_USAGE : PRODUCT_USAGE) + '\n');
 }
+
+const VALUELESS_FLAGS = new Set(['--json', '--dry-run', '--replace']);
 
 function args(argv: string[]): Map<string, string[]> {
   const result = new Map<string, string[]>();
-  for (let i = 0; i < argv.length; i += 2) {
+  for (let i = 0; i < argv.length;) {
     const key = argv[i];
     if (!key?.startsWith('--')) throw new ProtocolError('INVALID_INPUT', `Unexpected argument: ${key ?? ''}`);
+    if (VALUELESS_FLAGS.has(key)) {
+      const values = result.get(key) ?? [];
+      values.push('true');
+      result.set(key, values);
+      i += 1;
+      continue;
+    }
     const value = argv[i + 1];
     if (!value || value.startsWith('--')) throw new ProtocolError('INVALID_INPUT', `${key} requires a value`);
     const values = result.get(key) ?? [];
     values.push(value);
     result.set(key, values);
+    i += 2;
   }
   return result;
 }
@@ -82,6 +119,10 @@ function one(parsed: Map<string, string[]>, name: string, required = true): stri
   if (values.length > 1) throw new ProtocolError('INVALID_INPUT', `${name} may appear only once`);
   if (required && !values[0]) throw new ProtocolError('INVALID_INPUT', `${name} is required`);
   return values[0];
+}
+
+function has(parsed: Map<string, string[]>, name: string): boolean {
+  return (parsed.get(name)?.length ?? 0) > 0;
 }
 
 function readJsonFile(file: string, field: string): Record<string, unknown> {
@@ -147,6 +188,134 @@ function result(value: unknown): void {
   process.stdout.write(JSON.stringify({ok: true, ...value as object}) + '\n');
 }
 
+interface ProductProjectContext {
+  project_dir: string;
+  trace_dir: string;
+  state_file: string;
+  descriptor: ProjectInstanceDescriptor;
+}
+
+function productResult(parsed: Map<string, string[]>, text: string, value: Record<string, unknown>): void {
+  if (has(parsed, '--json')) result(value);
+  else process.stdout.write(`${text.trimEnd()}\n`);
+}
+
+function userIdForProduct(parsed: Map<string, string[]>): string {
+  const explicit = one(parsed, '--user-id', false);
+  if (explicit !== undefined) return explicit;
+  const raw = process.env.TRACE_USER_ID ?? process.env.USERNAME ?? process.env.USER ?? 'local-user';
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120);
+  return `local-${normalized || 'user'}`;
+}
+
+function projectContext(parsed: Map<string, string[]>): ProductProjectContext {
+  const explicitProject = one(parsed, '--project-dir', false) ?? one(parsed, '--project', false);
+  let cursor = path.resolve(explicitProject ?? process.cwd());
+  if (!fs.existsSync(cursor) || !fs.statSync(cursor).isDirectory()) throw new ProtocolError('INVALID_INPUT', `project directory does not exist: ${cursor}`);
+  while (true) {
+    const traceDir = path.join(cursor, '.trace');
+    const descriptorFile = path.join(traceDir, 'project.json');
+    if (fs.existsSync(descriptorFile)) {
+      let descriptor: ProjectInstanceDescriptor;
+      try { descriptor = validateProjectInstanceDescriptor(JSON.parse(fs.readFileSync(descriptorFile, 'utf8'))); }
+      catch (error) { throw new ProtocolError('PROJECT_INVALID', `Trace project descriptor is invalid: ${error instanceof Error ? error.message : String(error)}`); }
+      return {project_dir: cursor, trace_dir: traceDir, state_file: path.join(cursor, descriptor.state_file), descriptor};
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  throw new ProtocolError('PROJECT_NOT_INITIALIZED', 'No .trace/project.json was found. Run "trace init" in the project directory first.');
+}
+
+function productRuntime(context: ProductProjectContext): TraceRuntime | undefined {
+  return fs.existsSync(context.state_file) ? new TraceRuntime({sqliteStateFile: context.state_file}) : undefined;
+}
+
+function textField(value: Record<string, unknown>, name: string, fallback = '未提供'): string {
+  return typeof value[name] === 'string' && value[name].trim().length > 0 ? value[name] : fallback;
+}
+
+function productState(context: ProductProjectContext): {
+  data: ReturnType<TraceRuntime['listData']>;
+  changes: ReturnType<TraceRuntime['listChanges']>;
+  continuity: ReturnType<TraceRuntime['listContinuity']>;
+} {
+  const runtime = productRuntime(context);
+  if (runtime === undefined) return {data: [], changes: [], continuity: []};
+  try {
+    return {data: runtime.listData(), changes: runtime.listChanges(), continuity: runtime.listContinuity()};
+  } finally { runtime.close(); }
+}
+
+function productInbox(context: ProductProjectContext) {
+  const state = productState(context);
+  return state.data
+    .filter(record => record.status === 'candidate' && ['prompt_capture_proposal', 'candidate_precedent', 'capability_candidate'].includes(record.kind))
+    .map(record => {
+      if (record.kind === 'prompt_capture_proposal') {
+        return {
+          id: record.record_id, type: 'prompt_case', title: textField(record.payload, 'intent_summary'), status: '等待你的保存选择',
+          suggested_mode: textField(record.payload, 'capture_mode'), next_action: `trace review ${record.record_id}`,
+        };
+      }
+      if (record.kind === 'candidate_precedent') {
+        return {
+          id: record.record_id, type: 'precedent', title: textField(record.payload, 'claim'), status: '候选前例，尚未成为能力',
+          next_action: `trace review ${record.record_id}`,
+        };
+      }
+      return {
+        id: record.record_id, type: 'capability', title: textField(record.payload, 'title', record.subject.id), status: '候选能力，等待验证或采纳',
+        next_action: `trace review ${record.record_id}`,
+      };
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function productReview(context: ProductProjectContext, identifier: string): {record: ReturnType<TraceRuntime['listData']>[number]; view: Record<string, unknown>} {
+  const runtime = productRuntime(context);
+  if (runtime === undefined) throw new ProtocolError('NOT_FOUND', 'This project has no persisted Trace records yet.');
+  try {
+    const record = runtime.listData().find(item => item.record_id === identifier || item.subject.id === identifier || item.payload.proposal_id === identifier || item.payload.candidate_id === identifier);
+    if (record === undefined) throw new ProtocolError('NOT_FOUND', `No reviewable Trace item matches: ${identifier}`);
+    const common = {id: record.record_id, kind: record.kind, status: record.status, classification: record.classification, created_at: record.created_at};
+    if (record.kind === 'prompt_capture_proposal') {
+      return {record, view: {
+        ...common, title: textField(record.payload, 'intent_summary'), rationale: textField(record.payload, 'rationale'), capture_mode: textField(record.payload, 'capture_mode'),
+        persisted_now: '仅 hash、意图摘要和理由；没有 raw prompt 正文。',
+        next_action: record.status === 'candidate' ? `准备好所选内容后执行：trace review ${record.record_id} --save <绝对内容文件路径>` : '该案例已完成保存选择。',
+      }};
+    }
+    if (record.kind === 'candidate_precedent') {
+      const evidence = Array.isArray(record.payload.evidence_record_ids) ? record.payload.evidence_record_ids.length : 0;
+      return {record, view: {...common, title: textField(record.payload, 'claim'), rationale: textField(record.payload, 'rationale'), evidence_count: evidence, adoption_status: textField(record.payload, 'adoption_status', 'pending'), next_action: '在 Codex 中补充验证或讨论后，再决定是否制作能力候选。'}};
+    }
+    if (record.kind === 'source_snapshot') {
+      return {record, view: {...common, title: textField(record.payload, 'title'), provider: textField(record.payload, 'provider'), content_mode: textField(record.payload, 'content_mode', '来源快照'), persisted_now: '为保护来源内容，review 默认不显示正文。'}};
+    }
+    return {record, view: {...common, title: textField(record.payload, 'title', record.subject.id), summary: textField(record.payload, 'summary', textField(record.payload, 'claim', '可在 Codex 中继续查看与讨论。'))}};
+  } finally { runtime.close(); }
+}
+
+function renderInbox(items: Array<Record<string, unknown>>): string {
+  if (items.length === 0) return '待确认沉淀：0\n\n当前没有需要你决定的候选。继续在 Codex 中协作；值得保留的内容会出现在这里。';
+  return ['待确认沉淀：' + items.length, '', ...items.flatMap((item, index) => [
+    `${index + 1}. ${String(item.title)}`,
+    `   类型：${String(item.type)}；状态：${String(item.status)}`,
+    ...(item.suggested_mode === undefined ? [] : [`   建议保存方式：${String(item.suggested_mode)}`]),
+    `   下一步：${String(item.next_action)}`,
+  ])].join('\n');
+}
+
+function commandPart(value: string): string { return `"${value.replaceAll('"', '\\"')}"`; }
+
+function productHookCommand(context: ProductProjectContext): string {
+  const entry = path.resolve(process.argv[1] ?? '');
+  if (!entry || !fs.existsSync(entry)) throw new ProtocolError('IO_ERROR', 'Cannot resolve the installed Trace CLI entrypoint for the Codex hook.');
+  return `${commandPart(process.execPath)} ${commandPart(entry)} internal codex hook-stdio --project-dir ${commandPart(context.project_dir)}`;
+}
+
 function runtimePaths(parsed: Map<string, string[]>): {changeStateFile?: string; dataStateFile?: string; continuityStateFile?: string; sqliteStateFile?: string} {
   const sqlite = one(parsed, '--sqlite-state-file', false);
   const change = one(parsed, '--change-state-file', false);
@@ -167,8 +336,181 @@ function traceLineageArgs(parsed: Map<string, string[]>): {correlation_id?: stri
 }
 
 export async function run(argv: string[]): Promise<void> {
-  if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) { printUsage(); return; }
+  if (argv[0] === 'internal') {
+    if (argv.length === 1 || argv.slice(1).includes('--help') || argv.slice(1).includes('-h')) { printUsage(true); return; }
+    await run(argv.slice(1));
+    return;
+  }
+  if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) { printUsage(argv.includes('--advanced')); return; }
   const [group, action, ...rest] = argv;
+  // Product commands discover the nearest project boundary rather than asking
+  // users to repeatedly pass state-file, lineage and producer internals.
+  if (['init', 'status', 'inbox', 'sources', 'abilities'].includes(group ?? '')) {
+    const parsed = args(action?.startsWith('--') ? [action, ...rest] : rest);
+    if (group === 'init') {
+      const projectDir = path.resolve(one(parsed, '--project-dir', false) ?? process.cwd());
+      const requestedMode = one(parsed, '--source', false) ?? one(parsed, '--source-mode', false) ?? 'local';
+      if (!['local', 'external', 'team', 'empty'].includes(requestedMode)) throw new ProtocolError('INVALID_INPUT', '--source must be local, external, team, or empty');
+      const sourceProfilePath = one(parsed, '--source-profile', false);
+      const sourceProfile = sourceProfilePath === undefined ? undefined : readJsonFile(sourceProfilePath, '--source-profile') as unknown as ProjectSourceProfileInput;
+      const {manifest, templateId} = manifestFor(parsed);
+      const initialized = initializeProject({
+        project_dir: projectDir,
+        manifest,
+        runtime_version: runtimeVersionFor(parsed),
+        instance_id: one(parsed, '--instance-id', false) ?? defaultInstanceId(projectDir),
+        user_id: userIdForProduct(parsed),
+        source_mode: requestedMode as ProjectSourceMode,
+        ...(sourceProfile === undefined ? {} : {source_profile: sourceProfile}),
+      });
+      // Initialize an empty, schema-complete project state now. A newly
+      // initialized project must be immediately doctor/backup-ready rather
+      // than requiring a first hook event to create its database.
+      const initialRuntime = new TraceRuntime({sqliteStateFile: path.join(initialized.project_dir, initialized.descriptor.state_file)});
+      initialRuntime.close();
+      productResult(parsed, [
+        'Trace 已初始化。', '',
+        `项目：${initialized.project_dir}`,
+        `认知源：${initialized.descriptor.source_mode}`,
+        `模板：${templateId}`,
+        'Codex：尚未启用', '',
+        '下一步：',
+        '  trace codex enable',
+        '  trace status',
+      ].join('\n'), {status: 'initialized', template_id: templateId, project: initialized.project_dir, trace_dir: initialized.trace_dir, source_mode: initialized.descriptor.source_mode, next_actions: ['trace codex enable', 'trace status']});
+      return;
+    }
+    const context = projectContext(parsed);
+    if (group === 'status') {
+      const state = productState(context);
+      const inbox = productInbox(context);
+      const threads = state.continuity.filter(item => item.kind === 'thread');
+      const sources = (() => {
+        try { return readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile'); }
+        catch { return {}; }
+      })();
+      const snapshot = {
+        status: 'ready', project: context.project_dir, template: context.descriptor.template_id, source_mode: context.descriptor.source_mode,
+        source_id: typeof sources.source_id === 'string' ? sources.source_id : '未配置', codex: '运行 trace codex status 查看',
+        open_threads: threads.filter(item => item.payload.status === 'open' || item.payload.status === 'watching').length,
+        pending_reviews: inbox.length,
+        candidate_precedents: state.data.filter(item => item.kind === 'candidate_precedent').length,
+        candidate_capabilities: state.data.filter(item => item.kind === 'capability_candidate').length,
+        next_action: inbox.length > 0 ? 'trace inbox' : '继续在 Codex 中协作；值得沉淀的内容会进入 inbox。',
+      };
+      productResult(parsed, [
+        `当前项目：${snapshot.project}`,
+        `模板：${snapshot.template}`,
+        `认知源：${snapshot.source_mode} / ${snapshot.source_id}`,
+        `开放协作主题：${snapshot.open_threads}`,
+        `待确认沉淀：${snapshot.pending_reviews}`,
+        `候选前例：${snapshot.candidate_precedents}`,
+        `候选能力：${snapshot.candidate_capabilities}`,
+        '', `下一步：${snapshot.next_action}`,
+      ].join('\n'), snapshot);
+      return;
+    }
+    if (group === 'inbox') {
+      const items = productInbox(context);
+      productResult(parsed, renderInbox(items), {status: 'listed', project: context.project_dir, items});
+      return;
+    }
+    if (group === 'sources') {
+      const profile = readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile');
+      const source = {
+        source_id: textField(profile, 'source_id'), mode: context.descriptor.source_mode, scope: context.descriptor.source_scope,
+        read_enabled: profile.read_enabled === true, write_enabled: profile.write_enabled === true,
+      };
+      productResult(parsed, [
+        `认知源：${source.source_id}`,
+        `模式：${source.mode}；作用域：${source.scope}`,
+        `读取：${source.read_enabled ? '已授权' : '未授权'}；写入：${source.write_enabled ? '已授权' : '未授权'}`,
+        'Trace 不会自动复制外部个人或团队认知源；需要变更来源时使用项目配置或由 Codex 提出候选。',
+      ].join('\n'), {status: 'listed', project: context.project_dir, sources: [source]});
+      return;
+    }
+    const abilities = productState(context).data.filter(item => item.kind === 'capability_candidate').map(item => ({id: item.record_id, title: textField(item.payload, 'title', item.subject.id), status: item.status, created_at: item.created_at}));
+    productResult(parsed, abilities.length === 0 ? '能力候选：0\n\n当前没有待审核的能力。候选前例经过验证和采用后才会出现在这里。' : ['能力候选：' + abilities.length, '', ...abilities.map((item, index) => `${index + 1}. ${item.title}\n   状态：${item.status}\n   查看：trace review ${item.id}`)].join('\n'), {status: 'listed', project: context.project_dir, abilities});
+    return;
+  }
+  if (group === 'review') {
+    if (!action || action.startsWith('--')) throw new ProtocolError('INVALID_INPUT', 'trace review requires an inbox item ID');
+    const parsed = args(rest);
+    const context = projectContext(parsed);
+    const reviewed = productReview(context, action);
+    const saveFile = one(parsed, '--save', false);
+    if (saveFile !== undefined) {
+      if (!path.isAbsolute(saveFile)) throw new ProtocolError('INVALID_INPUT', '--save must be an absolute content-file path');
+      if (reviewed.record.kind !== 'prompt_capture_proposal' || reviewed.record.status !== 'candidate') throw new ProtocolError('INVALID_INPUT', '--save is available only for a candidate prompt-case proposal');
+      const runtime = new TraceRuntime({sqliteStateFile: context.state_file});
+      try {
+        const captured = runtime.capturePromptCase({
+          proposal_ref: {record_id: reviewed.record.record_id, revision: reviewed.record.revision, kind: reviewed.record.kind, schema_id: reviewed.record.schema_id, schema_version: reviewed.record.schema_version},
+          approval: `approve:${reviewed.record.record_id}`,
+          selected_content: fs.readFileSync(saveFile, 'utf8'),
+          producer: {component: 'trace.product-cli', version: runtimeVersionFor(parsed), run_id: `review-${reviewed.record.record_id}`},
+          correlation_id: reviewed.record.lineage.correlation_id,
+          causation_id: `trace-review:${reviewed.record.record_id}`,
+        });
+        productResult(parsed, [
+          '已按你的明确选择保存案例。',
+          `保存方式：${captured.capture_mode}`,
+          `可见范围：${captured.classification}`,
+          `来源快照：${captured.source_snapshot_ref.record_id}@${captured.source_snapshot_ref.revision}`,
+          '下一步：在 Codex 中附加结果证据；只有验证后才可以形成候选前例。',
+        ].join('\n'), {status: 'captured', ...captured});
+      } finally { runtime.close(); }
+      return;
+    }
+    const lines = Object.entries(reviewed.view).map(([key, value]) => `${key}：${Array.isArray(value) ? value.join(', ') : String(value)}`);
+    productResult(parsed, lines.join('\n'), {status: 'reviewed', project: context.project_dir, item: reviewed.view});
+    return;
+  }
+  if (group === 'codex' && (action === 'enable' || action === 'status')) {
+    const parsed = args(rest);
+    const context = projectContext(parsed);
+    const installer = new CodexHookInstaller(one(parsed, '--hooks-file', false));
+    if (action === 'status') {
+      const raw = fs.existsSync(installer.hooksFile) ? fs.readFileSync(installer.hooksFile, 'utf8') : '{}';
+      const enabled = /codex\s+hook-stdio|trace\.codex-managed\.v1/i.test(raw);
+      productResult(parsed, [`Codex：${enabled ? '已启用' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, enabled ? 'Trace 会为当前项目提供受控接续；完整 prompt 不会自动入库。' : '下一步：trace codex enable'].join('\n'), {status: enabled ? 'enabled' : 'disabled', hooks_file: installer.hooksFile, project: context.project_dir});
+      return;
+    }
+    const command = productHookCommand(context);
+    const preview = installer.preview({command});
+    if (has(parsed, '--dry-run')) {
+      productResult(parsed, [`Codex 启用预览`, `配置文件：${preview.hooks_file}`, `将管理事件：${preview.managed_events.join(', ')}`, `其他 hooks：${preview.unrelated_hooks_preserved ? '保留' : '需要检查'}`, '', '确认启用：trace codex enable'].join('\n'), {status: 'previewed', project: context.project_dir, preview});
+      return;
+    }
+    const receipt = installer.install({command, backup_root: path.join(context.trace_dir, 'backups', 'codex-hooks'), approval: 'approve:codex-hooks'});
+    const receiptFile = path.join(context.trace_dir, 'receipts', `codex-hooks-${Date.now()}.json`);
+    fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2) + '\n', {flag: 'wx'});
+    productResult(parsed, [`Codex 已为当前项目启用。`, `管理事件：${receipt.managed_events.join(', ')}`, `原配置备份：${receipt.backup_file ?? '无'}`, `可见回执：${receiptFile}`, '', '下一步：trace status'].join('\n'), {status: 'enabled', project: context.project_dir, receipt, receipt_file: receiptFile});
+    return;
+  }
+  if (group === 'doctor' && (action === undefined || action.startsWith('--'))) {
+    const parsed = args(action === undefined ? rest : [action, ...rest]);
+    const context = projectContext(parsed);
+    const report = doctorSqlite(context.state_file);
+    const errors = report.checks.filter(check => check.status === 'error').length;
+    const warnings = report.checks.filter(check => check.status === 'warn').length;
+    productResult(parsed, [`Trace 健康状态：${report.status}`, `SQLite driver：${report.sqlite_driver?.kind ?? '未打开'}`, `错误：${errors}；提醒：${warnings}`, '', report.status === 'healthy' ? '数据链路检查通过。' : '请使用 trace --help --advanced 查看诊断接口，或根据检查项处理。'].join('\n'), {status: report.status, project: context.project_dir, report});
+    return;
+  }
+  if (group === 'backup' && (action === 'create' || action === 'restore') && ![...rest].includes('--sqlite-state-file')) {
+    const parsed = args(rest);
+    const context = projectContext(parsed);
+    if (action === 'create') {
+      const fallback = path.join(context.trace_dir, 'backups', `trace-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
+      const backup = backupSqlite(context.state_file, one(parsed, '--file', false) ?? fallback);
+      productResult(parsed, [`备份已创建。`, `文件：${backup.manifest.backup_file}`, `校验：SHA-256 ${backup.manifest.sha256}`, `包含表：${backup.manifest.tables.join(', ')}`].join('\n'), {status: 'created', project: context.project_dir, backup});
+      return;
+    }
+    const file = one(parsed, '--file')!;
+    const restored = restoreSqlite(file, context.state_file, has(parsed, '--replace'));
+    productResult(parsed, [`备份已恢复。`, `状态库：${restored.database}`, `已验证：${restored.verified ? '是' : '否'}`, ...(restored.previous_database === undefined ? [] : [`旧状态库：${restored.previous_database}`])].join('\n'), {status: 'restored', project: context.project_dir, restore: restored});
+    return;
+  }
   if (!['change', 'data', 'prompt-case', 'continuity', 'context', 'template', 'project', 'migrate', 'capability', 'codex', 'zhihu', 'mywiki', 'skill', 'hooks', 'doctor', 'backup', 'restore'].includes(group ?? '') || !action) usage();
   const parsed = args(rest);
   if (group === 'context' && action === 'build') {
@@ -302,7 +644,8 @@ export async function run(argv: string[]): Promise<void> {
     if (!event || typeof event !== 'object') throw new ProtocolError('INVALID_INPUT', 'Codex hook event must be an object');
     const profilePath = one(parsed, '--source-profile', false);
     const sourceProfile = profilePath === undefined ? undefined : JSON.parse(fs.readFileSync(profilePath, 'utf8')) as MyWikiSourceProfile;
-    const runtime = new TraceRuntime({sqliteStateFile: one(parsed, '--sqlite-state-file')!});
+    const sqliteStateFile = one(parsed, '--sqlite-state-file', false) ?? projectContext(parsed).state_file;
+    const runtime = new TraceRuntime({sqliteStateFile});
     process.stdout.write(JSON.stringify(buildCodexHookOutput(event as Parameters<typeof buildCodexHookOutput>[0], runtime, sourceProfile)) + '\n');
     return;
   }

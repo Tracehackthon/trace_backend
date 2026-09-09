@@ -1,0 +1,10 @@
+{
+  "provider": "mywiki-local",
+  "source_id": "wiki:trace:agent-collaboration-governance",
+  "external_id": "wiki/capabilities/collaboration/共同思考协作能力.md",
+  "title": "Trace Agent 协作治理本地认知源",
+  "url": null,
+  "captured_at": "2026-09-09T00:00:00.000Z",
+  "content": "本地认知源判断：Agent 可以提出候选和验证结果，但能力发布、认知源采用和跨项目写入必须有明确的用户采纳与回执；激活上下文采用渐进式披露，不把完整聊天记录直接注入。",
+  "content_mode": "bounded_local_cognition_fixture"
+}

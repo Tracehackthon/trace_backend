@@ -1,0 +1,17 @@
+{
+  "source_pack_id": "trace-team-governance",
+  "version": "1.0.0",
+  "provider": "bundled",
+  "scope": ["team", "project", "context-governance", "capability-release"],
+  "routing": {
+    "triggers": ["agent collaboration", "team context contamination", "capability version conflict"]
+  },
+  "visibility": {
+    "default": "summary",
+    "review": "evidence",
+    "audit": "full"
+  },
+  "update_policy": "needs-review",
+  "requires_user_authorization_for_local_sources": true,
+  "requires_explicit_team_source_profile": true
+}

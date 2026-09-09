@@ -1,0 +1,22 @@
+{
+  "capability_id": "agent-collaboration-governance",
+  "version": "1.0.0",
+  "activation_contract": {
+    "triggers": ["多个 Agent 修改同一能力", "团队上下文来源不一致", "团队能力版本冲突"]
+  },
+  "input_contract": {
+    "required": ["agent_ids", "team_scope", "task_scope", "capability_version", "expected_output_contract"]
+  },
+  "output_contract": {
+    "required": ["ownership_assignment", "change_set", "validation_plan", "merge_decision"]
+  },
+  "acceptance_contract": {
+    "must_pass": ["每个 Agent 有明确任务边界", "团队来源作用域可核验", "输入输出协议可验证", "失败时可回滚"]
+  },
+  "scope": {
+    "read_scopes": ["team", "project"],
+    "write_scopes": [],
+    "requires_team_source_selection": true
+  },
+  "status": "template-preview"
+}

@@ -1,0 +1,14 @@
+{
+  "profile": "deepseek-harness",
+  "status": "reserved",
+  "host": "deepseek-harness",
+  "plugin_contract": "trace.plugin@0.1.0",
+  "integration_boundary": "packages/integration/deepseek-harness",
+  "runtime_package": "trace-runtime",
+  "data_protocol": "trace.data-envelope@0.1.0",
+  "change_protocol": "trace.change-set@0.2.0",
+  "continuity_protocol": "trace.continuity@0.1.0",
+  "context_protocol": "trace.context-record@0.1.0",
+  "template_protocol": "trace.template-bundle@0.1.0",
+  "activation": "not-installed"
+}

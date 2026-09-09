@@ -1,0 +1,12 @@
+{
+  "profile": "desktop",
+  "status": "reserved",
+  "host": "desktop",
+  "shell_boundary": "apps/desktop",
+  "runtime_transport": "packages/sdk/server",
+  "native_boundary": "native",
+  "views": ["work", "review", "diagnostic", "data-management"],
+  "state_store": "sqlite-versioned-ledger",
+  "template_flow": "preview-then-install-lockfile",
+  "activation": "not-installed"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@trace/codex-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {".": {"types": "./dist/index.d.ts", "default": "./dist/index.js"}},
+  "dependencies": {"@trace/context": "workspace:*", "@trace/continuity": "workspace:*", "@trace/runtime": "workspace:*", "@trace/integration-mywiki-source": "workspace:*"}
+}

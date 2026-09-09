@@ -1,0 +1,14 @@
+{
+  "provider": "zhihu",
+  "question_id": "1982512240482619481",
+  "question_title": "有没有大佬分享一下做agent时的一些经验？",
+  "answer_id": "2041200823053587542",
+  "answer_url": "https://www.zhihu.com/question/1982512240482619481/answer/2041200823053587542",
+  "source_id": "zhihu:question-1982512240482619481:answer-2041200823053587542",
+  "external_id": "question-1982512240482619481/answer-2041200823053587542",
+  "title": "有没有大佬分享一下做agent时的一些经验？",
+  "url": "https://www.zhihu.com/question/1982512240482619481/answer/2041200823053587542",
+  "captured_at": "2026-09-09T00:00:00.000Z",
+  "content": "测试用公开页面摘要：Agent 进入真实业务后可能出现工具调用失败、检索不准、上下文变长后混乱等问题；需要把工具、上下文、验证和回退边界拆开。此 fixture 保留来源 URL，但不把网页全文当作认知源。",
+  "content_mode": "bounded_public_summary"
+}

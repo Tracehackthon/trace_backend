@@ -1,0 +1,20 @@
+{
+  "context_template_id": "trace-default-governance",
+  "version": "1.0.0",
+  "rules": {
+    "proposal_requires_adoption": true,
+    "publish_requires_confirmation": true,
+    "show_persistence_receipt": true,
+    "show_activation_receipt": true,
+    "auto_write_cognitive_source": false
+  },
+  "activation": {
+    "mode": "progressive_disclosure",
+    "max_context_tokens": 6000
+  },
+  "visibility": {
+    "default_view": "summary",
+    "review_view": "evidence",
+    "audit_view": "full"
+  }
+}

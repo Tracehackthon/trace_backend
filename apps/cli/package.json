@@ -1,0 +1,8 @@
+{
+  "name": "@trace/app-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {"trace-runtime": "dist/main.js"},
+  "dependencies": {"@trace/core-capability": "workspace:*", "@trace/core-operations": "workspace:*", "@trace/context": "workspace:*", "@trace/migration": "workspace:*", "@trace/runtime": "workspace:*", "@trace/template-contract": "workspace:*", "@trace/template-catalog": "workspace:*", "@trace/codex-adapter": "workspace:*", "@trace/integration-zhihu-transport": "workspace:*", "@trace/integration-mywiki-source": "workspace:*", "@trace/host-codex-skill": "workspace:*", "@trace/host-codex-hooks": "workspace:*"}
+}

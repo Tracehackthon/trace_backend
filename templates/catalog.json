@@ -1,0 +1,8 @@
+{
+  "catalog_protocol": "trace.template-catalog@0.1.0",
+  "templates": [
+    {"id": "trace.codex-starter", "path": "codex-starter/manifest.json", "source_mode": "user-selected"},
+    {"id": "trace.codex-empty", "path": "codex-empty/manifest.json", "source_mode": "isolated-empty"},
+    {"id": "trace.codex-team", "path": "codex-team/manifest.json", "source_mode": "team-shared"}
+  ]
+}

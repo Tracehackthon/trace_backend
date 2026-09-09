@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.candidate-precedent@0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id",
+    "claim",
+    "evidence_record_ids",
+    "adoption_status",
+    "rationale",
+    "precedent_protocol_id",
+    "precedent_protocol_version"
+  ],
+  "properties": {
+    "candidate_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "claim": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "evidence_record_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "adoption_status": {"enum": ["pending", "adopted", "rejected", "superseded"]},
+    "rationale": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "precedent_protocol_id": {"const": "trace.candidate-precedent"},
+    "precedent_protocol_version": {"const": "0.1.0"},
+    "source_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "source_url": {"type": "string", "format": "uri", "maxLength": 2000},
+    "adapter_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "adapter_version": {"type": "string", "minLength": 1, "maxLength": 64}
+  }
+}

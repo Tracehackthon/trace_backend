@@ -1,0 +1,9 @@
+dist/
+node_modules/
+__pycache__/
+*.pyc
+release/
+.pnpm-store/
+.turbo/
+*.tsbuildinfo
+python/sdk/.venv/

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.data-envelope@0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_id", "protocol_version", "record_id", "revision", "kind", "status", "schema_id", "schema_version", "subject", "scope", "origin", "producer", "lineage", "classification", "payload", "integrity", "created_at", "updated_at"],
+  "properties": {
+    "protocol_id": {"const": "trace.data-envelope"},
+    "protocol_version": {"const": "0.1.0"},
+    "record_id": {"type": "string", "minLength": 1}, "revision": {"type": "integer", "minimum": 1},
+    "kind": {"enum": ["source_snapshot", "normalized_result", "candidate_precedent", "capability_candidate", "prompt_pack", "runtime_event", "artifact"]},
+    "status": {"enum": ["captured", "normalized", "candidate", "validated", "adopted", "published", "superseded", "rejected"]},
+    "schema_id": {"type": "string", "minLength": 1}, "schema_version": {"type": "string", "minLength": 1},
+    "subject": {"$ref": "#/$defs/identity"}, "scope": {"type": "object", "additionalProperties": false, "required": ["type", "id"], "properties": {"type": {"enum": ["personal", "project", "team", "domain"]}, "id": {"type": "string", "minLength": 1}}},
+    "origin": {"type": "object", "additionalProperties": false, "required": ["provider", "source_id", "captured_at", "content_hash"], "properties": {"provider": {"type": "string"}, "source_id": {"type": "string"}, "captured_at": {"type": "string", "format": "date-time"}, "content_hash": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}, "locator": {"type": "string"}}},
+    "producer": {"type": "object", "additionalProperties": false, "required": ["component", "version", "run_id"], "properties": {"component": {"type": "string"}, "version": {"type": "string"}, "run_id": {"type": "string"}}},
+    "lineage": {"type": "object", "additionalProperties": false, "required": ["parent_refs", "source_refs", "causation_id", "correlation_id"], "properties": {"parent_refs": {"type": "array", "items": {"$ref": "#/$defs/recordRef"}}, "source_refs": {"type": "array", "items": {"$ref": "#/$defs/recordRef"}}, "causation_id": {"type": "string"}, "correlation_id": {"type": "string"}, "change_id": {"type": "string"}}},
+    "classification": {"enum": ["public", "internal", "private", "secret"]}, "payload": {"type": "object"},
+    "integrity": {"type": "object", "additionalProperties": false, "required": ["algorithm", "payload_hash", "envelope_hash"], "properties": {"algorithm": {"const": "sha256"}, "payload_hash": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}, "envelope_hash": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}}},
+    "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "identity": {"type": "object", "additionalProperties": false, "required": ["type", "id"], "properties": {"type": {"type": "string"}, "id": {"type": "string"}}},
+    "recordRef": {"type": "object", "additionalProperties": false, "required": ["record_id", "revision", "kind", "schema_id", "schema_version"], "properties": {"record_id": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}, "kind": {"type": "string"}, "schema_id": {"type": "string"}, "schema_version": {"type": "string"}}}
+  }
+}

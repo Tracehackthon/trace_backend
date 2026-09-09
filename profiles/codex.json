@@ -1,0 +1,18 @@
+{
+  "profile": "codex",
+  "host": "codex",
+  "runtime_package": "trace-runtime",
+  "runtime_version": "0.6.0",
+  "bundle": "trace.codex@0.2.0",
+  "protocols": ["trace.change-set@0.2.0", "trace.data-envelope@0.1.0", "trace.context-record@0.1.0", "trace.continuity@0.1.0", "trace.template-bundle@0.1.0", "trace.candidate-precedent@0.1.0", "trace.capability-content@0.1.0", "trace.capability-publish@0.1.0"],
+  "adapters": ["apps/codex", "packages/integration/zhihu-precedent", "packages/integration/zhihu-transport", "packages/integration/mywiki-source", "packages/host/codex-skill", "packages/host/codex-hooks"],
+  "trigger": {"mode": "ts-runtime", "event_type": "codex.turn.started", "hook_event_types": ["SessionStart", "UserPromptSubmit"], "command": "trace-runtime codex hook-stdio --sqlite-state-file ABS [--source-profile ABS]"},
+  "state_files": {
+    "change": "<caller-provided-absolute-path>",
+    "data": "<caller-provided-absolute-path>",
+    "sqlite": "<product-mode-caller-provided-absolute-path>",
+    "continuity": "<development-mode-caller-provided-absolute-path>"
+  },
+  "template": "templates/codex-starter/manifest.json"
+}
+

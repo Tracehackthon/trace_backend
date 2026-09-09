@@ -1,0 +1,27 @@
+{
+  "context_template_id": "trace-team-context",
+  "version": "1.0.0",
+  "rules": {
+    "proposal_requires_adoption": true,
+    "publish_requires_confirmation": true,
+    "show_persistence_receipt": true,
+    "show_activation_receipt": true,
+    "auto_write_cognitive_source": false,
+    "cross_member_source_requires_scope_match": true
+  },
+  "activation": {
+    "mode": "progressive_disclosure",
+    "max_context_tokens": 6000,
+    "required_refs": ["team_source_profile", "project_scope"]
+  },
+  "visibility": {
+    "default_view": "summary",
+    "review_view": "evidence",
+    "audit_view": "full"
+  },
+  "cognitive_source": {
+    "mode": "team-shared",
+    "read_scopes": ["team", "project"],
+    "write_scopes": []
+  }
+}

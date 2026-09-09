@@ -1,0 +1,7 @@
+{
+  "name": "@trace/app-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reserved desktop shell boundary; it must call Trace through SDK/RPC"
+}

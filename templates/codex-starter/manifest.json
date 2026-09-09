@@ -1,0 +1,37 @@
+{
+  "protocol_id": "trace.template-bundle",
+  "protocol_version": "0.1.0",
+  "bundle_id": "trace.codex-starter",
+  "bundle_version": "0.1.0",
+  "display_name": "Trace Codex Starter",
+  "runtime": {"min_version": "0.6.0"},
+  "protocols": {
+    "trace.change-set": ">=0.2.0 <0.3.0",
+    "trace.data-envelope": ">=0.1.0 <0.2.0",
+    "trace.context-record": ">=0.1.0 <0.2.0",
+    "trace.continuity": ">=0.1.0 <0.2.0"
+  },
+  "capabilities": [
+    {"id": "agent-collaboration-governance", "version": "1.0.0"}
+  ],
+  "source_packs": [
+    {"id": "trace-collaboration-starter", "version": "1.0.0"}
+  ],
+  "context_templates": [
+    {"id": "trace-default-governance", "version": "1.0.0"}
+  ],
+  "hosts": ["codex"],
+  "activation": {"default": "preview", "require_user_confirmation": true},
+  "permissions": {
+    "read_scopes": ["project", "user-authorized-source"],
+    "write_scopes": [],
+    "network_providers": []
+  },
+  "cognitive_source": {
+    "mode": "user-selected",
+    "connector": "mywiki",
+    "selection_required": true,
+    "allowed_scope_types": ["personal", "project"],
+    "semantic_defaults": "source-pack"
+  }
+}

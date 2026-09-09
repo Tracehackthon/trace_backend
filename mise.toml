@@ -1,0 +1,10 @@
+# Optional local/CI toolchain pin. pnpm's packageManager field remains the
+# authoritative Node package-manager selection; mise only supplies runtimes.
+[tools]
+node = "22.23.1"
+python = "3.13.5"
+pnpm = "10.34.5"
+
+[tasks.check]
+description = "Run the complete Trace validation suite"
+run = "corepack pnpm check:all"

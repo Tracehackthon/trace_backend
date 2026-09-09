@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.continuity@0.1.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol_id", "protocol_version", "record_id", "revision", "kind", "thread_id", "visibility", "payload", "created_at", "updated_at"],
+  "properties": {
+    "protocol_id": {"const": "trace.continuity"}, "protocol_version": {"const": "0.1.0"}, "record_id": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}, "kind": {"enum": ["thread", "discussion_turn", "persistence_receipt", "activation_receipt"]}, "thread_id": {"type": "string"}, "visibility": {"enum": ["summary", "evidence", "audit"]}, "payload": {"type": "object"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "source_id": "mywiki-deep-cognitive-source",
+  "root": "<caller-provided-absolute-path>",
+  "formal_prefix": "wiki",
+  "read_enabled": true,
+  "write_enabled": false,
+  "user_id": "<caller-provided-user-id>",
+  "policy": "read-authorized-formal-pages; write-proposal-then-explicit-approval; raw-is-immutable"
+}

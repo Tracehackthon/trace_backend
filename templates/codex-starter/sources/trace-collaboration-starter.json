@@ -1,0 +1,12 @@
+{
+  "source_pack_id": "trace-collaboration-starter",
+  "version": "1.0.0",
+  "provider": "bundled",
+  "scope": ["collaboration", "context-governance", "capability-release"],
+  "routing": {
+    "triggers": ["agent collaboration", "context contamination", "capability governance"]
+  },
+  "visibility": {"default": "summary", "review": "evidence", "audit": "full"},
+  "update_policy": "needs-review",
+  "requires_user_authorization_for_local_sources": true
+}

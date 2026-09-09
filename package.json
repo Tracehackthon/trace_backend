@@ -1,0 +1,36 @@
+{
+  "name": "trace-runtime",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Trace TypeScript runtime packages and host adapters",
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "workspaces": ["packages/*", "packages/*/*", "apps/*"],
+  "bin": {
+    "trace-runtime": "dist/apps/cli/src/main.js",
+    "trace-runtime-rpc": "dist/packages/sdk/server/src/main.js"
+  },
+  "scripts": {
+    "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && pnpm exec tsc -p tsconfig.build.json",
+    "test": "pnpm build && node --test tests/*.test.mjs",
+    "package": "pnpm build && node scripts/package.mjs",
+    "audit:templates": "node scripts/audit-templates.mjs",
+    "export:source": "node scripts/export-source.mjs",
+    "test:python": "python scripts/test-python.py",
+    "check:all": "pnpm typecheck && pnpm audit:templates && pnpm test && pnpm test:python",
+    "changeset": "changeset",
+    "version-packages": "changeset version"
+  },
+  "devDependencies": {
+    "@changesets/cli": "catalog:devTools",
+    "@types/node": "catalog:devTools",
+    "typescript": "catalog:devTools"
+  },
+  "engines": {
+    "node": ">=22.5.0",
+    "pnpm": ">=10.34.5"
+  }
+}
+
+

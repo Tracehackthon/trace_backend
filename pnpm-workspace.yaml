@@ -1,0 +1,17 @@
+packages:
+  - packages/*
+  - packages/*/*
+  - apps/*
+
+catalogs:
+  devTools:
+    "@changesets/cli": 2.29.8
+    typescript: 7.0.2
+    "@types/node": 24.13.3
+
+# Reproducibility and dependency-build boundaries. Individual native builds
+# must be explicitly added to allowBuilds before they can run during install.
+strictDepBuilds: true
+allowBuilds:
+  esbuild: true
+

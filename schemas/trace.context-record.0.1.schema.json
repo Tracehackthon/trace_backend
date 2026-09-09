@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.context-record@0.1.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol_id", "protocol_version", "pack_id", "purpose", "summary", "source_refs", "read_pointers", "budget", "forbidden_scopes", "generated_at"],
+  "properties": {
+    "protocol_id": {"const": "trace.context-record"}, "protocol_version": {"const": "0.1.0"}, "pack_id": {"type": "string"}, "thread_id": {"type": "string"}, "purpose": {"type": "string"}, "summary": {"type": "string"},
+    "source_refs": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["record_id", "revision", "label"], "properties": {"record_id": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}, "label": {"type": "string"}, "locator": {"type": "string"}, "excerpt": {"type": "string"}}}},
+    "read_pointers": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["path", "purpose", "priority", "stop_condition"], "properties": {"path": {"type": "string"}, "purpose": {"type": "string"}, "priority": {"enum": ["must", "should", "optional"]}, "stop_condition": {"type": "string"}}}},
+    "budget": {"type": "object", "additionalProperties": false, "required": ["max_tokens", "max_sources"], "properties": {"max_tokens": {"type": "integer", "minimum": 1}, "max_sources": {"type": "integer", "minimum": 1}}}, "forbidden_scopes": {"type": "array", "items": {"type": "string"}}, "required_user_action": {"type": "string"}, "generated_at": {"type": "string", "format": "date-time"}
+  }
+}

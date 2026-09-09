@@ -1,0 +1,10 @@
+{
+  "provider": "zhihu",
+  "platform_base_url": "https://developer.zhihu.com",
+  "hackathon_base_url": "https://api.zhihu.com",
+  "access_secret_env": "ZHIHU_ACCESS_SECRET",
+  "timeout_ms": 15000,
+  "auth_policy": "access-secret-from-environment-only",
+  "retry_policy": "none-by-default",
+  "capture_policy": "bounded-summary-with-source-snapshot"
+}

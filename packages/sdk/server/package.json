@@ -1,0 +1,10 @@
+{
+  "name": "@trace/sdk-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "types": "dist/main.d.ts",
+  "dependencies": {"@trace/data": "workspace:*", "@trace/protocol": "workspace:*", "@trace/runtime": "workspace:*", "@trace/sdk-protocol": "workspace:*"}
+}
+

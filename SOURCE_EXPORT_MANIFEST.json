@@ -25,8 +25,8 @@
     },
     {
       "path": "apps/cli/src/main.ts",
-      "sha256": "94218165140282b5a6cbb21944c0047b127630a73e0f528ebb25aff1f514ddbb",
-      "bytes": 34676
+      "sha256": "f24d83d95c207547d1b2f888f53c58b7e052c35799f1eccc3d791ecdb51c7582",
+      "bytes": 34634
     },
     {
       "path": "apps/codex/package.json",
@@ -839,5 +839,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T12:34:33.889Z"
+  "created_at": "2026-09-09T12:35:20.091Z"
 }

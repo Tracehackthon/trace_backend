@@ -85,7 +85,7 @@ function readJsonFile(file: string, field: string): Record<string, unknown> {
 
 function manifestFor(parsed: Map<string, string[]>): {manifest: ReturnType<typeof validateTemplateManifest>; templateId: string} {
   const explicit = one(parsed, '--template-manifest', false);
-  if (explicit !== undefined) return {manifest: validateTemplateManifest(readJsonFile(explicit, '--template-manifest')), templateId: validateTemplateManifest(readJsonFile(explicit, '--template-manifest')).bundle_id};
+  if (explicit !== undefined) { const manifest = validateTemplateManifest(readJsonFile(explicit, '--template-manifest')); return {manifest, templateId: manifest.bundle_id}; }
   const templateId = one(parsed, '--template', false) ?? 'trace.codex-starter';
   const entry = SELECTABLE_TEMPLATES.find(item => item.id === templateId);
   if (!entry) throw new ProtocolError('INVALID_INPUT', `unknown template: ${templateId}`);

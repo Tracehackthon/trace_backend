@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.template-bundle@0.2.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol_id", "protocol_version", "bundle_id", "bundle_version", "display_name", "runtime", "protocols", "capabilities", "source_packs", "context_templates", "hosts", "activation", "permissions"],
+  "properties": {"protocol_id": {"const": "trace.template-bundle"}, "protocol_version": {"const": "0.2.0"}, "bundle_id": {"type": "string"}, "bundle_version": {"type": "string"}, "display_name": {"type": "string"}, "runtime": {"type": "object"}, "protocols": {"type": "object", "minProperties": 1}, "capabilities": {"type": "array"}, "source_packs": {"type": "array"}, "context_templates": {"type": "array"}, "hosts": {"type": "array", "items": {"type": "string"}}, "activation": {"type": "object"}, "permissions": {"type": "object"}}
+}

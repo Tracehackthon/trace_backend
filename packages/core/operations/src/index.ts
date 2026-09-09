@@ -1,18 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {DatabaseSync} from 'node:sqlite';
 import {ProtocolError, validateChangeSet} from '../../protocol/src/index.js';
 import {validateDataEnvelope} from '../../data/src/index.js';
 import {validateContinuityEnvelope} from '../../continuity/src/index.js';
 import {traceEventFromSqliteRow, type TraceEvent} from '../../observability/src/index.js';
+import {openSqlite, type SqliteDatabase, type SqliteDriverInfo} from '../../storage/src/index.js';
 
 export const BACKUP_PROTOCOL_ID = 'trace.backup' as const;
 export const BACKUP_PROTOCOL_VERSION = '0.1.0' as const;
 
 export interface DoctorCheck {name: string; status: 'pass' | 'warn' | 'error'; detail: string; count?: number;}
 export interface CorrelationTrace {correlation_id: string; events: TraceEvent[];}
-export interface DoctorReport {status: 'healthy' | 'warnings' | 'failed'; database: string; node: string; checks: DoctorCheck[]; created_at: string; correlation_trace?: CorrelationTrace;}
+export interface DoctorReport {status: 'healthy' | 'warnings' | 'failed'; database: string; node: string; sqlite_driver?: SqliteDriverInfo; checks: DoctorCheck[]; created_at: string; correlation_trace?: CorrelationTrace;}
 export interface BackupManifest {protocol_id: typeof BACKUP_PROTOCOL_ID; protocol_version: typeof BACKUP_PROTOCOL_VERSION; database: string; backup_file: string; sha256: string; bytes: number; tables: string[]; created_at: string;}
 export interface BackupReport {status: 'created'; manifest: BackupManifest; manifest_file: string;}
 export interface RestoreReport {status: 'restored'; database: string; backup_file: string; previous_database?: string; sha256: string; verified: true;}
@@ -20,7 +20,7 @@ export interface RestoreReport {status: 'restored'; database: string; backup_fil
 function absolute(file: string, field: string): string { if (!path.isAbsolute(file)) throw new ProtocolError('INVALID_PATH', `${field} must be absolute`); return path.resolve(file); }
 function sha256(file: string): string { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 function sqlQuote(value: string): string { return `'${value.replaceAll("'", "''")}'`; }
-function tableRows(db: DatabaseSync, table: string): Array<{identity: string; revision: number; payload: string}> {
+function tableRows(db: SqliteDatabase, table: string): Array<{identity: string; revision: number; payload: string}> {
   return db.prepare(`SELECT identity, revision, payload FROM ${table} ORDER BY identity, revision`).all() as Array<{identity: string; revision: number; payload: string}>;
 }
 function revisionCheck(rows: Array<{identity: string; revision: number}>): DoctorCheck[] {
@@ -37,12 +37,12 @@ function validateRows(table: string, rows: Array<{payload: string}>): DoctorChec
   catch (error) { return {name: `${table}:schema`, status: 'error', detail: String(error), count: rows.length}; }
 }
 
-function traceEvents(db: DatabaseSync, correlationId: string): TraceEvent[] {
+function traceEvents(db: SqliteDatabase, correlationId: string): TraceEvent[] {
   const rows = db.prepare('SELECT event_id, occurred_at, component, operation, outcome, correlation_id, causation_id, thread_id, record_refs, duration_ms, error_code FROM trace_events WHERE correlation_id = ? ORDER BY occurred_at, event_id').all(correlationId) as Array<Record<string, unknown>>;
   return rows.map(traceEventFromSqliteRow);
 }
 
-function validateTraceRows(db: DatabaseSync): DoctorCheck {
+function validateTraceRows(db: SqliteDatabase): DoctorCheck {
   try {
     const rows = db.prepare('SELECT event_id, occurred_at, component, operation, outcome, correlation_id, causation_id, thread_id, record_refs, duration_ms, error_code FROM trace_events ORDER BY occurred_at, event_id').all() as Array<Record<string, unknown>>;
     rows.forEach(traceEventFromSqliteRow);
@@ -55,10 +55,13 @@ function validateTraceRows(db: DatabaseSync): DoctorCheck {
 export function doctorSqlite(databaseFile: string, options: {correlation_id?: string} = {}): DoctorReport {
   const database = absolute(databaseFile, 'database'); const checks: DoctorCheck[] = [];
   if (!fs.existsSync(database)) return {status: 'failed', database, node: process.version, checks: [{name: 'database-exists', status: 'error', detail: 'database file does not exist'}], created_at: new Date().toISOString()};
-  let db: DatabaseSync | undefined;
+  let db: SqliteDatabase | undefined;
+  let driver: SqliteDriverInfo | undefined;
   let correlationTrace: CorrelationTrace | undefined;
   try {
-    db = new DatabaseSync(database, {readOnly: true});
+    const opened = openSqlite(database, {readOnly: true});
+    db = opened.db;
+    driver = opened.driver;
     const integrity = db.prepare('PRAGMA integrity_check').get() as Record<string, unknown>;
     checks.push({name: 'sqlite-integrity', status: integrity.integrity_check === 'ok' ? 'pass' : 'error', detail: String(integrity.integrity_check)});
     const tables = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{name: string}>).map(row => row.name));
@@ -77,7 +80,7 @@ export function doctorSqlite(databaseFile: string, options: {correlation_id?: st
   finally { db?.close(); }
   const hasError = checks.some(check => check.status === 'error'); const hasWarn = checks.some(check => check.status === 'warn');
   if (options.correlation_id !== undefined && correlationTrace === undefined) correlationTrace = {correlation_id: options.correlation_id, events: []};
-  return {status: hasError ? 'failed' : hasWarn ? 'warnings' : 'healthy', database, node: process.version, checks, created_at: new Date().toISOString(), ...(correlationTrace === undefined ? {} : {correlation_trace: correlationTrace})};
+  return {status: hasError ? 'failed' : hasWarn ? 'warnings' : 'healthy', database, node: process.version, ...(driver === undefined ? {} : {sqlite_driver: driver}), checks, created_at: new Date().toISOString(), ...(correlationTrace === undefined ? {} : {correlation_trace: correlationTrace})};
 }
 
 export function backupSqlite(databaseFile: string, backupFile: string): BackupReport {
@@ -85,9 +88,20 @@ export function backupSqlite(databaseFile: string, backupFile: string): BackupRe
   if (!fs.existsSync(database)) throw new ProtocolError('NOT_FOUND', `Database does not exist: ${database}`);
   if (fs.existsSync(backup)) throw new ProtocolError('TARGET_EXISTS', `Backup already exists: ${backup}`);
   fs.mkdirSync(path.dirname(backup), {recursive: true});
-  const db = new DatabaseSync(database);
-  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); db.exec(`VACUUM INTO ${sqlQuote(backup)}`); } finally { db.close(); }
-  const tables = new DatabaseSync(backup, {readOnly: true});
+  const opened = openSqlite(database);
+  const db = opened.db;
+  try {
+    if (opened.driver.kind === 'sql.js') {
+      // sql.js owns a file-backed in-memory image and cannot implement SQLite's
+      // VACUUM INTO virtual-file behavior. Its committed image is already a
+      // valid SQLite file, so preserve it byte-for-byte as the backup artifact.
+      fs.copyFileSync(database, backup, fs.constants.COPYFILE_EXCL);
+    } else {
+      db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      db.exec(`VACUUM INTO ${sqlQuote(backup)}`);
+    }
+  } finally { db.close(); }
+  const tables = openSqlite(backup, {readOnly: true}).db;
   let tableNames: string[];
   try { tableNames = (tables.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{name: string}>).map(row => row.name); } finally { tables.close(); }
   const manifest: BackupManifest = {protocol_id: BACKUP_PROTOCOL_ID, protocol_version: BACKUP_PROTOCOL_VERSION, database, backup_file: backup, sha256: sha256(backup), bytes: fs.statSync(backup).size, tables: tableNames, created_at: new Date().toISOString()};

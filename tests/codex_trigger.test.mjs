@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {DatabaseSync} from 'node:sqlite';
+import {openSqlite} from '../dist/packages/core/storage/src/index.js';
 
 const root = path.resolve(process.cwd());
 const cli = path.join(root, 'dist', 'apps', 'cli', 'src', 'main.js');
@@ -65,7 +65,8 @@ test('Codex hook uses a raw prompt only transiently and never persists it', () =
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.includes(marker), false, 'hook response must not echo the raw prompt');
 
-  const db = new DatabaseSync(database);
+  const opened = openSqlite(database, {readOnly: true});
+  const db = opened.db;
   try {
     const continuity = db.prepare('SELECT payload FROM continuity_records').all();
     const events = db.prepare('SELECT * FROM trace_events').all();

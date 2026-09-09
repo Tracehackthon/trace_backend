@@ -17,6 +17,7 @@ import {CodexSkillInstaller} from '../../../packages/host/codex-skill/src/index.
 import {CodexHookInstaller} from '../../../packages/host/codex-hooks/src/index.js';
 import {SELECTABLE_TEMPLATES} from '../../../packages/template/catalog/src/index.js';
 import {initializeProject, type ProjectSourceMode, type ProjectSourceProfileInput} from '../../../packages/core/instance/src/index.js';
+import {hashTransientPrompt} from '../../../packages/core/case-capture/src/index.js';
 
 const USAGE = [
     'Usage:',
@@ -27,6 +28,9 @@ const USAGE = [
     '  trace-runtime data create [state flags] --kind KIND --schema-id ID --schema-version VERSION --subject-type TYPE --subject-id ID --scope-type TYPE --scope-id ID --origin JSON --producer JSON --lineage JSON --classification LEVEL --payload JSON',
     '  trace-runtime data list [state flags] [--kind KIND]',
     '  trace-runtime data verify [state flags] --record-id ID',
+    '  trace-runtime prompt-case propose --sqlite-state-file ABS --prompt-file ABS --mode summary|redacted_excerpt|full_private --intent-summary TEXT --rationale TEXT --scope-type TYPE --scope-id ID --producer JSON --correlation-id ID --causation-id ID [--thread-id ID] [--redacted-preview TEXT]',
+    '  trace-runtime prompt-case capture --sqlite-state-file ABS --proposal-ref JSON --approval approve:RECORD_ID --content-file ABS --producer JSON --correlation-id ID --causation-id ID [--title TEXT] [--classification public|internal|private|secret]',
+    '  trace-runtime prompt-case precedent --sqlite-state-file ABS --candidate-id ID --prompt-source-ref JSON --outcome-ref JSON --claim TEXT --rationale TEXT --scope-type TYPE --scope-id ID --origin JSON --producer JSON --classification LEVEL --change-id ID --correlation-id ID --causation-id ID',
     '  trace-runtime continuity thread-create [state flags] --title TEXT --summary TEXT [--question TEXT] [--next-action TEXT] [--correlation-id ID --causation-id ID]',
     '  trace-runtime continuity turn-create [state flags] --thread-id ID --input-summary TEXT --output-summary TEXT --delta-type TYPE [--context-ref REF] [--persisted-ref REF] [--question TEXT] [--correlation-id ID --causation-id ID]',
     '  trace-runtime continuity receipt-create [state flags] --thread-id ID --receipt-kind persistence|activation --summary TEXT [--persisted-ref REF] [--activated-ref REF] [--not-persisted TEXT] [--next-prompt TEXT] [--required-action TEXT] [--correlation-id ID --causation-id ID]',
@@ -165,7 +169,7 @@ function traceLineageArgs(parsed: Map<string, string[]>): {correlation_id?: stri
 export async function run(argv: string[]): Promise<void> {
   if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) { printUsage(); return; }
   const [group, action, ...rest] = argv;
-  if (!['change', 'data', 'continuity', 'context', 'template', 'project', 'migrate', 'capability', 'codex', 'zhihu', 'mywiki', 'skill', 'hooks', 'doctor', 'backup', 'restore'].includes(group ?? '') || !action) usage();
+  if (!['change', 'data', 'prompt-case', 'continuity', 'context', 'template', 'project', 'migrate', 'capability', 'codex', 'zhihu', 'mywiki', 'skill', 'hooks', 'doctor', 'backup', 'restore'].includes(group ?? '') || !action) usage();
   const parsed = args(rest);
   if (group === 'context' && action === 'build') {
     const sourceRefs = parsed.get('--source-ref')?.map(value => jsonValue(value, '--source-ref')) ?? [];
@@ -342,6 +346,36 @@ export async function run(argv: string[]): Promise<void> {
     usage();
   }
   const runtime = new TraceRuntime(runtimePaths(parsed));
+  if (group === 'prompt-case') {
+    const scopeType = one(parsed, '--scope-type', false);
+    const scopeId = one(parsed, '--scope-id', false);
+    const producer = (name = '--producer') => jsonValue(one(parsed, name), name) as never;
+    const lineage = traceLineageArgs(parsed);
+    if (lineage.correlation_id === undefined || lineage.causation_id === undefined) throw new ProtocolError('INVALID_INPUT', 'prompt-case requires --correlation-id and --causation-id');
+    if (action === 'propose') {
+      if (!scopeType || !scopeId || !['personal', 'project', 'team', 'domain'].includes(scopeType)) throw new ProtocolError('INVALID_INPUT', 'prompt-case propose requires a supported --scope-type and --scope-id');
+      const promptFile = one(parsed, '--prompt-file')!;
+      if (!path.isAbsolute(promptFile)) throw new ProtocolError('INVALID_INPUT', '--prompt-file must be absolute');
+      const proposal = runtime.proposePromptCase({prompt_hash: hashTransientPrompt(fs.readFileSync(promptFile, 'utf8')), capture_mode: one(parsed, '--mode')! as never, intent_summary: one(parsed, '--intent-summary')!, rationale: one(parsed, '--rationale')!, scope: {type: scopeType as ScopeType, id: scopeId}, producer: producer(), correlation_id: lineage.correlation_id, causation_id: lineage.causation_id, ...(one(parsed, '--thread-id', false) === undefined ? {} : {thread_id: one(parsed, '--thread-id', false)!}), ...(one(parsed, '--redacted-preview', false) === undefined ? {} : {redacted_preview: one(parsed, '--redacted-preview', false)!})});
+      result({status: 'proposed', proposal, not_persisted: ['raw prompt'], next_action: `Choose content and run prompt-case capture with approval=approve:${proposal.proposal_ref.record_id}.`});
+      return;
+    }
+    if (action === 'capture') {
+      const contentFile = one(parsed, '--content-file')!;
+      if (!path.isAbsolute(contentFile)) throw new ProtocolError('INVALID_INPUT', '--content-file must be absolute');
+      const captured = runtime.capturePromptCase({proposal_ref: jsonValue(one(parsed, '--proposal-ref'), '--proposal-ref') as never, approval: one(parsed, '--approval')!, selected_content: fs.readFileSync(contentFile, 'utf8'), producer: producer(), correlation_id: lineage.correlation_id, causation_id: lineage.causation_id, ...(one(parsed, '--title', false) === undefined ? {} : {title: one(parsed, '--title', false)!}), ...(one(parsed, '--classification', false) === undefined ? {} : {classification: one(parsed, '--classification', false)! as never})});
+      result({status: 'captured', ...captured});
+      return;
+    }
+    if (action === 'precedent') {
+      if (!scopeType || !scopeId || !['personal', 'project', 'team', 'domain'].includes(scopeType)) throw new ProtocolError('INVALID_INPUT', 'prompt-case precedent requires a supported --scope-type and --scope-id');
+      const outcomeRefs = parsed.get('--outcome-ref')?.map(value => jsonValue(value, '--outcome-ref')) ?? [];
+      const record = runtime.createPromptCasePrecedent({candidate_id: one(parsed, '--candidate-id')!, prompt_source_ref: jsonValue(one(parsed, '--prompt-source-ref'), '--prompt-source-ref') as never, outcome_refs: outcomeRefs as never, claim: one(parsed, '--claim')!, rationale: one(parsed, '--rationale')!, scope: {type: scopeType as ScopeType, id: scopeId}, origin: jsonValue(one(parsed, '--origin'), '--origin') as never, producer: producer(), classification: one(parsed, '--classification')! as never, change_id: one(parsed, '--change-id')!, correlation_id: lineage.correlation_id, causation_id: lineage.causation_id});
+      result({status: 'precedent_created', record});
+      return;
+    }
+    usage();
+  }
   if (group === 'change' && action === 'create') {
     const kind = one(parsed, '--change-kind')!;
     if (!CHANGE_KINDS.includes(kind as ChangeKind)) throw new ProtocolError('INVALID_INPUT', 'Unsupported --change-kind');

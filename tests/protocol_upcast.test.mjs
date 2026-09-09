@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {DatabaseSync} from 'node:sqlite';
+import {openSqlite} from '../dist/packages/core/storage/src/index.js';
 import {validateContinuityEnvelope} from '../dist/packages/core/continuity/src/index.js';
 import {TraceRuntime} from '../dist/packages/core/runtime/src/index.js';
 import {doctorSqlite} from '../dist/packages/core/operations/src/index.js';
@@ -37,7 +37,7 @@ test('a legacy SQLite continuity revision remains immutable and can be followed 
   const bootstrap = new TraceRuntime({sqliteStateFile: database});
   bootstrap.close();
 
-  const db = new DatabaseSync(database);
+  const db = openSqlite(database).db;
   db.prepare('INSERT INTO continuity_records(identity, revision, payload) VALUES (?, ?, ?)').run('legacy-thread-001', 1, JSON.stringify(legacyThread()));
   db.close();
 
@@ -49,7 +49,7 @@ test('a legacy SQLite continuity revision remains immutable and can be followed 
   assert.equal(updated.revision, 2);
   runtime.close();
 
-  const raw = new DatabaseSync(database, {readOnly: true});
+  const raw = openSqlite(database, {readOnly: true}).db;
   const revisions = raw.prepare('SELECT revision, payload FROM continuity_records WHERE identity = ? ORDER BY revision').all('legacy-thread-001');
   raw.close();
   assert.equal(JSON.parse(revisions[0].payload).protocol_version, '0.1.0');

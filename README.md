@@ -11,6 +11,7 @@ Trace Runtime 是一个可安装的 TypeScript 基座：它负责把「上下文
 - **所有写入可见且需要确认。** 候选、能力发布、正式 Wiki 写入和 Codex hooks/Skill 替换都有 proposal、版本、备份和回滚边界。
 - **高频 hook 不重扫整库。** SQLite 热写入只核验当前 identity 的 revision 历史；全库 integrity/schema/revision 检查保留在 `doctor`，不会让每轮 Codex 激活随着历史记录线性退化。
 - **每轮运行都有安全的关联追踪。** Codex hook 仅临时用原始 prompt 检索已授权读取指针；它不会把 prompt 写进 thread、receipt、event 或 hook 输出。事件表只写 `correlation_id`、receipt reference、耗时和错误码，不含页面正文、密钥或工具参数。
+- **值得沉淀的 prompt 走显式案例链，不走 hook 自动落库。** 原始 prompt 先是 transient；用户可创建不含正文的 capture proposal，再选择 `summary`、`redacted_excerpt` 或 `full_private`，明确确认后才写入 `source_snapshot`，有结果证据后才可形成 `candidate_precedent`。
 
 ## 安装与检查
 
@@ -22,7 +23,7 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm check:all
 ```
 
-需要 Node.js `>=22.13.0` 和 pnpm `>=10.34.5`。`node:sqlite` 从 Node 22.13 起不再需要启动开关，但该 API 在 Node 22 中仍会显示 experimental warning；项目以 `mise.toml` 固定验证环境为 Node `22.23.1`。`check:all` 包含 TypeScript 类型检查、模板资源审计、TS/SQLite 集成测试以及薄 Python SDK 测试。
+需要 Node.js `>=22.13.0` 和 pnpm `>=10.34.5`。SQLite driver 默认是可审计的 `auto`：Node `>=24.2.0` 使用稳定的 `node:sqlite`；Node 22–24.1 优先使用随发行包提供的纯 JS/WASM `sql.js`，因此不会加载 `node:sqlite` 或产生它的 experimental warning。可用 `TRACE_SQLITE_DRIVER=auto|node|sql.js` 显式选择；强制 `node` 在 Node 24.2 前会在 doctor 输出 driver warning。`check:all` 包含 TypeScript 类型检查、模板资源审计、TS/SQLite 集成测试以及薄 Python SDK 测试。
 
 ## 为一个项目建立本地边界
 
@@ -80,15 +81,25 @@ node <RUNTIME_DIR>/dist/apps/cli/src/main.js backup create --sqlite-state-file <
 node <RUNTIME_DIR>/dist/apps/cli/src/main.js restore run --backup-file <BACKUP_FILE> --sqlite-state-file <RESTORED_STATE_FILE>
 ```
 
+### 显式 prompt 案例沉淀
+
+Codex hook 不替用户决定“这条 prompt 值得保存”。需要沉淀时，先以文件把原始内容交给一次性 propose 命令；该命令只计算 hash 并持久化用户写的意图摘要/理由，CLI 输出不会回显正文：
+
+```powershell
+node <RUNTIME_DIR>/dist/apps/cli/src/main.js prompt-case propose --sqlite-state-file <STATE_FILE> --prompt-file <ABS_PROMPT_FILE> --mode summary --intent-summary "协作问题的可复用描述" --rationale "确认是否可变成前例" --scope-type personal --scope-id <USER_ID> --producer @<ABS_PRODUCER_JSON> --correlation-id <ID> --causation-id <ID>
+```
+
+返回的 proposal 包含 `proposal_ref` 和下一步 approval token。用户选择的内容另存为文件后，才执行 `prompt-case capture --proposal-ref <JSON> --approval approve:<RECORD_ID> --content-file <ABS_SELECTED_CONTENT_FILE> ...`。`full_private` 强制 `private` classification；`summary`/`redacted_excerpt` 也默认 private，但可按产品作用域选择更严格的分类。capture 产生 `source_snapshot`；只有加上一个或多个 outcome ref 与 Change Set 后，`prompt-case precedent` 才能形成候选前例。proposal、snapshot 和 Continuity receipt 都是可见的，raw prompt 除非用户在 capture 步骤选择 `full_private`，否则不会进入状态库。
+
 来源、候选和能力的职责不能混淆：知乎或其他外部源先成为带 provenance 的 `source_snapshot`，讨论后才形成 `candidate_precedent`，再经 `capability_candidate` 的验证和用户采纳，最后才允许 Skill/能力发布。激活上下文只引用已授权的来源和版本，不把整库全文塞进 prompt。
 
 `doctor --correlation-id` 返回按时间排序的、可用户查看的运行事件：组件、操作、成功/失败、关联 ID、receipt/data 引用、耗时及错误码。它**不会**返回原始 prompt、完整来源正文、凭证、未采纳候选正文或工具参数。事件与运行状态保存在同一 SQLite 文件，因此 `backup` / `restore` 会一并处理。
 
 CLI 的成功/失败业务结果默认都是一行 JSON，便于 Codex、Python SDK、桌面端后续直接消费；`--help` 是正常的零退出码发现入口。需要传递较大的 JSON 对象时，所有 `JSON` 参数均可使用 `@<JSON_FILE>`，例如 `--source-ref @<ABS_SOURCE_REF_JSON>`，无需把对象正文塞进 shell 引号。
 
-### Continuity 协议升级
+### 协议升级
 
-新写入的 `trace.continuity` 使用 `0.2.0`，在 envelope 顶层保存 `correlation_id` 与 `causation_id`。历史 `0.1.0` continuity 记录会由明确的 in-memory upcaster 读取为 `0.2.0` 视图；它**不会重写历史 revision**。当旧 thread 后续更新时，才会追加一条 `0.2.0` revision。当前仅 Continuity 协议已接入该迁移链；其他协议仍是严格版本校验，遇到不支持版本会拒绝读取，而不会静默误读。
+`trace.change-set`、`trace.data-envelope`、`trace.context-record`、`trace.continuity`、`trace.runtime-event`、template/plugin/capability/capability-candidate/project-instance contract 现在均使用显式、定向的 `0.1.0 → 0.2.0` in-memory upcaster。它们不改写历史 revision；后续业务更新才会追加当前版本。任何没有注册完整路径的版本都以 `PROTOCOL_MIGRATION_REQUIRED` 拒绝读取，而不是静默猜测。Data envelope 的旧哈希会先按旧 envelope 校验，再生成仅内存的 `0.2.0` 视图。
 
 ## 模板、Skill 与 hooks
 
@@ -105,12 +116,14 @@ preview 不会改变宿主。只有带明确 approval 的 install 才会原子�
 
 - `packages/core/protocol`：协议身份、共享 validator primitive、状态门槛与显式 upcaster registry；领域包只维护自身语义，不复制基础 `object/text/list/unknown-field` 校验。
 - `packages/core/observability`：同库、无自由 payload 的运行事件；只记录 provenance，不保存敏感正文。
+- `packages/core/case-capture`：prompt 的 transient → proposal → user-approved source snapshot → precedent 边界；proposal 永远不接收/保存 raw prompt bytes。
 - 其他 `packages/core/*`：状态、数据链和运行时；不读用户 Wiki。
 - `packages/integration/*`：知乎、MyWiKi 等真实来源 adapter；每个来源独立版本化。
 - `packages/host/*`、`apps/codex`：宿主安装与 Codex 触发边界。
 - `packages/sdk/*`、`python/sdk`：跨进程和薄 SDK，不复制核心状态机。
 - `templates/`、`profiles/`、`packages/bundle/`：组合与冷启动描述，不是用户数据。
-- `native/`：清单校验、安装器和 launcher，不实现业务规则。
+- `native/`：清单校验、安装器和 launcher，不实现业务规则；发行包包含 Node 22 fallback SQLite driver。
+- `apps/desktop`、`packages/integration/deepseek-harness`：明确保留的宿主边界，当前没有伪造 shell 或事件 adapter；见各自 README 的准入条件。
 
 旧 Python runtime 已从 active tree 移除；`python/sdk` 只保留面向 RPC 的薄客户端。需要源码导出到独立 Git 目录时执行：
 

@@ -1,11 +1,12 @@
 import {createHash} from 'node:crypto';
-import {canonicalize, ProtocolError, rejectUnknown, requireObject, requireText, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
+import {canonicalize, ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject, requireText, type ProtocolVersioned, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
 
 export const DATA_PROTOCOL_ID = 'trace.data-envelope' as const;
-export const DATA_PROTOCOL_VERSION = '0.1.0' as const;
+export const DATA_PROTOCOL_VERSION = '0.2.0' as const;
 
 export const DATA_KINDS = [
   'source_snapshot',
+  'prompt_capture_proposal',
   'normalized_result',
   'candidate_precedent',
   'capability_candidate',
@@ -104,6 +105,7 @@ export interface UpdateDataRecord {
 
 export const REQUIRED_PAYLOAD_FIELDS: Readonly<Record<DataKind, readonly string[]>> = {
   source_snapshot: ['source_id', 'provider', 'external_id', 'title', 'content', 'captured_at', 'content_hash'],
+  prompt_capture_proposal: ['proposal_id', 'prompt_hash', 'capture_mode', 'intent_summary', 'rationale'],
   normalized_result: ['source_record_id', 'schema_version', 'items', 'normalized_at'],
   candidate_precedent: ['candidate_id', 'claim', 'evidence_record_ids', 'adoption_status', 'rationale'],
   capability_candidate: ['capability_id', 'activation_contract', 'input_contract', 'output_contract', 'acceptance_contract', 'evidence_record_ids'],
@@ -113,6 +115,17 @@ export const REQUIRED_PAYLOAD_FIELDS: Readonly<Record<DataKind, readonly string[
 };
 
 const MAX_PAYLOAD_CHARS = 4 * 1024 * 1024;
+
+type AnyDataProtocol = ProtocolVersioned & Record<string, unknown>;
+const dataUpcasters = new ProtocolVersionRegistry<AnyDataProtocol>();
+dataUpcasters.register({
+  protocol_id: DATA_PROTOCOL_ID,
+  from_version: '0.1.0',
+  to_version: DATA_PROTOCOL_VERSION,
+  // v0.2 adds explicit prompt-capture admission semantics at the kind layer;
+  // existing envelope fields remain compatible.
+  upcast(value) { return {...value, protocol_version: DATA_PROTOCOL_VERSION}; },
+});
 
 function requireIsoTimestamp(value: unknown, field: string): string {
   const text = requireText(value, field, 64);
@@ -177,9 +190,23 @@ export function validateDataLineage(value: unknown): DataLineage {
 }
 
 export function validateDataEnvelope(value: unknown, checkIntegrity = true): DataEnvelope {
-  const object = requireObject(value, 'data_envelope');
+  const raw = requireObject(value, 'data_envelope');
+  if (raw.protocol_id !== DATA_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported data envelope protocol');
+  let object: Record<string, unknown> = raw;
+  if (raw.protocol_version === '0.1.0') {
+    // Verify the historical hash against the historical bytes before creating
+    // an in-memory v0.2 view. The persisted revision remains untouched; a
+    // later update appends the canonical version with a new envelope hash.
+    const legacyIntegrity = requireObject(raw.integrity, 'data_envelope.integrity');
+    const legacyEnvelope = {...raw, integrity: legacyIntegrity};
+    const {integrity: _legacyIntegrity, ...legacyWithoutIntegrity} = legacyEnvelope;
+    if (checkIntegrity && legacyIntegrity.envelope_hash !== envelopeHash(legacyWithoutIntegrity as Omit<DataEnvelope, 'integrity'>)) throw new ProtocolError('INTEGRITY_MISMATCH', 'legacy envelope_hash does not match envelope');
+    const upgraded = dataUpcasters.upgrade(raw as AnyDataProtocol, DATA_PROTOCOL_VERSION) as Record<string, unknown>;
+    const {integrity: _ignored, ...upgradedWithoutIntegrity} = upgraded;
+    object = {...upgraded, integrity: {...legacyIntegrity, envelope_hash: envelopeHash(upgradedWithoutIntegrity as Omit<DataEnvelope, 'integrity'>)}};
+  }
   rejectUnknown(object, ['protocol_id', 'protocol_version', 'record_id', 'revision', 'kind', 'status', 'schema_id', 'schema_version', 'subject', 'scope', 'origin', 'producer', 'lineage', 'classification', 'payload', 'integrity', 'created_at', 'updated_at'], 'data_envelope');
-  if (object.protocol_id !== DATA_PROTOCOL_ID || object.protocol_version !== DATA_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported data envelope protocol');
+  if (object.protocol_version !== DATA_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported data envelope protocol version: ${String(object.protocol_version)}`);
   if (!Number.isInteger(object.revision) || Number(object.revision) < 1) throw new ProtocolError('INVALID_FIELD', 'revision must be a positive integer');
   if (!DATA_KINDS.includes(object.kind as DataKind)) throw new ProtocolError('INVALID_FIELD', 'kind is not supported');
   if (!DATA_STATUSES.includes(object.status as DataStatus)) throw new ProtocolError('INVALID_FIELD', 'status is not supported');
@@ -198,12 +225,13 @@ export function validateDataEnvelope(value: unknown, checkIntegrity = true): Dat
   const kind = object.kind as DataKind;
   const missing = REQUIRED_PAYLOAD_FIELDS[kind].filter(field => !hasPath(payload, field));
   if (missing.length > 0) throw new ProtocolError('MISSING_REQUIRED_DATA', `${kind} payload is missing: ${missing.join(', ')}`);
-  if (kind === 'source_snapshot' && (object.lineage as Record<string, unknown> | undefined)?.['parent_refs'] && ((object.lineage as Record<string, unknown>).parent_refs as unknown[]).length > 0) throw new ProtocolError('INVALID_LINEAGE', 'source_snapshot cannot have parent_refs');
-  if (kind !== 'source_snapshot' && !Array.isArray((object.lineage as Record<string, unknown> | undefined)?.['source_refs']) && !Array.isArray((object.lineage as Record<string, unknown> | undefined)?.['parent_refs'])) throw new ProtocolError('INVALID_LINEAGE', `${kind} requires lineage refs`);
+  const sourceLike = kind === 'source_snapshot' || kind === 'prompt_capture_proposal';
+  if (sourceLike && (object.lineage as Record<string, unknown> | undefined)?.['parent_refs'] && ((object.lineage as Record<string, unknown>).parent_refs as unknown[]).length > 0) throw new ProtocolError('INVALID_LINEAGE', `${kind} cannot have parent_refs`);
+  if (!sourceLike && !Array.isArray((object.lineage as Record<string, unknown> | undefined)?.['source_refs']) && !Array.isArray((object.lineage as Record<string, unknown> | undefined)?.['parent_refs'])) throw new ProtocolError('INVALID_LINEAGE', `${kind} requires lineage refs`);
   const lineage = validateDataLineage(object.lineage);
-  if (kind === 'source_snapshot' && lineage.source_refs.length > 0) throw new ProtocolError('INVALID_LINEAGE', 'source_snapshot cannot have source_refs');
-  if (kind !== 'source_snapshot' && !lineage.change_id) throw new ProtocolError('MISSING_REQUIRED_DATA', `${kind} requires lineage.change_id`);
-  if (kind !== 'source_snapshot' && lineage.parent_refs.length === 0 && lineage.source_refs.length === 0) throw new ProtocolError('INVALID_LINEAGE', `${kind} must retain at least one parent or source reference`);
+  if (sourceLike && lineage.source_refs.length > 0) throw new ProtocolError('INVALID_LINEAGE', `${kind} cannot have source_refs`);
+  if (!sourceLike && !lineage.change_id) throw new ProtocolError('MISSING_REQUIRED_DATA', `${kind} requires lineage.change_id`);
+  if (!sourceLike && lineage.parent_refs.length === 0 && lineage.source_refs.length === 0) throw new ProtocolError('INVALID_LINEAGE', `${kind} must retain at least one parent or source reference`);
   const classification = object.classification;
   if (classification !== 'public' && classification !== 'internal' && classification !== 'private' && classification !== 'secret') throw new ProtocolError('INVALID_FIELD', 'classification is not supported');
   const integrityObject = requireObject(object.integrity, 'integrity');

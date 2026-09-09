@@ -1,8 +1,8 @@
 import type {CreateDataRecord, DataClassification, DataEnvelope, DataOrigin, DataProducer} from '../../data/src/index.js';
-import {ProtocolError, rejectUnknown, requireObject as object, requireStringList, requireText as text, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
+import {ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject as object, requireStringList, requireText as text, type ProtocolVersioned, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
 
 export const CAPABILITY_CANDIDATE_PROTOCOL_ID = 'trace.capability-candidate' as const;
-export const CAPABILITY_CANDIDATE_PROTOCOL_VERSION = '0.1.0' as const;
+export const CAPABILITY_CANDIDATE_PROTOCOL_VERSION = '0.2.0' as const;
 export const CAPABILITY_CANDIDATE_SCHEMA_ID = CAPABILITY_CANDIDATE_PROTOCOL_ID;
 export const CAPABILITY_CANDIDATE_SCHEMA_VERSION = CAPABILITY_CANDIDATE_PROTOCOL_VERSION;
 
@@ -107,6 +107,10 @@ export interface CapabilityCandidateEnvelopeRef {
   revision: number;
 }
 
+type AnyCapabilityCandidateProtocol = ProtocolVersioned & Record<string, unknown>;
+const capabilityCandidateUpcasters = new ProtocolVersionRegistry<AnyCapabilityCandidateProtocol>();
+capabilityCandidateUpcasters.register({protocol_id: CAPABILITY_CANDIDATE_PROTOCOL_ID, from_version: '0.1.0', to_version: CAPABILITY_CANDIDATE_PROTOCOL_VERSION, upcast(value) { return {...value, protocol_version: CAPABILITY_CANDIDATE_PROTOCOL_VERSION}; }});
+
 function list(value: unknown, field: string, min: number, max: number): string[] {
   return requireStringList(value, field, {min, max, itemMax: 1000});
 }
@@ -169,10 +173,12 @@ function validateAcceptance(value: unknown): CandidateAcceptanceContract {
 }
 
 export function validateCapabilityCandidatePayload(value: unknown): CapabilityCandidatePayload {
-  const item = object(value, 'capability_candidate.payload');
+  const raw = object(value, 'capability_candidate.payload');
+  if (raw.protocol_id !== CAPABILITY_CANDIDATE_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported capability candidate protocol');
+  const item = raw.protocol_version === '0.1.0' ? capabilityCandidateUpcasters.upgrade(raw as AnyCapabilityCandidateProtocol, CAPABILITY_CANDIDATE_PROTOCOL_VERSION) as Record<string, unknown> : raw;
   const required = ['candidate_id', 'capability_id', 'claim', 'rationale', 'semantic_delta', 'judgment_change', 'mechanism', 'scope', 'counterexamples', 'activation_contract', 'input_contract', 'output_contract', 'acceptance_contract', 'evidence_record_ids', 'precedent_record_ids', 'adoption_status', 'protocol_id', 'protocol_version'] as const;
   for (const field of required) if (!(field in item)) throw new ProtocolError('MISSING_REQUIRED_DATA', `capability_candidate payload is missing: ${field}`);
-  if (item.protocol_id !== CAPABILITY_CANDIDATE_PROTOCOL_ID || item.protocol_version !== CAPABILITY_CANDIDATE_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported capability candidate protocol');
+  if (item.protocol_version !== CAPABILITY_CANDIDATE_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported capability candidate protocol version: ${String(item.protocol_version)}`);
   if (item.adoption_status !== 'pending' && item.adoption_status !== 'adopted' && item.adoption_status !== 'rejected' && item.adoption_status !== 'superseded') throw new ProtocolError('INVALID_FIELD', 'adoption_status is not supported');
   const evidenceRecordIds = list(item.evidence_record_ids, 'evidence_record_ids', 1, 128);
   if (new Set(evidenceRecordIds).size !== evidenceRecordIds.length) throw new ProtocolError('INVALID_FIELD', 'evidence_record_ids contains duplicates');

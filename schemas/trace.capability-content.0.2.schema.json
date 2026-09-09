@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.capability-content@0.2.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_id", "protocol_version", "entrypoint", "triggers", "workflow", "acceptance", "security", "provenance"],
+  "properties": {
+    "protocol_id": {"const": "trace.capability-content"},
+    "protocol_version": {"const": "0.2.0"},
+    "entrypoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "name", "description"],
+      "properties": {"path": {"const": "SKILL.md"}, "name": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 1, "maxLength": 64}, "description": {"type": "string", "minLength": 1, "maxLength": 1024}}
+    },
+    "triggers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["positive", "negative"],
+      "properties": {"positive": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 1000}}, "negative": {"type": "array", "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 1000}}}
+    },
+    "workflow": {"$ref": "#/$defs/workflow"},
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["structural", "behavioral", "user_visible"],
+      "properties": {"structural": {"$ref": "#/$defs/list"}, "behavioral": {"$ref": "#/$defs/list"}, "user_visible": {"$ref": "#/$defs/list"}}
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secret_policy", "network_policy", "forbidden_scopes"],
+      "properties": {"secret_policy": {"const": "never_include"}, "network_policy": {"enum": ["none", "declared-only", "host-managed"]}, "forbidden_scopes": {"type": "array", "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 1000}}}
+    },
+    "provenance": {"$ref": "#/$defs/provenance"}
+  },
+  "$defs": {
+    "list": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs", "steps", "outputs", "failure_modes", "stop_conditions"],
+      "properties": {"inputs": {"$ref": "#/$defs/list"}, "steps": {"$ref": "#/$defs/list"}, "outputs": {"$ref": "#/$defs/list"}, "failure_modes": {"$ref": "#/$defs/list"}, "stop_conditions": {"$ref": "#/$defs/list"}}
+    },
+    "record_ref": {"type": "object", "additionalProperties": false, "required": ["record_id", "revision", "kind", "schema_id", "schema_version"], "properties": {"record_id": {"type": "string", "minLength": 1}, "revision": {"type": "integer", "minimum": 1}, "kind": {"type": "string", "minLength": 1}, "schema_id": {"type": "string", "minLength": 1}, "schema_version": {"type": "string", "minLength": 1}}},
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_kind", "source_refs", "change_id"],
+      "properties": {
+        "source_kind": {"enum": ["mywiki-cognitive-source", "mixed", "user-authored"]},
+        "source_refs": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"$ref": "#/$defs/record_ref"}},
+        "change_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "capability_candidate_ref": {"$ref": "#/$defs/record_ref"},
+        "source_revision": {"type": "string", "minLength": 1, "maxLength": 128},
+        "external_references": {"type": "array", "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["uri", "title", "observed_at"], "properties": {"uri": {"type": "string", "format": "uri", "maxLength": 2000}, "title": {"type": "string", "minLength": 1, "maxLength": 500}, "observed_at": {"type": "string", "format": "date-time"}}}}
+      }
+    }
+  }
+}

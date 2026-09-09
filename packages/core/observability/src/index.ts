@@ -1,12 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {DatabaseSync} from 'node:sqlite';
-import {SQLITE_BUSY_TIMEOUT_MS, StorageError} from '../../storage/src/index.js';
-import {requireText} from '../../protocol/src/index.js';
+import {SQLITE_BUSY_TIMEOUT_MS, StorageError, openSqlite, type SqliteDatabase, type SqliteDriverInfo} from '../../storage/src/index.js';
+import {ProtocolVersionRegistry, requireText, type ProtocolVersioned} from '../../protocol/src/index.js';
 
 export const TRACE_EVENT_PROTOCOL_ID = 'trace.runtime-event' as const;
-export const TRACE_EVENT_PROTOCOL_VERSION = '0.1.0' as const;
+export const TRACE_EVENT_PROTOCOL_VERSION = '0.2.0' as const;
 
 export type TraceEventOutcome = 'success' | 'failure';
 
@@ -42,6 +41,15 @@ export interface CreateTraceEvent {
   duration_ms?: number;
   error_code?: string;
 }
+
+type AnyTraceEventProtocol = ProtocolVersioned & Record<string, unknown>;
+const traceEventUpcasters = new ProtocolVersionRegistry<AnyTraceEventProtocol>();
+traceEventUpcasters.register({
+  protocol_id: TRACE_EVENT_PROTOCOL_ID,
+  from_version: '0.1.0',
+  to_version: TRACE_EVENT_PROTOCOL_VERSION,
+  upcast(value) { return {...value, protocol_version: TRACE_EVENT_PROTOCOL_VERSION}; },
+});
 
 function absolute(file: string): string {
   if (!path.isAbsolute(file)) throw new StorageError('INVALID_PATH', 'SQLite event database must be an absolute path');
@@ -95,11 +103,15 @@ export function buildTraceEvent(input: CreateTraceEvent, eventId = `trace-event-
 
 export function validateTraceEvent(value: unknown): TraceEvent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StorageError('INVALID_TRACE_EVENT', 'trace event must be an object');
-  const item = value as Record<string, unknown>;
+  const raw = value as Record<string, unknown>;
+  if (raw.protocol_id !== TRACE_EVENT_PROTOCOL_ID) throw new StorageError('TRACE_EVENT_PROTOCOL_MISMATCH', 'Unsupported trace event protocol');
+  const item = raw.protocol_version === '0.1.0'
+    ? traceEventUpcasters.upgrade(raw as AnyTraceEventProtocol, TRACE_EVENT_PROTOCOL_VERSION) as Record<string, unknown>
+    : raw;
   const allowed = ['protocol_id', 'protocol_version', 'event_id', 'occurred_at', 'component', 'operation', 'outcome', 'correlation_id', 'causation_id', 'thread_id', 'record_refs', 'duration_ms', 'error_code'];
   const unknown = Object.keys(item).filter(key => !allowed.includes(key));
   if (unknown.length > 0) throw new StorageError('INVALID_TRACE_EVENT', `trace event contains unsupported fields: ${unknown.join(', ')}`);
-  if (item.protocol_id !== TRACE_EVENT_PROTOCOL_ID || item.protocol_version !== TRACE_EVENT_PROTOCOL_VERSION) throw new StorageError('TRACE_EVENT_PROTOCOL_MISMATCH', 'Unsupported trace event protocol');
+  if (item.protocol_version !== TRACE_EVENT_PROTOCOL_VERSION) throw new StorageError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported trace event protocol version: ${String(item.protocol_version)}`);
   const duration = optionalDuration(item.duration_ms);
   const errorCode = optionalText(item.error_code, 'error_code', 120);
   return buildTraceEvent({
@@ -145,12 +157,15 @@ function sqliteError(error: unknown): StorageError {
 }
 
 export class SqliteTraceEventStore {
-  private readonly db: DatabaseSync;
+  private readonly db: SqliteDatabase;
+  readonly driver: SqliteDriverInfo;
 
   constructor(file: string) {
     const target = absolute(file);
     fs.mkdirSync(path.dirname(target), {recursive: true});
-    this.db = new DatabaseSync(target);
+    const opened = openSqlite(target);
+    this.db = opened.db;
+    this.driver = opened.driver;
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS trace_events (

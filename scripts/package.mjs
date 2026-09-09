@@ -38,6 +38,12 @@ copy('packages/bundle', 'bundle');
 copy('schemas', 'schemas');
 copy('python/sdk', 'python-sdk');
 copy('native', 'native');
+// The Node 22–24.1 runtime selects this pure-JS/WASM fallback before loading
+// experimental node:sqlite. Materialize its JS assets so native distribution
+// installation never depends on node-gyp or a platform-specific prebuild.
+copy('node_modules/sql.js', 'node_modules/sql.js');
+const sqlJsPackage = path.join(root, 'node_modules', 'sql.js', 'package.json');
+const sqlJsInfo = JSON.parse(fs.readFileSync(sqlJsPackage, 'utf8'));
 copy('README.md', 'README.md');
 copy('MIGRATION_STATUS.md', 'MIGRATION_STATUS.md');
 copy('AUDIT_20260909.md', 'AUDIT_20260909.md');
@@ -59,6 +65,7 @@ const manifest = {
   manifest_version: '0.1.0',
   runtime_version: packageInfo.version,
   node_engine: packageInfo.engines?.node ?? 'unknown',
+  sqlite_driver_bundle: {fallback: 'sql.js', version: sqlJsInfo.version, selected_on_node_before: '24.2.0'},
   state_modes: ['sqlite', 'separate-jsonl-development'],
   files,
   created_at: new Date().toISOString(),

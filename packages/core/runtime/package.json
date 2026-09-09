@@ -6,6 +6,6 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {".": {"types": "./dist/index.d.ts", "default": "./dist/index.js"}},
-  "dependencies": {"@trace/change-set": "workspace:*", "@trace/continuity": "workspace:*", "@trace/core-capability-candidate": "workspace:*", "@trace/data": "workspace:*", "@trace/observability": "workspace:*", "@trace/protocol": "workspace:*", "@trace/storage": "workspace:*"}
+  "dependencies": {"@trace/case-capture": "workspace:*", "@trace/change-set": "workspace:*", "@trace/continuity": "workspace:*", "@trace/core-capability-candidate": "workspace:*", "@trace/data": "workspace:*", "@trace/observability": "workspace:*", "@trace/protocol": "workspace:*", "@trace/storage": "workspace:*"}
 }
 

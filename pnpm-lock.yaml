@@ -19,6 +19,10 @@ catalogs:
 importers:
 
   .:
+    dependencies:
+      sql.js:
+        specifier: 1.14.2
+        version: 1.14.2
     devDependencies:
       '@changesets/cli':
         specifier: catalog:devTools
@@ -100,6 +104,18 @@ importers:
       '@trace/data':
         specifier: workspace:*
         version: link:../data
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
+  packages/core/case-capture:
+    dependencies:
+      '@trace/data':
+        specifier: workspace:*
+        version: link:../data
+      '@trace/precedent':
+        specifier: workspace:*
+        version: link:../precedent
       '@trace/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -192,6 +208,9 @@ importers:
 
   packages/core/runtime:
     dependencies:
+      '@trace/case-capture':
+        specifier: workspace:*
+        version: link:../case-capture
       '@trace/change-set':
         specifier: workspace:*
         version: link:../change-set
@@ -795,6 +814,9 @@ packages:
   sprintf-js@1.0.3:
     resolution: {integrity: sha512-D9cPgkvLlV3t3IzL0D0YLvGA9Ahk4PcvVwUbN0dSGr1aP0Nrt4AEnTUbuGvquEC0mA64Gqt1fzirlRs5ibXx8g==}
 
+  sql.js@1.14.2:
+    resolution: {integrity: sha512-3ZGPovObMFrdw79zrUHbfdE/DLIsy8jdNdssmMSQuRAymedU6q84asPt0kgiqrdMYlPegDItiIMfmIXzZnYFcw==}
+
   strip-ansi@6.0.1:
     resolution: {integrity: sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==}
     engines: {node: '>=8'}
@@ -1298,6 +1320,8 @@ snapshots:
       signal-exit: 4.1.0
 
   sprintf-js@1.0.3: {}
+
+  sql.js@1.14.2: {}
 
   strip-ansi@6.0.1:
     dependencies:

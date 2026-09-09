@@ -4,8 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {DatabaseSync} from 'node:sqlite';
-import {SqliteVersionedStore} from '../dist/packages/core/storage/src/index.js';
+import {openSqlite, SqliteVersionedStore} from '../dist/packages/core/storage/src/index.js';
 import {TraceRuntime} from '../dist/packages/core/runtime/src/index.js';
 import {doctorSqlite} from '../dist/packages/core/operations/src/index.js';
 
@@ -34,13 +33,13 @@ test('SQLite hot writes only read the addressed identity while explicit full rea
   first.append({record_id: 'healthy', revision: 1, value: 'first'});
   first.close();
 
-  const db = new DatabaseSync(database);
+  const db = openSqlite(database).db;
   db.prepare('INSERT INTO records(identity, revision, payload) VALUES (?, ?, ?)').run('corrupt-unrelated', 1, '{not-json');
   db.close();
 
   const writer = new SqliteVersionedStore(database, 'records');
   assert.doesNotThrow(() => writer.append({record_id: 'new-write', revision: 1, value: 'second'}));
-  const gap = new DatabaseSync(database);
+  const gap = openSqlite(database).db;
   gap.prepare('INSERT INTO records(identity, revision, payload) VALUES (?, ?, ?)').run('gap-target', 2, JSON.stringify({record_id: 'gap-target', revision: 2, value: 'invalid history'}));
   gap.close();
   assert.throws(() => writer.append({record_id: 'gap-target', revision: 3, value: 'must not extend a gap'}), /Missing revision gap-target@1/);

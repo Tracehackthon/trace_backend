@@ -1,7 +1,7 @@
-import {ProtocolError, rejectUnknown, requireObject as record, requireStringList, requireText as text, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
+import {ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject as record, requireStringList, requireText as text, type ProtocolVersioned, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
 
 export const CAPABILITY_CONTENT_PROTOCOL_ID = 'trace.capability-content' as const;
-export const CAPABILITY_CONTENT_PROTOCOL_VERSION = '0.1.0' as const;
+export const CAPABILITY_CONTENT_PROTOCOL_VERSION = '0.2.0' as const;
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export type CapabilitySourceKind = 'mywiki-cognitive-source' | 'mixed' | 'user-authored';
@@ -33,6 +33,10 @@ export interface CapabilityContentContract {
   security: {secret_policy: 'never_include'; network_policy: CapabilityNetworkPolicy; forbidden_scopes: string[]};
   provenance: CapabilityProvenance;
 }
+
+type AnyCapabilityContentProtocol = ProtocolVersioned & Record<string, unknown>;
+const capabilityContentUpcasters = new ProtocolVersionRegistry<AnyCapabilityContentProtocol>();
+capabilityContentUpcasters.register({protocol_id: CAPABILITY_CONTENT_PROTOCOL_ID, from_version: '0.1.0', to_version: CAPABILITY_CONTENT_PROTOCOL_VERSION, upcast(value) { return {...value, protocol_version: CAPABILITY_CONTENT_PROTOCOL_VERSION}; }});
 
 function boundedList(value: unknown, field: string, min: number, max: number): string[] {
   return requireStringList(value, field, {min, max, itemMax: 1000});
@@ -76,9 +80,11 @@ export function validateCapabilityProvenance(value: unknown): CapabilityProvenan
 }
 
 export function validateCapabilityContentContract(value: unknown): CapabilityContentContract {
-  const item = record(value, 'content_contract');
+  const raw = record(value, 'content_contract');
+  if (raw.protocol_id !== CAPABILITY_CONTENT_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported capability content contract');
+  const item = raw.protocol_version === '0.1.0' ? capabilityContentUpcasters.upgrade(raw as AnyCapabilityContentProtocol, CAPABILITY_CONTENT_PROTOCOL_VERSION) as Record<string, unknown> : raw;
   rejectUnknown(item, ['protocol_id', 'protocol_version', 'entrypoint', 'triggers', 'workflow', 'acceptance', 'security', 'provenance'], 'content_contract');
-  if (item.protocol_id !== CAPABILITY_CONTENT_PROTOCOL_ID || item.protocol_version !== CAPABILITY_CONTENT_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported capability content contract');
+  if (item.protocol_version !== CAPABILITY_CONTENT_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported capability content protocol version: ${String(item.protocol_version)}`);
   const entrypoint = record(item.entrypoint, 'content_contract.entrypoint');
   rejectUnknown(entrypoint, ['path', 'name', 'description'], 'content_contract.entrypoint');
   if (entrypoint.path !== 'SKILL.md') throw new ProtocolError('INVALID_FIELD', 'content_contract.entrypoint.path must be SKILL.md');

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {DatabaseSync} from 'node:sqlite';
 import {StorageError, recordIdentity, type VersionedRecord, type VersionedStore} from './jsonl.js';
+import {openSqlite, type SqliteDatabase, type SqliteDriverInfo} from './sqlite-driver.js';
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
@@ -35,13 +35,16 @@ function writeError(error: unknown): StorageError {
  * in the core ledgers, while this module only owns durable rows and CAS.
  */
 export class SqliteVersionedStore<T extends VersionedRecord> implements VersionedStore<T> {
-  private readonly db: DatabaseSync;
+  private readonly db: SqliteDatabase;
   private readonly table: string;
+  readonly driver: SqliteDriverInfo;
 
   constructor(file: string, table: string) {
     const target = absolute(file);
     fs.mkdirSync(path.dirname(target), {recursive: true});
-    this.db = new DatabaseSync(target);
+    const opened = openSqlite(target);
+    this.db = opened.db;
+    this.driver = opened.driver;
     this.table = tableName(table);
     this.db.exec('PRAGMA journal_mode = WAL');
     // WAL only allows readers to proceed while a writer holds the lock. A

@@ -1,8 +1,8 @@
-import {ProtocolError, rejectUnknown, requireObject as record, requireText as text, type RecordRef} from '../../protocol/src/index.js';
+import {ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject as record, requireText as text, type ProtocolVersioned, type RecordRef} from '../../protocol/src/index.js';
 import {CapabilityContentContract, CapabilityProvenance, validateCapabilityContentContract, validateCapabilityProvenance} from './content.js';
 
 export const CAPABILITY_PROTOCOL_ID = 'trace.capability-publish' as const;
-export const CAPABILITY_PROTOCOL_VERSION = '0.1.0' as const;
+export const CAPABILITY_PROTOCOL_VERSION = '0.2.0' as const;
 
 export type CapabilityArtifactKind = 'skill' | 'workflow' | 'source-pack' | 'context-pack';
 
@@ -85,6 +85,18 @@ export interface CapabilityReceipt {
   updated_at: string;
 }
 
+type AnyCapabilityProtocol = ProtocolVersioned & Record<string, unknown>;
+const capabilityUpcasters = new ProtocolVersionRegistry<AnyCapabilityProtocol>();
+capabilityUpcasters.register({protocol_id: CAPABILITY_PROTOCOL_ID, from_version: '0.1.0', to_version: CAPABILITY_PROTOCOL_VERSION, upcast(value) { return {...value, protocol_version: CAPABILITY_PROTOCOL_VERSION}; }});
+
+function canonicalCapabilityProtocol(raw: Record<string, unknown>, field: string, optional = false): Record<string, unknown> {
+  if (raw.protocol_id === undefined && raw.protocol_version === undefined && optional) return raw;
+  if (raw.protocol_id !== CAPABILITY_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', `Unsupported ${field} protocol`);
+  const item = raw.protocol_version === '0.1.0' ? capabilityUpcasters.upgrade(raw as AnyCapabilityProtocol, CAPABILITY_PROTOCOL_VERSION) as Record<string, unknown> : raw;
+  if (item.protocol_version !== CAPABILITY_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported ${field} protocol version: ${String(item.protocol_version)}`);
+  return item;
+}
+
 function safeRelative(value: unknown, field: string): string {
   const relative = text(value, field, 1000);
   if (relative.includes('\\') || relative.startsWith('/') || relative.split('/').some(part => part === '' || part === '.' || part === '..')) throw new ProtocolError('INVALID_PATH', `${field} must be a relative forward-slash path without traversal`);
@@ -103,10 +115,8 @@ function sameRecordRef(left: RecordRef | undefined, right: RecordRef | undefined
 }
 
 export function validateCapabilitySpec(value: unknown): CapabilitySpec {
-  const item = record(value, 'capability_spec');
+  const item = canonicalCapabilityProtocol(record(value, 'capability_spec'), 'capability', true);
   rejectUnknown(item, ['protocol_id', 'protocol_version', 'capability_id', 'version', 'display_name', 'description', 'artifact_kind', 'source_root', 'target_root', 'files', 'host_compatibility', 'runtime_compatibility', 'dependencies', 'provenance', 'content_contract', 'protocol_registry_ref'], 'capability_spec');
-  if (item.protocol_id !== undefined && item.protocol_id !== CAPABILITY_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported capability protocol');
-  if (item.protocol_version !== undefined && item.protocol_version !== CAPABILITY_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported capability protocol version');
   const kind = text(item.artifact_kind, 'artifact_kind', 32) as CapabilityArtifactKind;
   if (!['skill', 'workflow', 'source-pack', 'context-pack'].includes(kind)) throw new ProtocolError('INVALID_FIELD', 'artifact_kind is not supported');
   const sourceRoot = absolute(item.source_root, 'source_root');
@@ -155,9 +165,8 @@ export function validateCapabilitySpec(value: unknown): CapabilitySpec {
 }
 
 export function validateCapabilityManifest(value: unknown): CapabilityManifest {
-  const item = record(value, 'capability_manifest');
+  const item = canonicalCapabilityProtocol(record(value, 'capability_manifest'), 'capability manifest');
   rejectUnknown(item, ['protocol_id', 'protocol_version', 'capability_id', 'version', 'display_name', 'description', 'artifact_kind', 'source_root', 'target_root', 'host_compatibility', 'runtime_compatibility', 'dependencies', 'provenance', 'content_contract', 'protocol_registry_ref', 'sources', 'files', 'installed_before', 'staged_at'], 'capability_manifest');
-  if (item.protocol_id !== CAPABILITY_PROTOCOL_ID || item.protocol_version !== CAPABILITY_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported capability manifest protocol');
   const sources = record(item.sources, 'sources');
   const files = record(item.files, 'files');
   const installedBeforeValue = record(item.installed_before, 'installed_before');

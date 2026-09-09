@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.prompt-case-source@0.1.0",
+  "title": "Trace Approved Prompt Case Source Snapshot Payload",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["source_id", "provider", "external_id", "title", "content", "captured_at", "content_hash", "content_mode", "capture_proposal_ref", "prompt_hash"],
+  "properties": {
+    "source_id": {"type": "string", "minLength": 1},
+    "provider": {"const": "trace.user-approved-prompt-case"},
+    "external_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "content": {"type": "string", "minLength": 1},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "content_hash": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+    "content_mode": {"enum": ["summary", "redacted_excerpt", "full_private"]},
+    "capture_proposal_ref": {"type": "string", "minLength": 1},
+    "prompt_hash": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"}
+  }
+}

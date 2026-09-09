@@ -2,9 +2,9 @@ import type {CreateDataRecord, DataClassification, DataOrigin, DataProducer} fro
 import {requireText as text, type RecordRef} from '../../protocol/src/index.js';
 
 export const PRECEDENT_PROTOCOL_ID = 'trace.candidate-precedent' as const;
-export const PRECEDENT_PROTOCOL_VERSION = '0.1.0' as const;
+export const PRECEDENT_PROTOCOL_VERSION = '0.2.0' as const;
 export const PRECEDENT_SCHEMA_ID = 'trace.candidate-precedent' as const;
-export const PRECEDENT_SCHEMA_VERSION = '0.1.0' as const;
+export const PRECEDENT_SCHEMA_VERSION = '0.2.0' as const;
 
 export interface CandidatePrecedentInput {
   candidate_id: string;

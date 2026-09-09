@@ -4,7 +4,7 @@ Capability Publisher 是 Trace 的“候选能力 → 可审查产物 → 明确
 
 ## 发布协议
 
-协议标识为 `trace.capability-publish@0.1.0`。一份 `CapabilitySpec` 必须声明：
+协议标识为 `trace.capability-publish@0.2.0`。历史 `0.1.0` manifest/spec 会在内存中显式 upcast；无迁移路径的版本拒绝读取。一份 `CapabilitySpec` 必须声明：
 
 - 能力身份、版本、显示名、说明和产物类型；
 - 绝对的 source/target root；

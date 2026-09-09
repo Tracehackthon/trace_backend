@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.project-instance.0.2",
+  "title": "Trace project instance descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_id", "protocol_version", "project_id", "instance_id", "template_id", "template_version", "source_mode", "source_scope", "state_file", "source_root", "created_at"],
+  "properties": {
+    "protocol_id": {"const": "trace.project-instance"},
+    "protocol_version": {"const": "0.2.0"},
+    "project_id": {"type": "string", "minLength": 1, "maxLength": 80},
+    "instance_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "template_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "template_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "source_mode": {"enum": ["local", "external", "team", "empty"]},
+    "source_scope": {"enum": ["personal", "project", "team", "domain"]},
+    "state_file": {"const": ".trace/state/trace.sqlite"},
+    "source_root": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

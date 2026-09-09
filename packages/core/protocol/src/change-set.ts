@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {ProtocolError} from './error.js';
+import {ProtocolVersionRegistry, type ProtocolVersioned} from './versioning.js';
 import {rejectUnknown, requireObject, requireText} from './validation.js';
 
 export const CHANGE_SET_PROTOCOL_ID = 'trace.change-set' as const;
@@ -123,6 +124,18 @@ export const STATUS_TRANSITIONS: Readonly<Record<ChangeStatus, readonly ChangeSt
   rolled_back: [],
 };
 
+type AnyChangeSetProtocol = ProtocolVersioned & Record<string, unknown>;
+const changeSetUpcasters = new ProtocolVersionRegistry<AnyChangeSetProtocol>();
+changeSetUpcasters.register({
+  protocol_id: CHANGE_SET_PROTOCOL_ID,
+  from_version: '0.1.0',
+  to_version: CHANGE_SET_PROTOCOL_VERSION,
+  // v0.2 formalized the current lifecycle fields but did not rename the
+  // persisted v0.1 envelope fields. Keep this transformation explicit so a
+  // later structural change extends a directed chain instead of a branch.
+  upcast(value) { return {...value, protocol_version: CHANGE_SET_PROTOCOL_VERSION}; },
+});
+
 export function validateRecordRef(value: unknown, field = 'record_ref'): RecordRef {
   const object = requireObject(value, field);
   rejectUnknown(object, ['record_id', 'revision', 'kind', 'schema_id', 'schema_version'], field);
@@ -233,9 +246,13 @@ export function validateCompatibility(value: unknown): Compatibility {
 }
 
 export function validateChangeSet(value: unknown): ChangeSet {
-  const object = requireObject(value, 'change_set');
+  const raw = requireObject(value, 'change_set');
+  if (raw.protocol_id !== CHANGE_SET_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported Change Set protocol');
+  const object = raw.protocol_version === '0.1.0'
+    ? changeSetUpcasters.upgrade(raw as AnyChangeSetProtocol, CHANGE_SET_PROTOCOL_VERSION) as Record<string, unknown>
+    : raw;
   rejectUnknown(object, ['protocol_id', 'protocol_version', 'change_id', 'revision', 'change_kind', 'subject', 'base', 'proposed', 'impact', 'compatibility', 'validation', 'scope', 'status', 'requested_by', 'created_at', 'updated_at', 'adoption', 'promotion', 'rollback', 'lineage', 'note'], 'change_set');
-  if (object.protocol_id !== CHANGE_SET_PROTOCOL_ID || object.protocol_version !== CHANGE_SET_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported Change Set protocol');
+  if (object.protocol_version !== CHANGE_SET_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported Change Set protocol version: ${String(object.protocol_version)}`);
   const kind = object.change_kind;
   if (!CHANGE_KINDS.includes(kind as ChangeKind)) throw new ProtocolError('INVALID_FIELD', 'change_kind is not supported');
   const subject = requireObject(object.subject, 'subject');

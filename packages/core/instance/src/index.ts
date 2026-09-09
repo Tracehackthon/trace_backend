@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {ProtocolError, requireText as text} from '../../protocol/src/index.js';
+import {ProtocolError, ProtocolVersionRegistry, requireObject, requireText as text, type ProtocolVersioned} from '../../protocol/src/index.js';
 import {buildTemplateLock, validateTemplateManifest, type TemplateBundleManifest, type TemplateInstanceLock} from '../../../template/contract/src/index.js';
 
 export const PROJECT_INSTANCE_PROTOCOL_ID = 'trace.project-instance' as const;
-export const PROJECT_INSTANCE_PROTOCOL_VERSION = '0.1.0' as const;
+export const PROJECT_INSTANCE_PROTOCOL_VERSION = '0.2.0' as const;
 export type ProjectSourceMode = 'local' | 'external' | 'team' | 'empty';
 export type ProjectScopeType = 'personal' | 'project' | 'team' | 'domain';
 
@@ -51,6 +51,29 @@ export interface ProjectInitResult {
   lock: TemplateInstanceLock;
   source_profile: ProjectSourceProfileInput;
   created_paths: string[];
+}
+
+type AnyProjectInstanceProtocol = ProtocolVersioned & Record<string, unknown>;
+const projectInstanceUpcasters = new ProtocolVersionRegistry<AnyProjectInstanceProtocol>();
+projectInstanceUpcasters.register({protocol_id: PROJECT_INSTANCE_PROTOCOL_ID, from_version: '0.1.0', to_version: PROJECT_INSTANCE_PROTOCOL_VERSION, upcast(value) { return {...value, protocol_version: PROJECT_INSTANCE_PROTOCOL_VERSION}; }});
+
+/** Read project.json defensively without admitting a random user path as state. */
+export function validateProjectInstanceDescriptor(value: unknown): ProjectInstanceDescriptor {
+  const raw = requireObject(value, 'project_instance');
+  if (raw.protocol_id !== PROJECT_INSTANCE_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported project instance protocol');
+  const item = raw.protocol_version === '0.1.0' ? projectInstanceUpcasters.upgrade(raw as AnyProjectInstanceProtocol, PROJECT_INSTANCE_PROTOCOL_VERSION) as Record<string, unknown> : raw;
+  const allowed = ['protocol_id', 'protocol_version', 'project_id', 'instance_id', 'template_id', 'template_version', 'source_mode', 'source_scope', 'state_file', 'source_root', 'created_at'];
+  const unknown = Object.keys(item).filter(key => !allowed.includes(key));
+  if (unknown.length > 0) throw new ProtocolError('UNKNOWN_FIELD', `project instance contains unsupported fields: ${unknown.join(', ')}`);
+  if (item.protocol_version !== PROJECT_INSTANCE_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported project instance protocol version: ${String(item.protocol_version)}`);
+  const sourceMode = item.source_mode;
+  const sourceScope = item.source_scope;
+  if (!['local', 'external', 'team', 'empty'].includes(sourceMode as string) || !['personal', 'project', 'team', 'domain'].includes(sourceScope as string)) throw new ProtocolError('INVALID_FIELD', 'project instance source mode/scope is invalid');
+  const stateFile = text(item.state_file, 'state_file', 400);
+  const sourceRoot = text(item.source_root, 'source_root', 4000);
+  if (stateFile !== '.trace/state/trace.sqlite') throw new ProtocolError('INVALID_FIELD', 'project instance state_file is invalid');
+  if (!sourceRoot.startsWith('.trace/')) throw new ProtocolError('INVALID_FIELD', 'project instance source_root must be a project-local trace path');
+  return {protocol_id: PROJECT_INSTANCE_PROTOCOL_ID, protocol_version: PROJECT_INSTANCE_PROTOCOL_VERSION, project_id: text(item.project_id, 'project_id', 80), instance_id: text(item.instance_id, 'instance_id', 200), template_id: text(item.template_id, 'template_id', 240), template_version: text(item.template_version, 'template_version', 64), source_mode: sourceMode as ProjectSourceMode, source_scope: sourceScope as ProjectScopeType, state_file: stateFile, source_root: sourceRoot, created_at: text(item.created_at, 'created_at', 80)};
 }
 
 function absolute(value: unknown, field: string): string {
@@ -109,7 +132,7 @@ export function initializeProject(input: ProjectInitInput): ProjectInitResult {
     const profileText = json(selected.profile);
     const profileHash = sha256(profileText);
     const lock = buildTemplateLock(manifest, runtimeVersion, instanceId, createdAt, {source_id: selected.profile.source_id, profile_hash: profileHash, scope_type: selected.scope});
-    const descriptor: ProjectInstanceDescriptor = {protocol_id: PROJECT_INSTANCE_PROTOCOL_ID, protocol_version: PROJECT_INSTANCE_PROTOCOL_VERSION, project_id: slug(path.basename(projectDir)), instance_id: instanceId, template_id: manifest.bundle_id, template_version: manifest.bundle_version, source_mode: input.source_mode, source_scope: selected.scope, state_file: '.trace/state/trace.sqlite', source_root: input.source_mode === 'local' || input.source_mode === 'empty' ? '.trace/source' : '.trace/profiles/source.profile.json', created_at: createdAt};
+    const descriptor = validateProjectInstanceDescriptor({protocol_id: PROJECT_INSTANCE_PROTOCOL_ID, protocol_version: PROJECT_INSTANCE_PROTOCOL_VERSION, project_id: slug(path.basename(projectDir)), instance_id: instanceId, template_id: manifest.bundle_id, template_version: manifest.bundle_version, source_mode: input.source_mode, source_scope: selected.scope, state_file: '.trace/state/trace.sqlite', source_root: input.source_mode === 'local' || input.source_mode === 'empty' ? '.trace/source' : '.trace/profiles/source.profile.json', created_at: createdAt});
     writeNew(path.join(stagedTrace, 'project.json'), json(descriptor));
     writeNew(path.join(stagedTrace, 'instance', 'trace.lock.json'), json(lock));
     writeNew(path.join(stagedTrace, 'instance', 'template.manifest.json'), json(manifest));

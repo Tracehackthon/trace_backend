@@ -1,8 +1,8 @@
 import {createHash} from 'node:crypto';
-import {ProtocolError, rejectUnknown, requireObject as object, requireStringList, requireText as text} from '../../../core/protocol/src/index.js';
+import {ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject as object, requireStringList, requireText as text, type ProtocolVersioned} from '../../../core/protocol/src/index.js';
 
 export const TEMPLATE_PROTOCOL_ID = 'trace.template-bundle' as const;
-export const TEMPLATE_PROTOCOL_VERSION = '0.1.0' as const;
+export const TEMPLATE_PROTOCOL_VERSION = '0.2.0' as const;
 
 export interface TemplateRef {id: string; version: string; hash?: string;}
 
@@ -44,6 +44,10 @@ export interface TemplateInstanceLock {
   selected_source?: {source_id: string; profile_hash: string; scope_type: 'personal' | 'project' | 'team' | 'domain'};
 }
 
+type AnyTemplateProtocol = ProtocolVersioned & Record<string, unknown>;
+const templateUpcasters = new ProtocolVersionRegistry<AnyTemplateProtocol>();
+templateUpcasters.register({protocol_id: TEMPLATE_PROTOCOL_ID, from_version: '0.1.0', to_version: TEMPLATE_PROTOCOL_VERSION, upcast(value) { return {...value, protocol_version: TEMPLATE_PROTOCOL_VERSION}; }});
+
 function refs(value: unknown, field: string): TemplateRef[] {
   if (!Array.isArray(value) || value.length > 256) throw new ProtocolError('INVALID_FIELD', `${field} must contain at most 256 items`);
   return value.map((raw, index) => {
@@ -54,9 +58,11 @@ function refs(value: unknown, field: string): TemplateRef[] {
 }
 
 export function validateTemplateManifest(value: unknown): TemplateBundleManifest {
-  const item = object(value, 'template_manifest');
+  const raw = object(value, 'template_manifest');
+  if (raw.protocol_id !== TEMPLATE_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported template protocol');
+  const item = raw.protocol_version === '0.1.0' ? templateUpcasters.upgrade(raw as AnyTemplateProtocol, TEMPLATE_PROTOCOL_VERSION) as Record<string, unknown> : raw;
   rejectUnknown(item, ['protocol_id', 'protocol_version', 'bundle_id', 'bundle_version', 'display_name', 'runtime', 'protocols', 'capabilities', 'source_packs', 'context_templates', 'hosts', 'activation', 'permissions', 'cognitive_source'], 'template_manifest');
-  if (item.protocol_id !== TEMPLATE_PROTOCOL_ID || item.protocol_version !== TEMPLATE_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported template protocol');
+  if (item.protocol_version !== TEMPLATE_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported template protocol version: ${String(item.protocol_version)}`);
   const runtime = object(item.runtime, 'runtime');
   rejectUnknown(runtime, ['min_version', 'max_version'], 'runtime');
   const activation = object(item.activation, 'activation');

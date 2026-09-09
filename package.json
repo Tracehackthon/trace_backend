@@ -5,7 +5,11 @@
   "description": "Trace TypeScript runtime packages and host adapters",
   "type": "module",
   "packageManager": "pnpm@10.34.5",
-  "workspaces": ["packages/*", "packages/*/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "packages/*/*",
+    "apps/*"
+  ],
   "bin": {
     "trace-runtime": "dist/apps/cli/src/main.js",
     "trace-runtime-rpc": "dist/packages/sdk/server/src/main.js"
@@ -30,7 +34,8 @@
   "engines": {
     "node": ">=22.13.0",
     "pnpm": ">=10.34.5"
+  },
+  "dependencies": {
+    "sql.js": "1.14.2"
   }
 }
-
-

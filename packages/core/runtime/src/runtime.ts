@@ -6,6 +6,7 @@ import {ProtocolError, type ChangeSet, type CreateChangeSet, type UpdateChangeSe
 import type {CreateDataRecord, DataEnvelope, DataKind, UpdateDataRecord} from '../../data/src/index.js';
 import {buildCapabilityCandidateRecord, type CapabilityCandidateInput} from '../../capability-candidate/src/index.js';
 import {SqliteTraceEventStore, type CreateTraceEvent, type TraceEvent} from '../../observability/src/index.js';
+import {PromptCaseCaptureService, type CapturePromptCase, type CreatePromptCaptureProposal, type CreatePromptCasePrecedent} from '../../case-capture/src/index.js';
 
 export interface TraceRuntimePaths {
   changeStateFile?: string;
@@ -23,6 +24,7 @@ export class TraceRuntime {
   readonly data: DataLedger;
   readonly continuity?: ContinuityLedger;
   readonly events?: SqliteTraceEventStore;
+  readonly promptCases: PromptCaseCaptureService;
 
   constructor(paths: TraceRuntimePaths) {
     if (!paths.sqliteStateFile && (!paths.changeStateFile || !paths.dataStateFile)) throw new StorageError('INVALID_PATH', 'TraceRuntime requires either sqliteStateFile or both changeStateFile and dataStateFile');
@@ -38,6 +40,7 @@ export class TraceRuntime {
     data = new DataLedger(dataStore, {resolveChange: changeId => changes.get(changeId)});
     this.changes = changes;
     this.data = data;
+    this.promptCases = new PromptCaseCaptureService(this.data);
     if (paths.sqliteStateFile || paths.continuityStateFile) {
       const continuityStore = paths.sqliteStateFile ? new SqliteVersionedStore<ContinuityEnvelope>(paths.sqliteStateFile, 'continuity_records') : new AppendOnlyStore<ContinuityEnvelope>(paths.continuityStateFile!);
       this.continuity = new ContinuityLedger(continuityStore);
@@ -64,6 +67,24 @@ export class TraceRuntime {
   createCapabilityCandidate(input: CapabilityCandidateInput) {
     return this.data.create(buildCapabilityCandidateRecord(input));
   }
+
+  proposePromptCase(input: CreatePromptCaptureProposal) {
+    const proposal = this.promptCases.propose(input);
+    if (proposal.thread_id !== undefined && this.continuity !== undefined) {
+      this.createReceipt({thread_id: proposal.thread_id, receipt_kind: 'persistence', summary: 'A prompt-case capture proposal was created; no raw prompt has been persisted.', persisted_refs: [proposal.proposal_ref.record_id + '@' + proposal.proposal_ref.revision], not_persisted: ['raw prompt'], required_user_action: `Choose summary, redacted_excerpt, or full_private and approve:${proposal.proposal_ref.record_id}.`, correlation_id: input.correlation_id, causation_id: input.causation_id});
+    }
+    return proposal;
+  }
+
+  capturePromptCase(input: CapturePromptCase) {
+    const result = this.promptCases.capture(input);
+    if (result.proposal.thread_id !== undefined && this.continuity !== undefined) {
+      this.createReceipt({thread_id: result.proposal.thread_id, receipt_kind: 'persistence', summary: `A ${result.capture_mode} prompt case was explicitly persisted as a private source snapshot.`, persisted_refs: [result.proposal.proposal_ref.record_id + '@' + result.proposal.proposal_ref.revision, result.source_snapshot_ref.record_id + '@' + result.source_snapshot_ref.revision], not_persisted: [], next_prompts: ['Attach an outcome record, then create a candidate precedent if the case is reusable.'], correlation_id: input.correlation_id, causation_id: input.causation_id});
+    }
+    return result;
+  }
+
+  createPromptCasePrecedent(input: CreatePromptCasePrecedent) { return this.promptCases.createPrecedent(input); }
 
   updateData(recordId: string, input: UpdateDataRecord) {
     return this.data.update(recordId, input);

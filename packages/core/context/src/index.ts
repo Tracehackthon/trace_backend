@@ -1,8 +1,8 @@
 import {createHash} from 'node:crypto';
-import {ProtocolError, rejectUnknown, requireObject as object, requireText as text} from '../../protocol/src/index.js';
+import {ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject as object, requireText as text, type ProtocolVersioned} from '../../protocol/src/index.js';
 
 export const CONTEXT_PROTOCOL_ID = 'trace.context-record' as const;
-export const CONTEXT_PROTOCOL_VERSION = '0.1.0' as const;
+export const CONTEXT_PROTOCOL_VERSION = '0.2.0' as const;
 
 export interface ContextSourceRef {
   record_id: string;
@@ -46,6 +46,17 @@ export interface BuildActivationPackInput {
   required_user_action?: string;
 }
 
+type AnyContextProtocol = ProtocolVersioned & Record<string, unknown>;
+const contextUpcasters = new ProtocolVersionRegistry<AnyContextProtocol>();
+contextUpcasters.register({
+  protocol_id: CONTEXT_PROTOCOL_ID,
+  from_version: '0.1.0',
+  to_version: CONTEXT_PROTOCOL_VERSION,
+  // v0.2 retains the bounded pointer-only payload. The explicit step means
+  // future context changes cannot silently reinterpret a v0.1 pack.
+  upcast(value) { return {...value, protocol_version: CONTEXT_PROTOCOL_VERSION}; },
+});
+
 function refs(value: unknown): ContextSourceRef[] {
   if (!Array.isArray(value) || value.length > 128) throw new ProtocolError('INVALID_FIELD', 'source_refs must contain at most 128 references');
   return value.map((raw, index) => {
@@ -63,9 +74,13 @@ function refs(value: unknown): ContextSourceRef[] {
 }
 
 export function validateActivationPack(value: unknown): ActivationPack {
-  const item = object(value, 'activation_pack');
+  const raw = object(value, 'activation_pack');
+  if (raw.protocol_id !== CONTEXT_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported context protocol');
+  const item = raw.protocol_version === '0.1.0'
+    ? contextUpcasters.upgrade(raw as AnyContextProtocol, CONTEXT_PROTOCOL_VERSION) as Record<string, unknown>
+    : raw;
   rejectUnknown(item, ['protocol_id', 'protocol_version', 'pack_id', 'thread_id', 'purpose', 'summary', 'source_refs', 'read_pointers', 'budget', 'forbidden_scopes', 'required_user_action', 'generated_at'], 'activation_pack');
-  if (item.protocol_id !== CONTEXT_PROTOCOL_ID || item.protocol_version !== CONTEXT_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported context protocol');
+  if (item.protocol_version !== CONTEXT_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported context protocol version: ${String(item.protocol_version)}`);
   const budget = object(item.budget, 'budget');
   rejectUnknown(budget, ['max_tokens', 'max_sources'], 'budget');
   if (!Number.isInteger(budget.max_tokens) || Number(budget.max_tokens) < 1 || Number(budget.max_tokens) > 200_000) throw new ProtocolError('INVALID_FIELD', 'budget.max_tokens must be between 1 and 200000');

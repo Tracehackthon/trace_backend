@@ -1,5 +1,7 @@
+import {ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject as record, requireText as text, type ProtocolVersioned} from '../../../core/protocol/src/index.js';
+
 export const PLUGIN_PROTOCOL_ID = 'trace.plugin' as const;
-export const PLUGIN_PROTOCOL_VERSION = '0.1.0' as const;
+export const PLUGIN_PROTOCOL_VERSION = '0.2.0' as const;
 
 export const PLUGIN_HOSTS = ['deepseek-harness', 'codex', 'desktop'] as const;
 export type PluginHostKind = (typeof PLUGIN_HOSTS)[number];
@@ -53,10 +55,16 @@ export interface TracePlugin {
   activate(host: PluginHost): Promise<{deactivate(): Promise<void>} | void>;
 }
 
+type AnyPluginProtocol = ProtocolVersioned & Record<string, unknown>;
+const pluginUpcasters = new ProtocolVersionRegistry<AnyPluginProtocol>();
+pluginUpcasters.register({protocol_id: PLUGIN_PROTOCOL_ID, from_version: '0.1.0', to_version: PLUGIN_PROTOCOL_VERSION, upcast(value) { return {...value, protocol_version: PLUGIN_PROTOCOL_VERSION}; }});
+
 export function validatePluginDescriptor(value: unknown): TracePluginDescriptor {
-  const object = record(value, 'plugin descriptor');
+  const raw = record(value, 'plugin descriptor');
+  if (raw.protocol_id !== PLUGIN_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported plugin protocol');
+  const object = raw.protocol_version === '0.1.0' ? pluginUpcasters.upgrade(raw as AnyPluginProtocol, PLUGIN_PROTOCOL_VERSION) as Record<string, unknown> : raw;
   rejectUnknown(object, ['plugin_id', 'plugin_version', 'protocol_id', 'protocol_version', 'hosts', 'capabilities', 'permissions', 'schemas', 'entrypoint'], 'plugin descriptor');
-  if (object.protocol_id !== PLUGIN_PROTOCOL_ID || object.protocol_version !== PLUGIN_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported plugin protocol');
+  if (object.protocol_version !== PLUGIN_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported plugin protocol version: ${String(object.protocol_version)}`);
   if (!Array.isArray(object.hosts) || object.hosts.length === 0 || object.hosts.some(item => !PLUGIN_HOSTS.includes(item as PluginHostKind))) throw new ProtocolError('INVALID_FIELD', 'plugin hosts are invalid');
   if (!Array.isArray(object.capabilities) || object.capabilities.length === 0 || object.capabilities.some(item => !PLUGIN_CAPABILITIES.includes(item as PluginCapability))) throw new ProtocolError('INVALID_FIELD', 'plugin capabilities are invalid');
   if (!Array.isArray(object.permissions) || object.permissions.some(item => !PLUGIN_PERMISSIONS.includes(item as PluginPermission))) throw new ProtocolError('INVALID_FIELD', 'plugin permissions are invalid');
@@ -78,4 +86,3 @@ export function validatePluginDescriptor(value: unknown): TracePluginDescriptor 
     entrypoint: text(object.entrypoint, 'entrypoint', 1000),
   };
 }
-import {ProtocolError, rejectUnknown, requireObject as record, requireText as text} from '../../../core/protocol/src/index.js';

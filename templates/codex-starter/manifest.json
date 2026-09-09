@@ -1,14 +1,14 @@
 {
   "protocol_id": "trace.template-bundle",
-  "protocol_version": "0.1.0",
+  "protocol_version": "0.2.0",
   "bundle_id": "trace.codex-starter",
-  "bundle_version": "0.1.0",
+  "bundle_version": "0.2.0",
   "display_name": "Trace Codex Starter",
   "runtime": {"min_version": "0.6.0"},
   "protocols": {
     "trace.change-set": ">=0.2.0 <0.3.0",
-    "trace.data-envelope": ">=0.1.0 <0.2.0",
-    "trace.context-record": ">=0.1.0 <0.2.0",
+    "trace.data-envelope": ">=0.1.0 <0.3.0",
+    "trace.context-record": ">=0.1.0 <0.3.0",
     "trace.continuity": ">=0.1.0 <0.3.0"
   },
   "capabilities": [

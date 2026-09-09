@@ -14,8 +14,9 @@
 | `core/migration` | JSONL → SQLite staging、计数和源文件保留 | 删除旧证据 |
 | `template/contract` | 能力/来源/上下文模板 Bundle、preview、instance lockfile | 直接覆盖用户实例 |
 | `core/precedent` | 宿主无关的候选前例 payload、证据和 Change Set lineage | 知乎/宿主 transport |
+| `core/case-capture` | transient prompt 的 hash-only proposal、显式 capture、source snapshot 与 precedent 入口 | hook 自动归档、完整聊天转录 |
 | `integration/zhihu-precedent` | 独立知乎来源 → source_snapshot / candidate_precedent adapter | core 状态机、用户 adoption |
 | `core/capability` | Skill 候选、入口/内容契约、认知源 provenance、验证和发行身份 | 具体宿主审批 |
 
-现在 TS 垂直切片已覆盖 Change Set、Data Ledger、SQLite、Continuity、Activation Pack、候选前例 adapter、Capability Publisher 和模板冷启动。旧 Python runtime 已从 active tree 移出并归档到 `tmp/trace-python-runtime-legacy-20260909/`；当前 runtime 不再调用它。`python/sdk` 仅保留为 TS runtime 的薄 RPC 客户端，不是第二套 runtime。
+现在 TS 垂直切片已覆盖 Change Set、Data Ledger、SQLite、Continuity、Activation Pack、候选前例 adapter、显式 prompt case capture、Capability Publisher 和模板冷启动。旧 Python runtime 已从 active tree 移出并归档到 `tmp/trace-python-runtime-legacy-20260909/`；当前 runtime 不再调用它。`python/sdk` 仅保留为 TS runtime 的薄 RPC 客户端，不是第二套 runtime。`apps/desktop` 与 `integration/deepseek-harness` 是刻意未实现的宿主边界，不能据目录存在推断已接入。
 

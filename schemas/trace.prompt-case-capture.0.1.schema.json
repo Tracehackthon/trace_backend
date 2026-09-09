@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.prompt-case-capture@0.1.0",
+  "title": "Trace Prompt Capture Proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["proposal_id", "prompt_hash", "capture_mode", "intent_summary", "rationale"],
+  "properties": {
+    "proposal_id": {"type": "string", "minLength": 1},
+    "prompt_hash": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+    "capture_mode": {"enum": ["summary", "redacted_excerpt", "full_private"]},
+    "intent_summary": {"type": "string", "minLength": 1},
+    "rationale": {"type": "string", "minLength": 1},
+    "thread_id": {"type": "string", "minLength": 1},
+    "redacted_preview": {"type": "string", "minLength": 1},
+    "captured_source_ref": {"type": "string", "minLength": 1}
+  },
+  "not": {"required": ["prompt", "raw_prompt", "content", "selected_content"]}
+}

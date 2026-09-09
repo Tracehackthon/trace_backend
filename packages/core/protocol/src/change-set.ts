@@ -1,4 +1,6 @@
 import {createHash} from 'node:crypto';
+import {ProtocolError} from './error.js';
+import {rejectUnknown, requireObject, requireText} from './validation.js';
 
 export const CHANGE_SET_PROTOCOL_ID = 'trace.change-set' as const;
 export const CHANGE_SET_PROTOCOL_VERSION = '0.2.0' as const;
@@ -121,13 +123,6 @@ export const STATUS_TRANSITIONS: Readonly<Record<ChangeStatus, readonly ChangeSt
   rolled_back: [],
 };
 
-export class ProtocolError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-    this.name = 'TraceProtocolError';
-  }
-}
-
 export function validateRecordRef(value: unknown, field = 'record_ref'): RecordRef {
   const object = requireObject(value, field);
   rejectUnknown(object, ['record_id', 'revision', 'kind', 'schema_id', 'schema_version'], field);
@@ -191,25 +186,6 @@ export function validateCreateChangeSet(value: unknown): CreateChangeSet {
     lineage: validateChangeLineage(object.lineage),
     ...(object.note === undefined ? {} : {note: requireText(object.note, 'note', 4000)}),
   };
-}
-
-function requireText(value: unknown, field: string, max = 512): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) {
-    throw new ProtocolError('INVALID_FIELD', `${field} must be a non-empty string of at most ${max} characters`);
-  }
-  return value.trim();
-}
-
-function requireObject(value: unknown, field: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ProtocolError('INVALID_FIELD', `${field} must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function rejectUnknown(object: Record<string, unknown>, allowed: readonly string[], field: string): void {
-  const unknown = Object.keys(object).filter(key => !allowed.includes(key));
-  if (unknown.length > 0) throw new ProtocolError('UNKNOWN_FIELD', `${field} contains unsupported fields: ${unknown.join(', ')}`);
 }
 
 function requireBoundedObject(value: unknown, field: string): Record<string, unknown> {

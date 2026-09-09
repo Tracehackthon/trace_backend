@@ -1,4 +1,5 @@
 import {captureZhihuContent, type ZhihuContentInput} from '../../zhihu-precedent/src/index.js';
+import {requireText as text} from '../../../core/protocol/src/index.js';
 
 export const ZHIHU_TRANSPORT_ID = 'trace.zhihu-http-transport' as const;
 export const ZHIHU_TRANSPORT_VERSION = '0.1.0' as const;
@@ -60,11 +61,6 @@ const PATHS = {
   hackathonKnowledgeList: '/km-indep-home/hackathon/v2/knowledge/list',
   hackathonKnowledgeDetail: '/km-indep-home/hackathon/v2/knowledge',
 } as const;
-
-function text(value: unknown, field: string, max = 4000): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new Error(`${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
 
 function number(value: unknown, field: string, min: number, max: number): number {
   if (!Number.isInteger(value) || Number(value) < min || Number(value) > max) throw new Error(`${field} must be an integer between ${min} and ${max}`);

@@ -6,5 +6,5 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {".": {"types": "./dist/index.d.ts", "default": "./dist/index.js"}},
-  "dependencies": {"@trace/data": "workspace:*", "@trace/precedent": "workspace:*"}
+  "dependencies": {"@trace/data": "workspace:*", "@trace/precedent": "workspace:*", "@trace/protocol": "workspace:*"}
 }

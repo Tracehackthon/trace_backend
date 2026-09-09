@@ -7,7 +7,11 @@ const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const outArg = process.argv.indexOf('--out');
 const configured = outArg >= 0 ? process.argv[outArg + 1] : process.env.TRACE_SOURCE_EXPORT_DIR;
 const replace = process.argv.includes('--replace');
+const keepArg = process.argv.indexOf('--keep-backups');
+const keepRaw = keepArg >= 0 ? process.argv[keepArg + 1] : (process.env.TRACE_SOURCE_EXPORT_KEEP_BACKUPS ?? '3');
+const keepBackups = Number(keepRaw);
 if (!configured || !path.isAbsolute(configured)) throw new Error('Provide an absolute source export with --out ABS or TRACE_SOURCE_EXPORT_DIR');
+if (!Number.isInteger(keepBackups) || keepBackups < 0 || keepBackups > 20) throw new Error('--keep-backups / TRACE_SOURCE_EXPORT_KEEP_BACKUPS must be an integer from 0 to 20');
 const output = path.resolve(configured);
 if (output === root || output.startsWith(`${root}${path.sep}`)) throw new Error('Source export must be outside the active runtime root');
 if (fs.existsSync(output) && fs.readdirSync(output).length > 0 && !replace) throw new Error(`Source export output is not empty: ${output}; use --replace explicitly`);
@@ -96,6 +100,7 @@ fs.writeFileSync(path.join(staging, 'SOURCE_EXPORT_MANIFEST.json'), JSON.stringi
   manifest_version: '0.2.0',
   runtime_version: runtime.version,
   managed_entries: entries,
+  backup_policy: {max_managed_backups: keepBackups},
   files,
   created_at: new Date().toISOString(),
 }, null, 2) + '\n', 'utf8');
@@ -111,6 +116,41 @@ const managedEntries = [...new Set([...previousEntries, ...entries, 'SOURCE_EXPO
 const movedEntries = [];
 const deployedEntries = [];
 let cleanupWarnings = [];
+
+function sourceBackupDirectories() {
+  const parent = path.dirname(output);
+  const prefix = `${path.basename(output)}.previous-`;
+  return fs.readdirSync(parent, {withFileTypes: true})
+    .filter(entry => entry.isDirectory() && entry.name.startsWith(prefix))
+    .map(entry => path.join(parent, entry.name))
+    .filter(directory => {
+      const manifestFile = path.join(directory, 'SOURCE_EXPORT_MANIFEST.json');
+      if (!fs.existsSync(manifestFile)) return false;
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+        // v0.2+ is produced by the entry-level exporter and is source-only.
+        // Older root-move backups are deliberately outside automatic pruning.
+        return manifest.manifest_id === 'trace.runtime.source-export'
+          && typeof manifest.manifest_version === 'string'
+          && /^0\.[2-9]\./.test(manifest.manifest_version);
+      } catch { return false; }
+    })
+    .sort((left, right) => path.basename(right).localeCompare(path.basename(left)));
+}
+
+function pruneManagedSourceBackups() {
+  const stale = sourceBackupDirectories().slice(keepBackups);
+  const removed = [];
+  for (const directory of stale) {
+    try {
+      fs.rmSync(directory, {recursive: true, force: true});
+      removed.push(directory);
+    } catch (error) {
+      cleanupWarnings.push({entry: path.basename(directory), message: `backup retention: ${error.message}`});
+    }
+  }
+  return removed;
+}
 
 try {
   if (!fs.existsSync(output)) {
@@ -155,6 +195,7 @@ for (const entry of generatedEntries) {
     cleanupWarnings.push({entry, message: error.message});
   }
 }
+const prunedBackups = pruneManagedSourceBackups();
 
 process.stdout.write(JSON.stringify({
   status: 'exported',
@@ -163,5 +204,7 @@ process.stdout.write(JSON.stringify({
   runtime_version: runtime.version,
   files: files.length,
   manifest: path.join(output, 'SOURCE_EXPORT_MANIFEST.json'),
+  keep_backups: keepBackups,
+  pruned_backups: prunedBackups,
   cleanup_warnings: cleanupWarnings,
 }) + '\n');

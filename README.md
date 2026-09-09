@@ -115,7 +115,7 @@ preview 不会改变宿主。只有带明确 approval 的 install 才会原子�
 旧 Python runtime 已从 active tree 移除；`python/sdk` 只保留面向 RPC 的薄客户端。需要源码导出到独立 Git 目录时执行：
 
 ```powershell
-corepack pnpm export:source -- --out <SOURCE_EXPORT_DIR> --replace
+corepack pnpm export:source -- --out <SOURCE_EXPORT_DIR> --replace --keep-backups 3
 ```
 
-导出会排除 `node_modules/`、`dist/`、缓存、SQLite、凭证和用户数据。导出时会保留目标目录的 `.git/` 与本地 `.workbuddy-ai/` 状态，但不会把依赖树放进 `trace-runtime.previous-*` 备份；需要依赖时在导出后执行 `corepack pnpm install --frozen-lockfile`。发行包也不会包含用户认知源。
+导出会排除 `node_modules/`、`dist/`、缓存、SQLite、凭证和用户数据。导出时会保留目标目录的 `.git/` 与本地 `.workbuddy-ai/` 状态，但不会把依赖树放进 `trace-runtime.previous-*` 备份；默认最多保留 3 个由当前 entry-level exporter 创建的 source-only 备份，可用 `--keep-backups` 或 `TRACE_SOURCE_EXPORT_KEEP_BACKUPS` 调整。旧版 root-move 备份不会被自动删除。需要依赖时在导出后执行 `corepack pnpm install --frozen-lockfile`。发行包也不会包含用户认知源。

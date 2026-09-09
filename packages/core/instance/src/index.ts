@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {ProtocolError} from '../../protocol/src/index.js';
+import {ProtocolError, requireText as text} from '../../protocol/src/index.js';
 import {buildTemplateLock, validateTemplateManifest, type TemplateBundleManifest, type TemplateInstanceLock} from '../../../template/contract/src/index.js';
 
 export const PROJECT_INSTANCE_PROTOCOL_ID = 'trace.project-instance' as const;
@@ -53,10 +53,6 @@ export interface ProjectInitResult {
   created_paths: string[];
 }
 
-function text(value: unknown, field: string, max = 500): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new ProtocolError('INVALID_INPUT', `${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
 function absolute(value: unknown, field: string): string {
   const resolved = path.resolve(text(value, field, 4000));
   if (!path.isAbsolute(resolved)) throw new ProtocolError('INVALID_INPUT', `${field} must be absolute`);

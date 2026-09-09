@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {requireText as text} from '../../../core/protocol/src/index.js';
 
 export const CODEX_SKILL_INSTALLER_ID = 'trace.codex-skill-installer' as const;
 export const CODEX_SKILL_INSTALLER_VERSION = '0.1.0' as const;
@@ -8,7 +9,6 @@ export const CODEX_SKILL_INSTALLER_VERSION = '0.1.0' as const;
 export interface SkillInstallPreview {skill_id: string; source_dir: string; target_dir: string; source_hash: string; existing_hash: string | null; changed: boolean; warnings: string[];}
 export interface SkillInstallReceipt {protocol_id: 'trace.codex-skill-install'; protocol_version: '0.1.0'; status: 'installed' | 'rolled_back'; skill_id: string; target_dir: string; source_hash: string; previous_hash: string | null; backup_dir: string | null; installed_at: string;}
 
-function text(value: unknown, field: string, max = 2000): string { if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new Error(`${field} must be a non-empty string of at most ${max} characters`); return value.trim(); }
 function absolute(value: string, field: string): string { const result = path.resolve(text(value, field)); if (!path.isAbsolute(result)) throw new Error(`${field} must be absolute`); return result; }
 function shaFile(file: string): string { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 function shaDir(root: string): string { const files: string[] = []; const walk = (dir: string): void => { for (const entry of fs.readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))) { const file = path.join(dir, entry.name); if (entry.isDirectory()) walk(file); else if (entry.isFile()) files.push(`${path.relative(root, file).replaceAll(path.sep, '/')}\0${shaFile(file)}`); } }; walk(root); return createHash('sha256').update(files.join('\n')).digest('hex'); }

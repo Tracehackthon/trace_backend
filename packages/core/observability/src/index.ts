@@ -3,6 +3,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {SQLITE_BUSY_TIMEOUT_MS, StorageError} from '../../storage/src/index.js';
+import {requireText} from '../../protocol/src/index.js';
 
 export const TRACE_EVENT_PROTOCOL_ID = 'trace.runtime-event' as const;
 export const TRACE_EVENT_PROTOCOL_VERSION = '0.1.0' as const;
@@ -47,19 +48,22 @@ function absolute(file: string): string {
   return path.resolve(file);
 }
 
-function text(value: unknown, field: string, max = 240): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max || /[\r\n]/.test(value)) throw new StorageError('INVALID_TRACE_EVENT', `${field} must be a non-empty single-line string of at most ${max} characters`);
-  return value.trim();
+function eventText(value: unknown, field: string, max = 240): string {
+  let normalized: string;
+  try { normalized = requireText(value, field, max); }
+  catch { throw new StorageError('INVALID_TRACE_EVENT', `${field} must be a non-empty single-line string of at most ${max} characters`); }
+  if (/[\r\n]/.test(normalized)) throw new StorageError('INVALID_TRACE_EVENT', `${field} must be a non-empty single-line string of at most ${max} characters`);
+  return normalized;
 }
 
 function recordRefs(value: unknown): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 128) throw new StorageError('INVALID_TRACE_EVENT', 'record_refs must contain at most 128 references');
-  return value.map((item, index) => text(item, `record_refs[${index}]`, 320));
+  return value.map((item, index) => eventText(item, `record_refs[${index}]`, 320));
 }
 
 function optionalText(value: unknown, field: string, max = 240): string | undefined {
-  return value === undefined ? undefined : text(value, field, max);
+  return value === undefined ? undefined : eventText(value, field, max);
 }
 
 function optionalDuration(value: unknown): number | undefined {
@@ -75,13 +79,13 @@ export function buildTraceEvent(input: CreateTraceEvent, eventId = `trace-event-
   return {
     protocol_id: TRACE_EVENT_PROTOCOL_ID,
     protocol_version: TRACE_EVENT_PROTOCOL_VERSION,
-    event_id: text(eventId, 'event_id'),
-    occurred_at: text(occurredAt, 'occurred_at', 80),
-    component: text(input.component, 'component', 160),
-    operation: text(input.operation, 'operation', 160),
+    event_id: eventText(eventId, 'event_id'),
+    occurred_at: eventText(occurredAt, 'occurred_at', 80),
+    component: eventText(input.component, 'component', 160),
+    operation: eventText(input.operation, 'operation', 160),
     outcome: input.outcome,
-    correlation_id: text(input.correlation_id, 'correlation_id'),
-    causation_id: text(input.causation_id, 'causation_id'),
+    correlation_id: eventText(input.correlation_id, 'correlation_id'),
+    causation_id: eventText(input.causation_id, 'causation_id'),
     ...(input.thread_id === undefined ? {} : {thread_id: optionalText(input.thread_id, 'thread_id')!}),
     record_refs: recordRefs(input.record_refs),
     ...(duration === undefined ? {} : {duration_ms: duration}),
@@ -99,16 +103,16 @@ export function validateTraceEvent(value: unknown): TraceEvent {
   const duration = optionalDuration(item.duration_ms);
   const errorCode = optionalText(item.error_code, 'error_code', 120);
   return buildTraceEvent({
-    component: text(item.component, 'component', 160),
-    operation: text(item.operation, 'operation', 160),
+    component: eventText(item.component, 'component', 160),
+    operation: eventText(item.operation, 'operation', 160),
     outcome: item.outcome as TraceEventOutcome,
-    correlation_id: text(item.correlation_id, 'correlation_id'),
-    causation_id: text(item.causation_id, 'causation_id'),
+    correlation_id: eventText(item.correlation_id, 'correlation_id'),
+    causation_id: eventText(item.causation_id, 'causation_id'),
     ...(item.thread_id === undefined ? {} : {thread_id: optionalText(item.thread_id, 'thread_id')!}),
     record_refs: recordRefs(item.record_refs),
     ...(duration === undefined ? {} : {duration_ms: duration}),
     ...(errorCode === undefined ? {} : {error_code: errorCode}),
-  }, text(item.event_id, 'event_id'), text(item.occurred_at, 'occurred_at', 80));
+  }, eventText(item.event_id, 'event_id'), eventText(item.occurred_at, 'occurred_at', 80));
 }
 
 /** Decode nullable SQLite columns without admitting a free-form event payload. */
@@ -177,7 +181,7 @@ export class SqliteTraceEventStore {
   }
 
   byCorrelation(correlationId: string): TraceEvent[] {
-    const correlation = text(correlationId, 'correlation_id');
+    const correlation = eventText(correlationId, 'correlation_id');
     try {
       const rows = this.db.prepare('SELECT event_id, occurred_at, component, operation, outcome, correlation_id, causation_id, thread_id, record_refs, duration_ms, error_code FROM trace_events WHERE correlation_id = ? ORDER BY occurred_at, event_id').all(correlation) as Array<Record<string, unknown>>;
       return rows.map(traceEventFromSqliteRow);

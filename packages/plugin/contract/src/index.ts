@@ -53,26 +53,17 @@ export interface TracePlugin {
   activate(host: PluginHost): Promise<{deactivate(): Promise<void>} | void>;
 }
 
-function text(value: unknown, field: string, max = 240): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new Error(`${field} must be a non-empty string`);
-  return value.trim();
-}
-
 export function validatePluginDescriptor(value: unknown): TracePluginDescriptor {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('plugin descriptor must be an object');
-  const object = value as Record<string, unknown>;
-  const unknown = Object.keys(object).filter(key => !['plugin_id', 'plugin_version', 'protocol_id', 'protocol_version', 'hosts', 'capabilities', 'permissions', 'schemas', 'entrypoint'].includes(key));
-  if (unknown.length > 0) throw new Error(`plugin descriptor contains unsupported fields: ${unknown.join(', ')}`);
-  if (object.protocol_id !== PLUGIN_PROTOCOL_ID || object.protocol_version !== PLUGIN_PROTOCOL_VERSION) throw new Error('Unsupported plugin protocol');
-  if (!Array.isArray(object.hosts) || object.hosts.length === 0 || object.hosts.some(item => !PLUGIN_HOSTS.includes(item as PluginHostKind))) throw new Error('plugin hosts are invalid');
-  if (!Array.isArray(object.capabilities) || object.capabilities.length === 0 || object.capabilities.some(item => !PLUGIN_CAPABILITIES.includes(item as PluginCapability))) throw new Error('plugin capabilities are invalid');
-  if (!Array.isArray(object.permissions) || object.permissions.some(item => !PLUGIN_PERMISSIONS.includes(item as PluginPermission))) throw new Error('plugin permissions are invalid');
-  if (!Array.isArray(object.schemas)) throw new Error('plugin schemas are required');
+  const object = record(value, 'plugin descriptor');
+  rejectUnknown(object, ['plugin_id', 'plugin_version', 'protocol_id', 'protocol_version', 'hosts', 'capabilities', 'permissions', 'schemas', 'entrypoint'], 'plugin descriptor');
+  if (object.protocol_id !== PLUGIN_PROTOCOL_ID || object.protocol_version !== PLUGIN_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported plugin protocol');
+  if (!Array.isArray(object.hosts) || object.hosts.length === 0 || object.hosts.some(item => !PLUGIN_HOSTS.includes(item as PluginHostKind))) throw new ProtocolError('INVALID_FIELD', 'plugin hosts are invalid');
+  if (!Array.isArray(object.capabilities) || object.capabilities.length === 0 || object.capabilities.some(item => !PLUGIN_CAPABILITIES.includes(item as PluginCapability))) throw new ProtocolError('INVALID_FIELD', 'plugin capabilities are invalid');
+  if (!Array.isArray(object.permissions) || object.permissions.some(item => !PLUGIN_PERMISSIONS.includes(item as PluginPermission))) throw new ProtocolError('INVALID_FIELD', 'plugin permissions are invalid');
+  if (!Array.isArray(object.schemas)) throw new ProtocolError('INVALID_FIELD', 'plugin schemas are required');
   const schemas = object.schemas.map((schema, index) => {
-    if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) throw new Error(`schemas[${index}] must be an object`);
-    const item = schema as Record<string, unknown>;
-    const unknownSchemaFields = Object.keys(item).filter(key => !['schema_id', 'schema_version'].includes(key));
-    if (unknownSchemaFields.length > 0) throw new Error(`schemas[${index}] contains unsupported fields: ${unknownSchemaFields.join(', ')}`);
+    const item = record(schema, `schemas[${index}]`);
+    rejectUnknown(item, ['schema_id', 'schema_version'], `schemas[${index}]`);
     return {schema_id: text(item.schema_id, `schemas[${index}].schema_id`), schema_version: text(item.schema_version, `schemas[${index}].schema_version`, 64)};
   });
   return {
@@ -87,3 +78,4 @@ export function validatePluginDescriptor(value: unknown): TracePluginDescriptor 
     entrypoint: text(object.entrypoint, 'entrypoint', 1000),
   };
 }
+import {ProtocolError, rejectUnknown, requireObject as record, requireText as text} from '../../../core/protocol/src/index.js';

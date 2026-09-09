@@ -6,5 +6,5 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {".": {"types": "./dist/index.d.ts", "default": "./dist/index.js"}},
-  "dependencies": {"@trace/integration-zhihu-precedent": "workspace:*"}
+  "dependencies": {"@trace/integration-zhihu-precedent": "workspace:*", "@trace/protocol": "workspace:*"}
 }

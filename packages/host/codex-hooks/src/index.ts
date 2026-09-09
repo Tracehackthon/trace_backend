@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {requireText as text} from '../../../core/protocol/src/index.js';
 
 export const CODEX_HOOK_INSTALLER_ID = 'trace.codex-hooks-installer' as const;
 export const CODEX_HOOK_INSTALLER_VERSION = '0.1.0' as const;
@@ -10,7 +11,6 @@ export interface CodexHooksConfig {hooks?: Record<string, unknown[]>; [key: stri
 export interface CodexHookPreview {hooks_file: string; before_hash: string; after_hash: string; managed_events: string[]; legacy_commands: string[]; unrelated_hooks_preserved: boolean;}
 export interface CodexHookReceipt {protocol_id: 'trace.codex-hook-install'; protocol_version: '0.1.0'; status: 'installed' | 'rolled_back'; hooks_file: string; before_hash: string; after_hash: string; backup_file: string | null; managed_events: string[]; installed_at: string;}
 
-function text(value: unknown, field: string, max = 2000): string { if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new Error(`${field} must be a non-empty string of at most ${max} characters`); return value.trim(); }
 function absolute(value: string, field: string): string { const result = path.resolve(text(value, field)); if (!path.isAbsolute(result)) throw new Error(`${field} must be absolute`); return result; }
 function hash(value: string): string { return createHash('sha256').update(value, 'utf8').digest('hex'); }
 function noSymlink(target: string): void { let cursor = target; while (true) { try { if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`Symlink is not allowed: ${target}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } const parent = path.dirname(cursor); if (parent === cursor) return; cursor = parent; } }

@@ -1,4 +1,4 @@
-import {ProtocolError} from './change-set.js';
+import {ProtocolError} from './error.js';
 
 export interface StringListOptions {
   min?: number;

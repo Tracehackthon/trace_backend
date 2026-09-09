@@ -8,7 +8,7 @@
 
 | 领域 | TS 位置 | 状态 | 证据/边界 |
 |---|---|---|---|
-| 协议、错误、状态门槛与 upcaster registry | `packages/core/protocol` | 已迁移并验证（首条升级链） | 共享 object/text/list/unknown-field primitive + deterministic malformed corpus；领域语义仍在领域包；显式 directed in-memory upcaster registry；目前已接入 Continuity `0.1.0 → 0.2.0`，其他协议仍严格拒绝不支持版本 |
+| 协议、错误、状态门槛与 upcaster registry | `packages/core/protocol` | 已迁移并验证（首条升级链） | 所有 public contract、adapter 与 host installer 复用 `requireText` / `requireObject` / `requireStringList` / `rejectUnknown`；领域语义仍在领域包，且由 adoption 回归防止本地副本漂移；显式 directed in-memory upcaster registry；目前已接入 Continuity `0.1.0 → 0.2.0`，其他协议仍严格拒绝不支持版本 |
 | 数据 envelope、lineage、hash、revision | `packages/core/data` | 已迁移并验证 | 合成全链、缺父、篡改、revision gap 回归 |
 | JSONL/SQLite 存储 | `packages/core/storage` | 已迁移并验证 | SQLite 分表；JSONL 兼容；identity-targeted 热写入、per-identity revision gap 守卫、WAL + 5 秒 busy timeout、CAS 和只读 doctor |
 | Change Set | `packages/core/change-set` | 已迁移并验证 | proposed → analyzed → validated → adopted → promoted/rollback |

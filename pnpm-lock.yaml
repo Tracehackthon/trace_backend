@@ -157,6 +157,9 @@ importers:
 
   packages/core/observability:
     dependencies:
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@trace/storage':
         specifier: workspace:*
         version: link:../storage
@@ -213,9 +216,17 @@ importers:
 
   packages/core/storage: {}
 
-  packages/host/codex-hooks: {}
+  packages/host/codex-hooks:
+    dependencies:
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
 
-  packages/host/codex-skill: {}
+  packages/host/codex-skill:
+    dependencies:
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
 
   packages/integration/deepseek-harness: {}
 
@@ -224,6 +235,9 @@ importers:
       '@trace/data':
         specifier: workspace:*
         version: link:../../core/data
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
 
   packages/integration/zhihu-precedent:
     dependencies:
@@ -233,14 +247,24 @@ importers:
       '@trace/precedent':
         specifier: workspace:*
         version: link:../../core/precedent
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
 
   packages/integration/zhihu-transport:
     dependencies:
       '@trace/integration-zhihu-precedent':
         specifier: workspace:*
         version: link:../zhihu-precedent
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
 
-  packages/plugin/contract: {}
+  packages/plugin/contract:
+    dependencies:
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
 
   packages/sdk/protocol:
     dependencies:

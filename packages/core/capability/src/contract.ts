@@ -1,4 +1,4 @@
-import {ProtocolError, type RecordRef} from '../../protocol/src/index.js';
+import {ProtocolError, rejectUnknown, requireObject as record, requireText as text, type RecordRef} from '../../protocol/src/index.js';
 import {CapabilityContentContract, CapabilityProvenance, validateCapabilityContentContract, validateCapabilityProvenance} from './content.js';
 
 export const CAPABILITY_PROTOCOL_ID = 'trace.capability-publish' as const;
@@ -85,11 +85,6 @@ export interface CapabilityReceipt {
   updated_at: string;
 }
 
-function text(value: unknown, field: string, max = 500): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new ProtocolError('INVALID_FIELD', `${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
-
 function safeRelative(value: unknown, field: string): string {
   const relative = text(value, field, 1000);
   if (relative.includes('\\') || relative.startsWith('/') || relative.split('/').some(part => part === '' || part === '.' || part === '..')) throw new ProtocolError('INVALID_PATH', `${field} must be a relative forward-slash path without traversal`);
@@ -100,16 +95,6 @@ function absolute(value: unknown, field: string): string {
   const candidate = text(value, field, 2000);
   if (!candidate.match(/^[A-Za-z]:[\\/]|^\\\\|^\//)) throw new ProtocolError('INVALID_PATH', `${field} must be absolute`);
   return candidate;
-}
-
-function record(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProtocolError('INVALID_FIELD', `${field} must be an object`);
-  return value as Record<string, unknown>;
-}
-
-function rejectUnknown(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
-  const unknown = Object.keys(value).filter(key => !allowed.includes(key));
-  if (unknown.length > 0) throw new ProtocolError('UNKNOWN_FIELD', `${field} contains unsupported fields: ${unknown.join(', ')}`);
 }
 
 function sameRecordRef(left: RecordRef | undefined, right: RecordRef | undefined): boolean {

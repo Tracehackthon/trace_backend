@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {ProtocolError} from '../../../core/protocol/src/index.js';
+import {ProtocolError, rejectUnknown, requireObject as object, requireStringList, requireText as text} from '../../../core/protocol/src/index.js';
 
 export const TEMPLATE_PROTOCOL_ID = 'trace.template-bundle' as const;
 export const TEMPLATE_PROTOCOL_VERSION = '0.1.0' as const;
@@ -44,21 +44,6 @@ export interface TemplateInstanceLock {
   selected_source?: {source_id: string; profile_hash: string; scope_type: 'personal' | 'project' | 'team' | 'domain'};
 }
 
-function text(value: unknown, field: string, max = 240): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new ProtocolError('INVALID_FIELD', `${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
-
-function object(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProtocolError('INVALID_FIELD', `${field} must be an object`);
-  return value as Record<string, unknown>;
-}
-
-function rejectUnknown(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
-  const unknown = Object.keys(value).filter(key => !allowed.includes(key));
-  if (unknown.length > 0) throw new ProtocolError('UNKNOWN_FIELD', `${field} contains unsupported fields: ${unknown.join(', ')}`);
-}
-
 function refs(value: unknown, field: string): TemplateRef[] {
   if (!Array.isArray(value) || value.length > 256) throw new ProtocolError('INVALID_FIELD', `${field} must contain at most 256 items`);
   return value.map((raw, index) => {
@@ -80,10 +65,7 @@ export function validateTemplateManifest(value: unknown): TemplateBundleManifest
   if (typeof activation.require_user_confirmation !== 'boolean') throw new ProtocolError('INVALID_FIELD', 'activation.require_user_confirmation must be boolean');
   const permissions = object(item.permissions, 'permissions');
   rejectUnknown(permissions, ['read_scopes', 'write_scopes', 'network_providers'], 'permissions');
-  const list = (value: unknown, field: string): string[] => {
-    if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string')) throw new ProtocolError('INVALID_FIELD', `${field} must be a list of strings`);
-    return value.map(entry => text(entry, field, 1000));
-  };
+  const list = (value: unknown, field: string): string[] => requireStringList(value, field, {max: 256, itemMax: 1000});
   const protocolMap = object(item.protocols, 'protocols');
   if (Object.keys(protocolMap).length === 0 || Object.entries(protocolMap).some(([key, value]) => key.trim().length === 0 || typeof value !== 'string' || value.trim().length === 0)) throw new ProtocolError('INVALID_FIELD', 'protocols must map non-empty protocol ids to non-empty ranges');
   let cognitiveSource: TemplateBundleManifest['cognitive_source'];

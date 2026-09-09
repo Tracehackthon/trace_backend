@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import type {CreateDataRecord} from '../../../core/data/src/index.js';
+import {requireText as text} from '../../../core/protocol/src/index.js';
 
 export const MYWIKI_SOURCE_ID = 'trace.mywiki-formal-source' as const;
 export const MYWIKI_SOURCE_VERSION = '0.1.0' as const;
@@ -55,10 +56,6 @@ export interface MyWikiWriteReceipt {
   applied_at: string;
 }
 
-function text(value: unknown, field: string, max = 1000): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new Error(`${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
 function sha(value: string): string { return createHash('sha256').update(value, 'utf8').digest('hex'); }
 function inside(root: string, target: string): boolean { return target === root || target.startsWith(`${root}${path.sep}`); }
 function safeRelative(value: string): string {

@@ -795,8 +795,8 @@
     },
     {
       "path": "tests/project_init.test.mjs",
-      "sha256": "f7914d588009a25f24aa41d60760d6898edc8348dcf042635fcf6d7db61a38bb",
-      "bytes": 2737
+      "sha256": "cc875194d73d691d427027bcfcbe4eb2934d35a5855c5a41ca4931f5dbf3c7b8",
+      "bytes": 3517
     },
     {
       "path": "tests/python/test_sdk.py",
@@ -839,5 +839,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T12:35:20.091Z"
+  "created_at": "2026-09-09T12:37:03.452Z"
 }

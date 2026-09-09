@@ -37,3 +37,14 @@ test('project init external mode keeps the external root in local profile only',
   const lock = JSON.parse(fs.readFileSync(path.join(project, '.trace', 'instance', 'trace.lock.json'), 'utf8'));
   assert.deepEqual(lock.selected_source, {source_id: 'external-source', profile_hash: lock.selected_source.profile_hash, scope_type: 'personal'});
 });
+
+test('project init refuses a non-empty existing .trace without leaving staging files', () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-project-'));
+  fs.mkdirSync(path.join(project, '.trace'), {recursive: true});
+  fs.writeFileSync(path.join(project, '.trace', 'marker.txt'), 'keep');
+  const run = spawnSync(process.execPath, [cli, 'project', 'init', '--project-dir', project, '--user-id', 'test-user', '--template', 'trace.codex-empty', '--confirm', 'true'], {encoding: 'utf8'});
+  assert.notEqual(run.status, 0);
+  assert.match(run.stdout, /INSTANCE_EXISTS/);
+  assert.deepEqual(fs.readdirSync(project).filter(name => name.startsWith('.trace-init-')), []);
+  assert.equal(fs.readFileSync(path.join(project, '.trace', 'marker.txt'), 'utf8'), 'keep');
+});

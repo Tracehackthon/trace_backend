@@ -88,8 +88,8 @@
     },
     {
       "path": "AUDIT_20260909.md",
-      "sha256": "7daef681d0192ce420737760bb885c2617ba677e46d06d277e8bde365d8920f0",
-      "bytes": 6676
+      "sha256": "732fd3df512aa79aac6fb0da16551c50322bb71a150aab479c1e1c8332e822a4",
+      "bytes": 6710
     },
     {
       "path": "GIT_REMOTE_SETUP.md",
@@ -98,8 +98,8 @@
     },
     {
       "path": "MIGRATION_STATUS.md",
-      "sha256": "179ebbf5af91d466b5e3cc310878186b9b5dd0075f7c7d4dfb22e1be139b66ac",
-      "bytes": 8454
+      "sha256": "917429cc43d63de4f88a426af54e6f37e785253a9520e87a15c38eee65e32eb6",
+      "bytes": 8488
     },
     {
       "path": "mise.toml",
@@ -123,8 +123,8 @@
     },
     {
       "path": "native/README.md",
-      "sha256": "485046b5a2c666c35535c349afc0f31dafddec91a125d4deeaaf1efeefc6b342",
-      "bytes": 2253
+      "sha256": "daba640b97da30a44994a14ef3f85aa1097a2e74e80d49bb00b70b448f12bc63",
+      "bytes": 2270
     },
     {
       "path": "package.json",
@@ -323,8 +323,8 @@
     },
     {
       "path": "packages/core/operations/README.md",
-      "sha256": "9ea598d8fa93eb354d09cfeb0ae5205496bcff84a150e4b4b33443d889a37037",
-      "bytes": 448
+      "sha256": "6f15ea1c5b31e6bb7f69ff613b84ba9201addb879f05e4877a129e3ce3398ed8",
+      "bytes": 465
     },
     {
       "path": "packages/core/operations/src/index.ts",
@@ -418,8 +418,8 @@
     },
     {
       "path": "packages/core/storage/README.md",
-      "sha256": "01c5636e10425ca707e5bbd2c0c35984aefdcdea3f6941985e2d2809191aff33",
-      "bytes": 945
+      "sha256": "dc96d35955591c867d0981cb510be3eb1cf6ac4aa844de9e04b4aea06121f30b",
+      "bytes": 963
     },
     {
       "path": "packages/core/storage/src/index.ts",
@@ -433,8 +433,8 @@
     },
     {
       "path": "packages/core/storage/src/sqlite-driver.ts",
-      "sha256": "e699225ec941507cec786b0069dd656f981cc099b5fef89e19a1a7c60156902a",
-      "bytes": 12388
+      "sha256": "ad74454f3e4b2f62ba9f7a34ac89b4c8fc94ddb5e4dc3e2ff69f25d6227ef272",
+      "bytes": 12401
     },
     {
       "path": "packages/core/storage/src/sqlite.ts",
@@ -673,8 +673,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "44b8e4608e1370e18939a87b8c7907e11c424680076ef559a39d8e9da1a9365c",
-      "bytes": 11406
+      "sha256": "f6201cb03a930cb6708d2059a2f9eb3c213d8034f5169ab24c63b20843494cea",
+      "bytes": 11424
     },
     {
       "path": "schemas/README.md",
@@ -1032,5 +1032,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T14:34:56.996Z"
+  "created_at": "2026-09-09T14:37:36.936Z"
 }

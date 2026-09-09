@@ -9,7 +9,7 @@ Native 是运行时分发边界，不是领域逻辑。发行包仍由 TypeScrip
 - `launcher/trace-runtime.mjs`：用当前 Node 启动发行包内的 `dist/apps/cli/src/main.js`，设置 `TRACE_RUNTIME_ROOT`，透传参数和退出码；
 - `launcher/trace-runtime.cmd`：Windows 的薄包装；
 - `install.mjs`：校验 `release-manifest.json` 中每个文件的 SHA-256/字节数，再写入 staging 目录并原子替换目标。替换前保留 `.previous-*`，安装回执写在目标目录内；默认拒绝覆盖，必须显式 `--replace`。
-- 发行包同时 materialize 纯 JS/WASM `sql.js` 及其运行资产。Node 22–24.1 的 runtime 默认先使用它，避免加载实验性的 `node:sqlite`，不依赖 node-gyp、预编译二进制或本机编译器；Node `>=24.2.0` 默认使用稳定内置 driver。`release-manifest.json.sqlite_driver_bundle` 记录该 fallback 身份。
+- 发行包同时 materialize 纯 JavaScript `sql.js`（asm build）及其运行资产。Node 22–24.1 的 runtime 默认先使用它，避免加载实验性的 `node:sqlite`，不依赖 node-gyp、预编译二进制或本机编译器；Node `>=24.2.0` 默认使用稳定内置 driver。`release-manifest.json.sqlite_driver_bundle` 记录该 fallback 身份。
 
 ```text
 corepack pnpm package -- --out C:\abs\trace-release

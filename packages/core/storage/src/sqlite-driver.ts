@@ -60,7 +60,7 @@ interface SqlJsModule {
 
 const requireFromHere = createRequire(import.meta.url);
 const sqlJsFactory = requireFromHere('sql.js/dist/sql-asm.js') as () => Promise<SqlJsModule>;
-// The asm build is an audited, pure-JavaScript/WASM SQLite fallback. Top-level
+// The selected sql.js asm build is audited and has no native node-gyp dependency. Top-level
 // await completes before any store constructor runs, preserving the synchronous
 // public store API while never loading node:sqlite on Node 22–24.1.
 const SQL = await sqlJsFactory();

@@ -10,7 +10,7 @@
 |---|---|---|---|
 | 协议、错误、状态门槛与 upcaster registry | `packages/core/protocol` | 已迁移并验证 | 所有 public contract、adapter 与 host installer 复用 `requireText` / `requireObject` / `requireStringList` / `rejectUnknown`；Change Set、Data、Context、Continuity、runtime event、template/plugin/capability/candidate contract 都有显式 `0.1.0 → 0.2.0` directed in-memory path；无完整路径仍 fail-closed |
 | 数据 envelope、lineage、hash、revision | `packages/core/data` | 已迁移并验证 | `0.1.0 → 0.2.0` 先校验历史 hash 后再生成内存视图；合成全链、缺父、篡改、revision gap 回归；新增不含正文的 prompt capture proposal kind |
-| JSONL/SQLite 存储 | `packages/core/storage` | 已迁移并验证 | SQLite 分表；JSONL 兼容；identity-targeted 热写入、per-identity revision gap 守卫、WAL + 5 秒 busy timeout、CAS 和只读 doctor；Node 22–24.1 使用发行包内纯 JS/WASM `sql.js` fallback（受控本地文件锁与原子提交），Node >=24.2 使用稳定 `node:sqlite` |
+| JSONL/SQLite 存储 | `packages/core/storage` | 已迁移并验证 | SQLite 分表；JSONL 兼容；identity-targeted 热写入、per-identity revision gap 守卫、WAL + 5 秒 busy timeout、CAS 和只读 doctor；Node 22–24.1 使用发行包内纯 JavaScript `sql.js`（asm build）fallback（受控本地文件锁与原子提交），Node >=24.2 使用稳定 `node:sqlite` |
 | Change Set | `packages/core/change-set` | 已迁移并验证 | `0.1.0 → 0.2.0` in-memory upcast；proposed → analyzed → validated → adopted → promoted/rollback |
 | Continuity / 沉淀与激活回执 | `packages/core/continuity` | 已迁移并验证 | `0.2.0` 顶层 correlation/causation；主题、讨论回合、用户可见 receipt；旧 `0.1.0` 只读 upcast、不改历史 revision；不保存完整转录 |
 | Runtime observability | `packages/core/observability` | 已迁移并验证（Codex activation） | 同库 `trace_events`；correlation/causation、receipt refs、耗时、错误码；没有通用 payload，禁止 prompt/source body/secret/tool args 入库；`doctor --correlation-id` 查询 |
@@ -23,7 +23,7 @@
 | TypeScript SDK / JSONL RPC | `packages/sdk` | 已迁移并验证 | 与 runtime 相同方法和结果语义 |
 | Python SDK | `python/sdk` | 仅保留薄适配并验证 | 只启动/调用 TS runtime RPC；`uv.lock` 已固定；不包含旧 Python runtime |
 | canonical JSON Schema | `schemas/` | 已迁移并验证 | JSON Schema 2020-12 结构契约；语义仍由 runtime validator 守护 |
-| native 分发边界 | `native/` | 首条可用实现已验证 | manifest-hash installer、Node launcher、Windows `.cmd`、发行内纯 JS/WASM `sql.js` fallback；还不是 SEA/签名二进制 |
+| native 分发边界 | `native/` | 首条可用实现已验证 | manifest-hash installer、Node launcher、Windows `.cmd`、发行内纯 JavaScript `sql.js`（asm build）fallback；还不是 SEA/签名二进制 |
 | 候选前例协议 | `packages/core/precedent` + `packages/core/capability-candidate` | 已迁移并验证 | 宿主无关 payload、证据 refs、Change Set lineage；前例不能绕过语义候选直接发布 |
 | 知乎候选前例 adapter | `packages/integration/zhihu-precedent` | 独立拆包并验证 | 有界知乎 API-like/fixture 输入 → source_snapshot/candidate_precedent；不负责 HTTP transport 或 adoption |
 | 知乎实时 API transport | `packages/integration/zhihu-transport` | 已迁移并验证 | Node 22 fetch；官方 Access Secret + `X-Request-Timestamp`；平台搜索/全局搜索/热榜/用户接口及黑客松内容接口；无默认重试；响应码/密钥泄漏门禁 |

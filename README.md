@@ -23,7 +23,7 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm check:all
 ```
 
-需要 Node.js `>=22.13.0` 和 pnpm `>=10.34.5`。SQLite driver 默认是可审计的 `auto`：Node `>=24.2.0` 使用稳定的 `node:sqlite`；Node 22–24.1 优先使用随发行包提供的纯 JS/WASM `sql.js`，因此不会加载 `node:sqlite` 或产生它的 experimental warning。可用 `TRACE_SQLITE_DRIVER=auto|node|sql.js` 显式选择；强制 `node` 在 Node 24.2 前会在 doctor 输出 driver warning。`check:all` 包含 TypeScript 类型检查、模板资源审计、TS/SQLite 集成测试以及薄 Python SDK 测试。
+需要 Node.js `>=22.13.0` 和 pnpm `>=10.34.5`。SQLite driver 默认是可审计的 `auto`：Node `>=24.2.0` 使用稳定的 `node:sqlite`；Node 22–24.1 优先使用随发行包提供的纯 JavaScript `sql.js`（asm build），因此不会加载 `node:sqlite` 或产生它的 experimental warning。可用 `TRACE_SQLITE_DRIVER=auto|node|sql.js` 显式选择；强制 `node` 在 Node 24.2 前会在 doctor 输出 driver warning。`check:all` 包含 TypeScript 类型检查、模板资源审计、TS/SQLite 集成测试以及薄 Python SDK 测试。
 
 ## 为一个项目建立本地边界
 

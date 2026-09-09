@@ -94,13 +94,13 @@
     },
     {
       "path": "docs/architecture.md",
-      "sha256": "441abfd3e97dffe9d7a4d4a83c86a788974bafa58566885feb5fe18138592f95",
-      "bytes": 1630
+      "sha256": "9c88459580206a17f9d284ac4f22a7ebb04c930b70fe58cc1a0fedd3180c5ff3",
+      "bytes": 2043
     },
     {
       "path": "docs/daily-workflow.md",
-      "sha256": "bfaaf8112d71fbf29b772d10da393d81a1fba817f4f55f9f8d19cfd06987be88",
-      "bytes": 1793
+      "sha256": "5acb16d0e6493244fdc6aefb5776375234e72ad41c8e046ac0fc2124488dcc01",
+      "bytes": 2165
     },
     {
       "path": "docs/getting-started.md",
@@ -114,8 +114,8 @@
     },
     {
       "path": "docs/README.md",
-      "sha256": "925d5f074f77d4f1b2cabdde3288b52cb81b262543d7d69a7649f62f55f0408a",
-      "bytes": 916
+      "sha256": "7fde5c02dc6d14a744a05507b55f2206f4fbbbd800095f505cf92d6a15b8a6f9",
+      "bytes": 1264
     },
     {
       "path": "GIT_REMOTE_SETUP.md",
@@ -709,8 +709,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "6f421c6ba35600022b46e4888f9c211292f85f9bccc42e7c3146dccef406be0b",
-      "bytes": 3009
+      "sha256": "64b89eba30e1804b747df70310bce539a15ff685f732bb5066bd9a5a99d33eb8",
+      "bytes": 7676
     },
     {
       "path": "schemas/README.md",
@@ -1073,5 +1073,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T15:01:53.315Z"
+  "created_at": "2026-09-09T15:10:30.451Z"
 }

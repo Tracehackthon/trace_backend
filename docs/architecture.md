@@ -1,9 +1,9 @@
 # 产品边界与架构
 
-Trace 的产品入口和数据底座必须分开。
+Trace 的架构不是从“数据库、RAG 或 hook”倒推出来的，而是服务于同一条产品生命周期：**候选认知变化 → 用户采用 → 能力 / 激活 → 后续验证、限制或撤回**。
 
 ```text
-用户层：init / status / inbox / review / sources / abilities / doctor / backup
+用户层：看见工作线、来源、候选、采用状态、能力、健康与恢复
     ↓
 宿主层：Codex hooks、SDK JSONL RPC、未来 desktop adapter
     ↓
@@ -12,7 +12,7 @@ Trace 的产品入口和数据底座必须分开。
 
 ## 用户层
 
-用户看到的是项目、认知源、候选、能力、健康与恢复。默认 CLI 从最近的 `.trace/` 自动发现项目，避免重复填写 SQLite 路径、lineage 或 producer。
+用户看到的是项目、认知源、候选、能力、健康与恢复；更重要的是能知道：本轮发生了什么变化、什么只是候选、什么尚未保存、下一步怎样继续。默认 CLI 从最近的 `.trace/` 自动发现项目，避免重复填写 SQLite 路径、lineage 或 producer。
 
 ## 宿主层
 
@@ -23,6 +23,7 @@ Desktop 与 DeepSeek Harness 仍是明确未实现的宿主边界：目录存在
 ## 核心层
 
 - Context 只提供受控引用和读取指针，不注入整库正文；
+- Continuity 记录跨会话工作线、重要变化、激活 / 沉淀回执，而不把完整聊天伪装为认知源；
 - Data Ledger 维护 hash、revision、lineage 和 fail-closed 验证；
 - Change Set 管理候选、验证、采纳、发布与回滚；
 - Prompt case 必须经过 transient → proposal → user-approved capture；

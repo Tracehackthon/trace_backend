@@ -10,7 +10,7 @@ Trace Runtime 是一个可安装的 TypeScript 基座：它负责把「上下文
 - **模板不是认知源。** 模板只提供协议、能力入口、上下文治理和冷启动结构；真正的语义内容必须由用户选择或在项目中逐步沉淀。
 - **所有写入可见且需要确认。** 候选、能力发布、正式 Wiki 写入和 Codex hooks/Skill 替换都有 proposal、版本、备份和回滚边界。
 - **高频 hook 不重扫整库。** SQLite 热写入只核验当前 identity 的 revision 历史；全库 integrity/schema/revision 检查保留在 `doctor`，不会让每轮 Codex 激活随着历史记录线性退化。
-- **每轮运行都有安全的关联追踪。** Codex activation 写入 `correlation_id`、receipt reference、耗时和错误码；事件表没有原始 prompt、页面正文、密钥或工具参数字段。
+- **每轮运行都有安全的关联追踪。** Codex hook 仅临时用原始 prompt 检索已授权读取指针；它不会把 prompt 写进 thread、receipt、event 或 hook 输出。事件表只写 `correlation_id`、receipt reference、耗时和错误码，不含页面正文、密钥或工具参数。
 
 ## 安装与检查
 

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {DatabaseSync} from 'node:sqlite';
 
 const root = path.resolve(process.cwd());
 const cli = path.join(root, 'dist', 'apps', 'cli', 'src', 'main.js');
@@ -51,4 +52,26 @@ test('Codex trigger can switch to the TypeScript runtime without a Python hook',
   assert.equal(report.correlation_trace.events.length, 1);
   assert.equal(report.correlation_trace.events[0].event_id, output.trace_event.event_id);
   assert.equal(JSON.stringify(report.correlation_trace).includes('SENSITIVE_PROMPT_MARKER'), false, 'doctor correlation output must remain provenance-only');
+});
+
+test('Codex hook uses a raw prompt only transiently and never persists it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-hook-privacy-'));
+  const database = path.join(dir, 'trace.sqlite');
+  const marker = 'RAW_PROMPT_MUST_NOT_BE_PERSISTED_4b7c25';
+  const result = spawnSync(process.execPath, [cli, 'codex', 'hook-stdio', '--sqlite-state-file', database], {
+    encoding: 'utf8',
+    input: JSON.stringify({hook_event_name: 'UserPromptSubmit', session_id: 'hook-privacy-session', prompt: marker, cwd: dir}),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.includes(marker), false, 'hook response must not echo the raw prompt');
+
+  const db = new DatabaseSync(database);
+  try {
+    const continuity = db.prepare('SELECT payload FROM continuity_records').all();
+    const events = db.prepare('SELECT * FROM trace_events').all();
+    assert.equal(JSON.stringify(continuity).includes(marker), false, 'continuity state must not retain the raw prompt');
+    assert.equal(JSON.stringify(events).includes(marker), false, 'runtime events must not retain the raw prompt');
+  } finally {
+    db.close();
+  }
 });

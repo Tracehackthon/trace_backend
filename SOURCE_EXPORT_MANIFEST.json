@@ -65,8 +65,8 @@
     },
     {
       "path": "apps/codex/src/index.ts",
-      "sha256": "7b8df584466cbf53eff53b61c131c0b7f83e5d3cd242975f46bd17f31455d6be",
-      "bytes": 8103
+      "sha256": "2ce8fd7d27fe3393dd1a6dbcf03eed3d8353def2075adb5c2e9e387ea76f3c3c",
+      "bytes": 8459
     },
     {
       "path": "apps/desktop/package.json",
@@ -85,8 +85,8 @@
     },
     {
       "path": "AUDIT_20260909.md",
-      "sha256": "0600cc4fface135502b05bc6ba2ddeb3a3728d0c477ffebaf558c67f40be055f",
-      "bytes": 6300
+      "sha256": "927930a2c9604a8d5b829ac8bf919bc233df0dfbe99f192e03206ff77df9132c",
+      "bytes": 6331
     },
     {
       "path": "GIT_REMOTE_SETUP.md",
@@ -645,8 +645,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "5a1ac689d8eaab7275acfc776494de7a1b9a3319eda90f8b7ae0e4ff3880cef6",
-      "bytes": 8757
+      "sha256": "874454f1a11fdbc2993cd83128229722128b1e76bea5c6f594b645f0fe2752df",
+      "bytes": 8855
     },
     {
       "path": "schemas/README.md",
@@ -815,8 +815,8 @@
     },
     {
       "path": "tests/codex_trigger.test.mjs",
-      "sha256": "e812940b43d2a6a7d4aedf00bbc03edd549b97e98e0f0052cca59bde075bcc51",
-      "bytes": 3228
+      "sha256": "1ce8a97aedab41c31e5d4aa5195e800d4d5bff420d73a2313f33a78c6aa457b1",
+      "bytes": 4439
     },
     {
       "path": "tests/data-chain.test.mjs",
@@ -924,5 +924,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T13:29:22.586Z"
+  "created_at": "2026-09-09T13:33:07.933Z"
 }

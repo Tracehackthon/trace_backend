@@ -117,7 +117,13 @@ export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntim
   const provider = sourceProfile === undefined ? undefined : new MyWikiSourceProvider(sourceProfile);
   const pages = provider === undefined || prompt.trim().length === 0 ? [] : provider.search(prompt, 8);
   const readPointers = pages.map(page => ({path: page.absolute_path, purpose: `读取正式认知源页面：${page.title}`, priority: 'should' as const, stop_condition: '只在当前问题需要时读取，并保留页面 revision/hash'}));
-  const event: CodexTurnStartedEvent = {event_type: 'codex.turn.started', thread_id: sessionId, purpose: eventName === 'SessionStart' ? 'Codex session activation' : 'Codex user prompt activation', summary: prompt || 'Codex lifecycle activation', source_refs: [], read_pointers: readPointers, forbidden_scopes: ['raw/**', 'unscoped-user-data/**'], max_tokens: 6000};
+  // Codex already owns the raw prompt. Trace may use it transiently to locate
+  // authorized read pointers, but must never turn it into a durable thread
+  // summary, receipt, event, or hook response.
+  const summary = eventName === 'SessionStart'
+    ? 'Codex session activation; no raw prompt is persisted by Trace.'
+    : 'Codex user prompt received; raw prompt is not persisted by Trace.';
+  const event: CodexTurnStartedEvent = {event_type: 'codex.turn.started', thread_id: sessionId, purpose: eventName === 'SessionStart' ? 'Codex session activation' : 'Codex user prompt activation', summary, source_refs: [], read_pointers: readPointers, forbidden_scopes: ['raw/**', 'unscoped-user-data/**'], max_tokens: 6000};
   const activation = activateCodexTurn(runtime, event);
   const visible = {trace: 'activation', source_profile: sourceProfile?.source_id ?? null, pages_considered: pages.map(page => ({path: page.relative_path, title: page.title, revision: page.revision, content_hash: page.content_hash})), pack_id: activation.pack.pack_id, correlation_id: activation.correlation_id, trace_event_id: activation.trace_event?.event_id ?? null, user_notice: activation.user_notice};
   return {hookSpecificOutput: {hookEventName: eventName, additionalContext: JSON.stringify(visible)}};

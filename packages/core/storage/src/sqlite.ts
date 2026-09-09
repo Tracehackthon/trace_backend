@@ -3,6 +3,8 @@ import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {StorageError, recordIdentity, type VersionedRecord, type VersionedStore} from './jsonl.js';
 
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
 function absolute(file: string): string {
   if (!path.isAbsolute(file)) throw new StorageError('INVALID_PATH', 'SQLite state file must be an absolute path');
   return path.resolve(file);
@@ -20,6 +22,13 @@ function stableJson(value: unknown): string {
   return encoded === undefined ? 'undefined' : encoded;
 }
 
+function writeError(error: unknown): StorageError {
+  if (error instanceof StorageError) return error;
+  const message = String(error);
+  if (/SQLITE_BUSY|database is locked|database is busy/i.test(message)) return new StorageError('SQLITE_BUSY', message);
+  return new StorageError('SQLITE_WRITE_FAILED', message);
+}
+
 /**
  * SQLite implementation of the same append-only versioned-store seam used by
  * JSONL. The database is a local product state store; protocol validation stays
@@ -35,6 +44,10 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
     this.db = new DatabaseSync(target);
     this.table = tableName(table);
     this.db.exec('PRAGMA journal_mode = WAL');
+    // WAL only allows readers to proceed while a writer holds the lock. A
+    // bounded busy timeout makes independent Codex/CLI processes wait for that
+    // writer instead of failing immediately with SQLITE_BUSY.
+    this.db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS ${this.table} (
       identity TEXT NOT NULL,
       revision INTEGER NOT NULL,
@@ -74,6 +87,22 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
     return latest;
   }
 
+  read(recordId: string, revision?: number): T | undefined {
+    if (!recordId) throw new StorageError('INVALID_IDENTITY', 'recordId must be non-empty');
+    // The hot path only scans revisions for the one identity being written. It
+    // therefore preserves the no-gap invariant without reparsing unrelated
+    // history on every Codex lifecycle event.
+    const rows = this.db.prepare(`SELECT identity, revision, payload FROM ${this.table} WHERE identity = ? ORDER BY revision`).all(recordId) as Array<{identity: string; revision: number; payload: string}>;
+    const records = rows.map(row => {
+      let value: T;
+      try { value = JSON.parse(row.payload) as T; } catch { throw new StorageError('INVALID_JSON', `Invalid JSON payload in SQLite table ${this.table}`); }
+      if (recordIdentity(value) !== row.identity || value.revision !== Number(row.revision)) throw new StorageError('ROW_PAYLOAD_MISMATCH', `SQLite row identity does not match payload in ${this.table}`);
+      return value;
+    });
+    for (let index = 0; index < records.length; index += 1) if (records[index]!.revision !== index + 1) throw new StorageError('REVISION_GAP', `Missing revision ${recordId}@${index + 1}`);
+    return revision === undefined ? records.at(-1) : records.find(item => item.revision === revision);
+  }
+
   private withWrite<TValue>(fn: () => TValue): TValue {
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -86,9 +115,8 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
     }
   }
 
-  private appendUnsafe(record: T): void {
+  private appendUnsafe(record: T, current = this.read(recordIdentity(record))): void {
     const id = recordIdentity(record);
-    const current = this.latest().find(item => recordIdentity(item) === id);
     if (!current && record.revision !== 1) throw new StorageError('INVALID_REVISION', 'The first revision must be 1');
     if (current && record.revision !== current.revision + 1) throw new StorageError('INVALID_REVISION', `Expected revision ${current.revision + 1}, found ${record.revision}`);
     this.db.prepare(`INSERT INTO ${this.table}(identity, revision, payload) VALUES (?, ?, ?)`).run(id, record.revision, JSON.stringify(record));
@@ -98,8 +126,7 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
     try {
       this.withWrite(() => this.appendUnsafe(record));
     } catch (error) {
-      if (error instanceof StorageError) throw error;
-      throw new StorageError('SQLITE_WRITE_FAILED', String(error));
+      throw writeError(error);
     }
   }
 
@@ -107,31 +134,29 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
     try {
       return this.withWrite(() => {
         const id = recordIdentity(record);
-        const existing = this.latest().find(item => recordIdentity(item) === id);
+        const existing = this.read(id);
         if (existing) return {record: existing, inserted: false};
-        this.appendUnsafe(record);
+        this.appendUnsafe(record, undefined);
         return {record, inserted: true};
       });
     } catch (error) {
-      if (error instanceof StorageError) throw error;
-      throw new StorageError('SQLITE_WRITE_FAILED', String(error));
+      throw writeError(error);
     }
   }
 
   compareAndSwap(recordId: string, expectedRevision: number, update: (current: T) => T): T {
     try {
       return this.withWrite(() => {
-        const current = this.latest().find(item => recordIdentity(item) === recordId);
+        const current = this.read(recordId);
         if (!current) throw new StorageError('NOT_FOUND', `Unknown versioned record: ${recordId}`);
         if (current.revision !== expectedRevision) throw new StorageError('REVISION_CONFLICT', `Expected revision ${expectedRevision}, found ${current.revision}`);
         const next = update(current);
         if (recordIdentity(next) !== recordIdentity(current) || next.revision !== current.revision + 1) throw new StorageError('INVALID_REVISION', 'Updates must increment exactly one revision and preserve record identity');
-        this.appendUnsafe(next);
+        this.appendUnsafe(next, current);
         return next;
       });
     } catch (error) {
-      if (error instanceof StorageError) throw error;
-      throw new StorageError('SQLITE_WRITE_FAILED', String(error));
+      throw writeError(error);
     }
   }
 

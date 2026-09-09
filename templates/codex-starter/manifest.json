@@ -9,7 +9,7 @@
     "trace.change-set": ">=0.2.0 <0.3.0",
     "trace.data-envelope": ">=0.1.0 <0.2.0",
     "trace.context-record": ">=0.1.0 <0.2.0",
-    "trace.continuity": ">=0.1.0 <0.2.0"
+    "trace.continuity": ">=0.1.0 <0.3.0"
   },
   "capabilities": [
     {"id": "agent-collaboration-governance", "version": "1.0.0"}

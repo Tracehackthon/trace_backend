@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {canonicalize, ProtocolError, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
+import {canonicalize, ProtocolError, rejectUnknown, requireObject, requireText, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
 
 export const DATA_PROTOCOL_ID = 'trace.data-envelope' as const;
 export const DATA_PROTOCOL_VERSION = '0.1.0' as const;
@@ -113,21 +113,6 @@ export const REQUIRED_PAYLOAD_FIELDS: Readonly<Record<DataKind, readonly string[
 };
 
 const MAX_PAYLOAD_CHARS = 4 * 1024 * 1024;
-
-function requireText(value: unknown, field: string, max = 512): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new ProtocolError('INVALID_FIELD', `${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
-
-function requireObject(value: unknown, field: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new ProtocolError('INVALID_FIELD', `${field} must be an object`);
-  return value as Record<string, unknown>;
-}
-
-function rejectUnknown(object: Record<string, unknown>, allowed: readonly string[], field: string): void {
-  const unknown = Object.keys(object).filter(key => !allowed.includes(key));
-  if (unknown.length > 0) throw new ProtocolError('UNKNOWN_FIELD', `${field} contains unsupported fields: ${unknown.join(', ')}`);
-}
 
 function requireIsoTimestamp(value: unknown, field: string): string {
   const text = requireText(value, field, 64);

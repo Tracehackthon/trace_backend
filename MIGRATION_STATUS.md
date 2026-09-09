@@ -8,15 +8,16 @@
 
 | 领域 | TS 位置 | 状态 | 证据/边界 |
 |---|---|---|---|
-| 协议、错误和状态门槛 | `packages/core/protocol` | 已迁移并验证 | 结构/语义 validator；协议身份写入记录 |
+| 协议、错误、状态门槛与 upcaster registry | `packages/core/protocol` | 已迁移并验证（首条升级链） | 共享 object/text/list/unknown-field primitive + deterministic malformed corpus；领域语义仍在领域包；显式 directed in-memory upcaster registry；目前已接入 Continuity `0.1.0 → 0.2.0`，其他协议仍严格拒绝不支持版本 |
 | 数据 envelope、lineage、hash、revision | `packages/core/data` | 已迁移并验证 | 合成全链、缺父、篡改、revision gap 回归 |
-| JSONL/SQLite 存储 | `packages/core/storage` | 已迁移并验证 | SQLite 分表；JSONL 兼容；CAS 和只读 doctor |
+| JSONL/SQLite 存储 | `packages/core/storage` | 已迁移并验证 | SQLite 分表；JSONL 兼容；identity-targeted 热写入、per-identity revision gap 守卫、WAL + 5 秒 busy timeout、CAS 和只读 doctor |
 | Change Set | `packages/core/change-set` | 已迁移并验证 | proposed → analyzed → validated → adopted → promoted/rollback |
-| Continuity / 沉淀与激活回执 | `packages/core/continuity` | 已迁移并验证 | 主题、讨论回合、用户可见 receipt；不保存完整转录 |
+| Continuity / 沉淀与激活回执 | `packages/core/continuity` | 已迁移并验证 | `0.2.0` 顶层 correlation/causation；主题、讨论回合、用户可见 receipt；旧 `0.1.0` 只读 upcast、不改历史 revision；不保存完整转录 |
+| Runtime observability | `packages/core/observability` | 已迁移并验证（Codex activation） | 同库 `trace_events`；correlation/causation、receipt refs、耗时、错误码；没有通用 payload，禁止 prompt/source body/secret/tool args 入库；`doctor --correlation-id` 查询 |
 | Activation Pack / 上下文边界 | `packages/core/context` | 已迁移并验证 | 来源引用、读取指针、预算、禁止范围；不拼宿主 prompt |
 | JSONL → SQLite migration | `packages/core/migration` | 已迁移并验证 | staging、源文件不改写、报告可回放 |
 | Capability Publisher | `packages/core/capability` + `packages/core/capability-candidate` | 已迁移并验证 | `candidate_precedent → capability_candidate → adopted → preview → stage → validate → publish(approval) → rollback`；逐文件哈希、目标形状、Skill 内容契约、候选 revision 和认知源 provenance 门禁 |
-| Codex adapter | `apps/codex` | 已迁移并验证（runtime 边界） | `codex.turn.started` → Activation Pack + activation receipt；未接 Codex UI hook |
+| Codex adapter | `apps/codex` | 已迁移并验证（runtime 边界） | `codex.turn.started` → Activation Pack + activation receipt + correlation event；未接 Codex UI hook |
 | doctor / backup / restore | `packages/core/operations`、`apps/cli` | 已迁移并验证 | integrity/schema/revision；VACUUM backup 清单；restore staging + previous target |
 | TypeScript SDK / JSONL RPC | `packages/sdk` | 已迁移并验证 | 与 runtime 相同方法和结果语义 |
 | Python SDK | `python/sdk` | 仅保留薄适配并验证 | 只启动/调用 TS runtime RPC；`uv.lock` 已固定；不包含旧 Python runtime |

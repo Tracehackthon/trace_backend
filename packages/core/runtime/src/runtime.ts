@@ -5,6 +5,7 @@ import {ContinuityLedger, type CreateDiscussionTurn, type CreateReceipt, type Cr
 import {ProtocolError, type ChangeSet, type CreateChangeSet, type UpdateChangeSet, type ChangeStatus} from '../../protocol/src/index.js';
 import type {CreateDataRecord, DataEnvelope, DataKind, UpdateDataRecord} from '../../data/src/index.js';
 import {buildCapabilityCandidateRecord, type CapabilityCandidateInput} from '../../capability-candidate/src/index.js';
+import {SqliteTraceEventStore, type CreateTraceEvent, type TraceEvent} from '../../observability/src/index.js';
 
 export interface TraceRuntimePaths {
   changeStateFile?: string;
@@ -21,6 +22,7 @@ export class TraceRuntime {
   readonly changes: ChangeSetService;
   readonly data: DataLedger;
   readonly continuity?: ContinuityLedger;
+  readonly events?: SqliteTraceEventStore;
 
   constructor(paths: TraceRuntimePaths) {
     if (!paths.sqliteStateFile && (!paths.changeStateFile || !paths.dataStateFile)) throw new StorageError('INVALID_PATH', 'TraceRuntime requires either sqliteStateFile or both changeStateFile and dataStateFile');
@@ -40,6 +42,7 @@ export class TraceRuntime {
       const continuityStore = paths.sqliteStateFile ? new SqliteVersionedStore<ContinuityEnvelope>(paths.sqliteStateFile, 'continuity_records') : new AppendOnlyStore<ContinuityEnvelope>(paths.continuityStateFile!);
       this.continuity = new ContinuityLedger(continuityStore);
     }
+    if (paths.sqliteStateFile) this.events = new SqliteTraceEventStore(paths.sqliteStateFile);
   }
 
   createChange(input: CreateChangeSet) {
@@ -84,5 +87,19 @@ export class TraceRuntime {
   appendDiscussionTurn(input: CreateDiscussionTurn) { return this.requireContinuity().appendTurn(input); }
   createReceipt(input: CreateReceipt) { return this.requireContinuity().createReceipt(input); }
   listContinuity(threadId?: string) { return this.requireContinuity().list(threadId); }
+  recordTraceEvent(input: CreateTraceEvent): TraceEvent {
+    if (!this.events) throw new StorageError('TRACE_EVENTS_UNAVAILABLE', 'Trace event storage requires sqliteStateFile');
+    return this.events.record(input);
+  }
+  listTraceEvents(correlationId: string): TraceEvent[] {
+    if (!this.events) throw new StorageError('TRACE_EVENTS_UNAVAILABLE', 'Trace event storage requires sqliteStateFile');
+    return this.events.byCorrelation(correlationId);
+  }
+  close(): void {
+    this.changes.store.close?.();
+    this.data.store.close?.();
+    this.continuity?.store.close?.();
+    this.events?.close();
+  }
 }
 

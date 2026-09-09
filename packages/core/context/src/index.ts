@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {ProtocolError} from '../../protocol/src/index.js';
+import {ProtocolError, rejectUnknown, requireObject as object, requireText as text} from '../../protocol/src/index.js';
 
 export const CONTEXT_PROTOCOL_ID = 'trace.context-record' as const;
 export const CONTEXT_PROTOCOL_VERSION = '0.1.0' as const;
@@ -44,21 +44,6 @@ export interface BuildActivationPackInput {
   budget?: {max_tokens?: number; max_sources?: number};
   forbidden_scopes?: string[];
   required_user_action?: string;
-}
-
-function text(value: unknown, field: string, max = 2000): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new ProtocolError('INVALID_FIELD', `${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
-
-function object(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProtocolError('INVALID_FIELD', `${field} must be an object`);
-  return value as Record<string, unknown>;
-}
-
-function rejectUnknown(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
-  const unknown = Object.keys(value).filter(key => !allowed.includes(key));
-  if (unknown.length > 0) throw new ProtocolError('UNKNOWN_FIELD', `${field} contains unsupported fields: ${unknown.join(', ')}`);
 }
 
 function refs(value: unknown): ContextSourceRef[] {

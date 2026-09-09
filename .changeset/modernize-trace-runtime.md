@@ -1,5 +1,8 @@
 ---
 "@trace/runtime": minor
+"@trace/storage": minor
+"@trace/observability": minor
+"@trace/continuity": minor
 "@trace/core-capability": minor
 "@trace/core-capability-candidate": minor
 "@trace/core-operations": minor

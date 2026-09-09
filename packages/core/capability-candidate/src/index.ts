@@ -1,5 +1,5 @@
 import type {CreateDataRecord, DataClassification, DataEnvelope, DataOrigin, DataProducer} from '../../data/src/index.js';
-import {ProtocolError, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
+import {ProtocolError, rejectUnknown, requireObject as object, requireStringList, requireText as text, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
 
 export const CAPABILITY_CANDIDATE_PROTOCOL_ID = 'trace.capability-candidate' as const;
 export const CAPABILITY_CANDIDATE_PROTOCOL_VERSION = '0.1.0' as const;
@@ -107,26 +107,8 @@ export interface CapabilityCandidateEnvelopeRef {
   revision: number;
 }
 
-function object(value: unknown, field: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new ProtocolError('INVALID_FIELD', `${field} must be an object`);
-  return value as Record<string, unknown>;
-}
-
-function rejectUnknown(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
-  const unknown = Object.keys(value).filter(key => !allowed.includes(key));
-  if (unknown.length > 0) throw new ProtocolError('UNKNOWN_FIELD', `${field} contains unsupported fields: ${unknown.join(', ')}`);
-}
-
-function text(value: unknown, field: string, max = 4000): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new ProtocolError('INVALID_FIELD', `${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
-
 function list(value: unknown, field: string, min: number, max: number): string[] {
-  if (!Array.isArray(value) || value.length < min || value.length > max || value.some(item => typeof item !== 'string' || item.trim().length === 0 || item.length > 1000)) {
-    throw new ProtocolError('INVALID_FIELD', `${field} must contain ${min === max ? min : `${min}-${max}`} non-empty strings`);
-  }
-  return value.map(item => String(item).trim());
+  return requireStringList(value, field, {min, max, itemMax: 1000});
 }
 
 function refs(value: unknown, field: string, min = 1): RecordRef[] {

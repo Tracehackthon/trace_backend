@@ -78,7 +78,8 @@ export class ChangeSetService {
   create(input: CreateChangeSet): CreateResult {
     input = validateCreateChangeSet(input);
     const changeId = stableChangeId(input);
-    const existing = this.latest().find(item => item.change_id === changeId);
+    const rawExisting = this.store.read(changeId);
+    const existing = rawExisting === undefined ? undefined : validateChangeSet(rawExisting);
     if (existing) return {status: 'no_change', record: existing};
     const timestamp = now();
     const raw: ChangeSet = {
@@ -113,7 +114,8 @@ export class ChangeSetService {
   }
 
   get(changeId: string): ChangeSet {
-    const found = this.latest().find(item => item.change_id === changeId);
+    const raw = this.store.read(changeId);
+    const found = raw === undefined ? undefined : validateChangeSet(raw);
     if (!found) throw new ProtocolError('NOT_FOUND', `Unknown change set: ${changeId}`);
     return found;
   }

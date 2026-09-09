@@ -1,13 +1,12 @@
-"""Run the legacy capability regression only when it is colocated with MyWiKi.
+"""Run only the thin Python SDK regression shipped with Trace Runtime.
 
-The exported Trace source repository must remain standalone, so it falls back
-to the thin Python SDK tests shipped inside this repository.
+The product test boundary must be independent of a colocated MyWiKi checkout:
+the retired Python runtime and its tests are not part of the active product.
 """
 from pathlib import Path
 import subprocess
 import sys
 
 root = Path(__file__).resolve().parents[1]
-workspace_tests = [root.parent / "capability_runtime" / "tests", root.parent / "capability_release" / "tests"]
-targets = workspace_tests if all(path.exists() for path in workspace_tests) else [root / "tests" / "python"]
+targets = [root / "tests" / "python"]
 raise SystemExit(subprocess.run([sys.executable, "-m", "pytest", *map(str, targets), "-q"], cwd=root).returncode)

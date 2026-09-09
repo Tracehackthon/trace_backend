@@ -58,7 +58,7 @@ const manifest = {
   manifest_id: 'trace.runtime.distribution',
   manifest_version: '0.1.0',
   runtime_version: packageInfo.version,
-  node_engine: '>=22.5.0',
+  node_engine: packageInfo.engines?.node ?? 'unknown',
   state_modes: ['sqlite', 'separate-jsonl-development'],
   files,
   created_at: new Date().toISOString(),

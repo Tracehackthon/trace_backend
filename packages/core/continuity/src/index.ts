@@ -1,9 +1,9 @@
 import {createHash} from 'node:crypto';
-import {ProtocolError} from '../../protocol/src/index.js';
+import {optionalStringList as stringList, ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject as object, requireText as text, type ProtocolVersioned} from '../../protocol/src/index.js';
 import type {VersionedStore} from '../../storage/src/index.js';
 
 export const CONTINUITY_PROTOCOL_ID = 'trace.continuity' as const;
-export const CONTINUITY_PROTOCOL_VERSION = '0.1.0' as const;
+export const CONTINUITY_PROTOCOL_VERSION = '0.2.0' as const;
 export const CONTINUITY_KINDS = ['thread', 'discussion_turn', 'persistence_receipt', 'activation_receipt'] as const;
 export type ContinuityKind = (typeof CONTINUITY_KINDS)[number];
 export type ThreadStatus = 'open' | 'watching' | 'resolved' | 'published' | 'superseded';
@@ -17,6 +17,8 @@ export interface ContinuityEnvelope {
   revision: number;
   kind: ContinuityKind;
   thread_id: string;
+  correlation_id: string;
+  causation_id: string;
   visibility: VisibilityMode;
   payload: Record<string, unknown>;
   created_at: string;
@@ -33,6 +35,8 @@ export interface CreateThread {
   adopted_refs?: string[];
   open_questions?: string[];
   next_action?: string;
+  correlation_id?: string;
+  causation_id?: string;
 }
 
 export interface UpdateThread {
@@ -53,6 +57,8 @@ export interface CreateDiscussionTurn {
   context_refs?: string[];
   persisted_refs?: string[];
   open_questions?: string[];
+  correlation_id?: string;
+  causation_id?: string;
 }
 
 export interface CreateReceipt {
@@ -64,31 +70,12 @@ export interface CreateReceipt {
   activated_refs?: string[];
   required_user_action?: string;
   next_prompts?: string[];
+  correlation_id?: string;
+  causation_id?: string;
 }
 
 const THREAD_STATUSES: readonly ThreadStatus[] = ['open', 'watching', 'resolved', 'published', 'superseded'];
 const DELTA_TYPES: readonly DeltaType[] = ['none', 'new_candidate', 'revision', 'adoption', 'rejection', 'publication'];
-
-function text(value: unknown, field: string, max = 4000): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new ProtocolError('INVALID_FIELD', `${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
-}
-
-function object(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProtocolError('INVALID_FIELD', `${field} must be an object`);
-  return value as Record<string, unknown>;
-}
-
-function rejectUnknown(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
-  const unknown = Object.keys(value).filter(key => !allowed.includes(key));
-  if (unknown.length > 0) throw new ProtocolError('UNKNOWN_FIELD', `${field} contains unsupported fields: ${unknown.join(', ')}`);
-}
-
-function stringList(value: unknown, field: string, max = 128): string[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > max || value.some(item => typeof item !== 'string' || item.trim().length === 0 || item.length > 500)) throw new ProtocolError('INVALID_FIELD', `${field} must be a list of non-empty strings`);
-  return value.map(item => String(item).trim());
-}
 
 function digest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 20);
@@ -96,9 +83,35 @@ function digest(value: unknown): string {
 
 function timestamp(): string { return new Date().toISOString(); }
 
-function buildEnvelope(kind: ContinuityKind, threadId: string, payload: Record<string, unknown>, recordId?: string): ContinuityEnvelope {
+type AnyContinuityProtocol = ProtocolVersioned & Record<string, unknown>;
+
+const continuityUpcasters = new ProtocolVersionRegistry<AnyContinuityProtocol>();
+continuityUpcasters.register({
+  protocol_id: CONTINUITY_PROTOCOL_ID,
+  from_version: '0.1.0',
+  to_version: CONTINUITY_PROTOCOL_VERSION,
+  upcast(value) {
+    const recordId = typeof value.record_id === 'string' ? value.record_id : 'unknown';
+    const revision = Number.isInteger(value.revision) ? String(value.revision) : 'unknown';
+    return {
+      ...value,
+      protocol_version: CONTINUITY_PROTOCOL_VERSION,
+      correlation_id: `legacy-continuity:${recordId}`,
+      causation_id: `legacy-continuity:${recordId}@${revision}`,
+    };
+  },
+});
+
+function lineageFor(kind: ContinuityKind, threadId: string, payload: Record<string, unknown>, input: {correlation_id?: string; causation_id?: string}): {correlation_id: string; causation_id: string} {
+  const correlationId = input.correlation_id === undefined ? `continuity-thread:${threadId}` : text(input.correlation_id, 'correlation_id', 240);
+  const causationId = input.causation_id === undefined ? `continuity-${kind}:${digest({threadId, payload})}` : text(input.causation_id, 'causation_id', 240);
+  return {correlation_id: correlationId, causation_id: causationId};
+}
+
+function buildEnvelope(kind: ContinuityKind, threadId: string, payload: Record<string, unknown>, recordId: string | undefined, lineage: {correlation_id?: string; causation_id?: string}): ContinuityEnvelope {
   const now = timestamp();
   const identity = recordId ?? `continuity-${kind}-${digest({threadId, payload})}`;
+  const trace = lineageFor(kind, threadId, payload, lineage);
   return validateContinuityEnvelope({
     protocol_id: CONTINUITY_PROTOCOL_ID,
     protocol_version: CONTINUITY_PROTOCOL_VERSION,
@@ -106,6 +119,8 @@ function buildEnvelope(kind: ContinuityKind, threadId: string, payload: Record<s
     revision: 1,
     kind,
     thread_id: threadId,
+    correlation_id: trace.correlation_id,
+    causation_id: trace.causation_id,
     visibility: 'summary',
     payload,
     created_at: now,
@@ -114,9 +129,13 @@ function buildEnvelope(kind: ContinuityKind, threadId: string, payload: Record<s
 }
 
 export function validateContinuityEnvelope(value: unknown): ContinuityEnvelope {
-  const item = object(value, 'continuity_envelope');
-  rejectUnknown(item, ['protocol_id', 'protocol_version', 'record_id', 'revision', 'kind', 'thread_id', 'visibility', 'payload', 'created_at', 'updated_at'], 'continuity_envelope');
-  if (item.protocol_id !== CONTINUITY_PROTOCOL_ID || item.protocol_version !== CONTINUITY_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported continuity protocol');
+  const raw = object(value, 'continuity_envelope');
+  if (raw.protocol_id !== CONTINUITY_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported continuity protocol');
+  const item = raw.protocol_version === '0.1.0'
+    ? continuityUpcasters.upgrade(raw as AnyContinuityProtocol, CONTINUITY_PROTOCOL_VERSION) as Record<string, unknown>
+    : raw;
+  rejectUnknown(item, ['protocol_id', 'protocol_version', 'record_id', 'revision', 'kind', 'thread_id', 'correlation_id', 'causation_id', 'visibility', 'payload', 'created_at', 'updated_at'], 'continuity_envelope');
+  if (item.protocol_version !== CONTINUITY_PROTOCOL_VERSION) throw new ProtocolError('PROTOCOL_MIGRATION_REQUIRED', `Unsupported continuity protocol version: ${String(item.protocol_version)}`);
   if (!Number.isInteger(item.revision) || Number(item.revision) < 1) throw new ProtocolError('INVALID_FIELD', 'continuity revision must be positive');
   if (!CONTINUITY_KINDS.includes(item.kind as ContinuityKind)) throw new ProtocolError('INVALID_FIELD', 'continuity kind is not supported');
   if (item.visibility !== 'summary' && item.visibility !== 'evidence' && item.visibility !== 'audit') throw new ProtocolError('INVALID_FIELD', 'visibility is not supported');
@@ -149,6 +168,8 @@ export function validateContinuityEnvelope(value: unknown): ContinuityEnvelope {
     revision: Number(item.revision),
     kind,
     thread_id: text(item.thread_id, 'thread_id', 240),
+    correlation_id: text(item.correlation_id, 'correlation_id', 240),
+    causation_id: text(item.causation_id, 'causation_id', 240),
     visibility: item.visibility as VisibilityMode,
     payload,
     created_at: text(item.created_at, 'created_at', 80),
@@ -172,13 +193,14 @@ export class ContinuityLedger {
       adopted_refs: stringList(input.adopted_refs, 'adopted_refs'),
       open_questions: stringList(input.open_questions, 'open_questions'),
       ...(input.next_action === undefined ? {} : {next_action: text(input.next_action, 'next_action', 1000)}),
-    }, threadId);
+    }, threadId, input);
     return validateContinuityEnvelope(this.store.appendIfAbsent(record).record);
   }
 
   getThread(threadId: string): ContinuityEnvelope {
-    const found = this.latest().filter(item => item.kind === 'thread' && item.thread_id === threadId).at(0);
-    if (!found) throw new ProtocolError('NOT_FOUND', `Unknown continuity thread: ${threadId}`);
+    const raw = this.store.read(threadId);
+    const found = raw === undefined ? undefined : validateContinuityEnvelope(raw);
+    if (found?.kind !== 'thread' || found.thread_id !== threadId) throw new ProtocolError('NOT_FOUND', `Unknown continuity thread: ${threadId}`);
     return found;
   }
 
@@ -215,7 +237,7 @@ export class ContinuityLedger {
       context_refs: stringList(input.context_refs, 'context_refs'),
       persisted_refs: stringList(input.persisted_refs, 'persisted_refs'),
       open_questions: stringList(input.open_questions, 'open_questions'),
-    });
+    }, undefined, input);
     return validateContinuityEnvelope(this.store.appendIfAbsent(record).record);
   }
 
@@ -230,7 +252,7 @@ export class ContinuityLedger {
       ...(input.not_persisted === undefined ? {} : {not_persisted: stringList(input.not_persisted, 'not_persisted')}),
       ...(input.required_user_action === undefined ? {} : {required_user_action: text(input.required_user_action, 'required_user_action', 1000)}),
       ...(input.next_prompts === undefined ? {} : {next_prompts: stringList(input.next_prompts, 'next_prompts')}),
-    });
+    }, undefined, input);
     return validateContinuityEnvelope(this.store.appendIfAbsent(record).record);
   }
 

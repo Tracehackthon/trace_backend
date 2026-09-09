@@ -1,9 +1,11 @@
 dist/
 node_modules/
 __pycache__/
+.pytest_cache/
 *.pyc
 release/
 .pnpm-store/
 .turbo/
 *.tsbuildinfo
 python/sdk/.venv/
+.workbuddy-ai/

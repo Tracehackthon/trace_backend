@@ -39,29 +39,29 @@ export class DataLedger {
     return this.store.all().map(value => validateDataEnvelope(value));
   }
 
-  private findExact(ref: RecordRef, records = this.allValidated()): DataEnvelope {
-    const found = records.find(item => item.record_id === ref.record_id && item.revision === ref.revision);
+  private findExact(ref: RecordRef): DataEnvelope {
+    const raw = this.store.read(ref.record_id, ref.revision);
+    const found = raw === undefined ? undefined : validateDataEnvelope(raw);
     if (!found) throw new ProtocolError('LINEAGE_MISSING', `Missing data reference ${ref.record_id}@${ref.revision}`);
     if (found.kind !== ref.kind || found.schema_id !== ref.schema_id || found.schema_version !== ref.schema_version) throw new ProtocolError('LINEAGE_MISMATCH', `Data reference metadata does not match ${ref.record_id}@${ref.revision}`);
     return found;
   }
 
-  private assertDirectLineage(record: DataEnvelope, records = this.allValidated()): void {
+  private assertDirectLineage(record: DataEnvelope): void {
     if (record.lineage.change_id !== undefined && this.options.resolveChange !== undefined) this.options.resolveChange(record.lineage.change_id);
-    for (const ref of [...record.lineage.parent_refs, ...record.lineage.source_refs]) this.findExact(ref, records);
+    for (const ref of [...record.lineage.parent_refs, ...record.lineage.source_refs]) this.findExact(ref);
   }
 
   create(input: CreateDataRecord): DataEnvelope {
     const record = buildDataEnvelope(input);
-    const records = this.allValidated();
-    this.assertDirectLineage(record, records);
+    this.assertDirectLineage(record);
     const stored = this.store.appendIfAbsent(record);
     return validateDataEnvelope(stored.record);
   }
 
   get(recordId: string, revision?: number): DataEnvelope {
-    const records = this.allValidated();
-    const found = records.find(item => item.record_id === recordId && (revision === undefined || item.revision === revision));
+    const raw = this.store.read(recordId, revision);
+    const found = raw === undefined ? undefined : validateDataEnvelope(raw);
     if (!found) throw new StorageError('NOT_FOUND', `Unknown data record: ${recordId}${revision === undefined ? '' : `@${revision}`}`);
     return found;
   }

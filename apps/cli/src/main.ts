@@ -18,8 +18,7 @@ import {CodexHookInstaller} from '../../../packages/host/codex-hooks/src/index.j
 import {SELECTABLE_TEMPLATES} from '../../../packages/template/catalog/src/index.js';
 import {initializeProject, type ProjectSourceMode, type ProjectSourceProfileInput} from '../../../packages/core/instance/src/index.js';
 
-function usage(): never {
-  throw new ProtocolError('INVALID_INPUT', [
+const USAGE = [
     'Usage:',
     '  state flags: use --sqlite-state-file ABS, or both --change-state-file ABS --data-state-file ABS; --continuity-state-file ABS is optional for JSONL',
     '  trace-runtime change create [state flags] --change-kind KIND --subject-type TYPE --subject-id ID --base JSON --proposed JSON --impact ITEM [--impact ITEM] --compatibility JSON --requested-by ID --scope-type TYPE --scope-id ID --lineage JSON [--note TEXT]',
@@ -28,9 +27,9 @@ function usage(): never {
     '  trace-runtime data create [state flags] --kind KIND --schema-id ID --schema-version VERSION --subject-type TYPE --subject-id ID --scope-type TYPE --scope-id ID --origin JSON --producer JSON --lineage JSON --classification LEVEL --payload JSON',
     '  trace-runtime data list [state flags] [--kind KIND]',
     '  trace-runtime data verify [state flags] --record-id ID',
-    '  trace-runtime continuity thread-create [state flags] --title TEXT --summary TEXT [--question TEXT] [--next-action TEXT]',
-    '  trace-runtime continuity turn-create [state flags] --thread-id ID --input-summary TEXT --output-summary TEXT --delta-type TYPE [--context-ref REF] [--persisted-ref REF] [--question TEXT]',
-    '  trace-runtime continuity receipt-create [state flags] --thread-id ID --receipt-kind persistence|activation --summary TEXT [--persisted-ref REF] [--activated-ref REF] [--not-persisted TEXT] [--next-prompt TEXT] [--required-action TEXT]',
+    '  trace-runtime continuity thread-create [state flags] --title TEXT --summary TEXT [--question TEXT] [--next-action TEXT] [--correlation-id ID --causation-id ID]',
+    '  trace-runtime continuity turn-create [state flags] --thread-id ID --input-summary TEXT --output-summary TEXT --delta-type TYPE [--context-ref REF] [--persisted-ref REF] [--question TEXT] [--correlation-id ID --causation-id ID]',
+    '  trace-runtime continuity receipt-create [state flags] --thread-id ID --receipt-kind persistence|activation --summary TEXT [--persisted-ref REF] [--activated-ref REF] [--not-persisted TEXT] [--next-prompt TEXT] [--required-action TEXT] [--correlation-id ID --causation-id ID]',
     '  trace-runtime continuity list [state flags] [--thread-id ID]',
     '  trace-runtime context build --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--max-tokens N] [--max-sources N] [--forbidden-scope TEXT]',
     '  trace-runtime template preview --manifest ABS [--existing-lock ABS]',
@@ -40,17 +39,24 @@ function usage(): never {
     '  trace-runtime project init --project-dir ABS --user-id ID [--template ID] [--template-manifest ABS] [--source-mode local|external|team|empty] [--source-root ABS --source-id ID | --source-profile ABS] [--instance-id ID] [--runtime-version VERSION] --confirm true',
     '  trace-runtime migrate sqlite --change-state-file ABS --data-state-file ABS --sqlite-state-file ABS [--report ABS]',
     '  trace-runtime capability preview|stage|validate|publish|rollback ... [--sqlite-state-file <absolute-path>]',
-    '  trace-runtime codex activate --sqlite-state-file ABS --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--thread-id ID] [--forbidden-scope TEXT]',
+    '  trace-runtime codex activate --sqlite-state-file ABS --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--thread-id ID] [--correlation-id ID --causation-id ID] [--forbidden-scope TEXT]',
     '  trace-runtime codex trigger --sqlite-state-file ABS --event-file ABS',
     '  trace-runtime codex hook-stdio --sqlite-state-file ABS [--source-profile ABS]',
     '  trace-runtime zhihu search|global-search|hot --profile ABS --query TEXT|--limit N [--capture-run-id ID --sqlite-state-file ABS]',
     '  trace-runtime mywiki read|search|propose|apply --profile ABS ...',
     '  trace-runtime skill preview|install|rollback ...',
     '  trace-runtime hooks preview|install|rollback ...',
-    '  trace-runtime doctor run --sqlite-state-file ABS',
+    '  trace-runtime doctor run --sqlite-state-file ABS [--correlation-id ID]',
     '  trace-runtime backup create --sqlite-state-file ABS --backup-file ABS',
     '  trace-runtime restore run --backup-file ABS --sqlite-state-file ABS [--replace true]',
-  ].join('\n'));
+  ].join('\n');
+
+function usage(): never {
+  throw new ProtocolError('INVALID_INPUT', USAGE);
+}
+
+function printUsage(): void {
+  process.stdout.write(USAGE + '\n');
 }
 
 function args(argv: string[]): Map<string, string[]> {
@@ -147,7 +153,17 @@ function runtimePaths(parsed: Map<string, string[]>): {changeStateFile?: string;
   return sqlite ? {sqliteStateFile: sqlite} : {changeStateFile: change!, dataStateFile: data!, ...(continuity === undefined ? {} : {continuityStateFile: continuity})};
 }
 
+function traceLineageArgs(parsed: Map<string, string[]>): {correlation_id?: string; causation_id?: string} {
+  const correlationId = one(parsed, '--correlation-id', false);
+  const causationId = one(parsed, '--causation-id', false);
+  return {
+    ...(correlationId === undefined ? {} : {correlation_id: correlationId}),
+    ...(causationId === undefined ? {} : {causation_id: causationId}),
+  };
+}
+
 export async function run(argv: string[]): Promise<void> {
+  if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) { printUsage(); return; }
   const [group, action, ...rest] = argv;
   if (!['change', 'data', 'continuity', 'context', 'template', 'project', 'migrate', 'capability', 'codex', 'zhihu', 'mywiki', 'skill', 'hooks', 'doctor', 'backup', 'restore'].includes(group ?? '') || !action) usage();
   const parsed = args(rest);
@@ -226,7 +242,8 @@ export async function run(argv: string[]): Promise<void> {
     return;
   }
   if (group === 'doctor' && action === 'run') {
-    result(doctorSqlite(one(parsed, '--sqlite-state-file')!));
+    const correlationId = one(parsed, '--correlation-id', false);
+    result(doctorSqlite(one(parsed, '--sqlite-state-file')!, correlationId === undefined ? {} : {correlation_id: correlationId}));
     return;
   }
   if (group === 'backup' && action === 'create') {
@@ -261,7 +278,7 @@ export async function run(argv: string[]): Promise<void> {
     const sqliteStateFile = one(parsed, '--sqlite-state-file')!;
     const runtime = new TraceRuntime({sqliteStateFile});
     const threadId = one(parsed, '--thread-id', false);
-    const event = {event_type: 'codex.turn.started' as const, ...(threadId === undefined ? {} : {thread_id: threadId}), purpose: one(parsed, '--purpose')!, summary: one(parsed, '--summary')!, source_refs: sourceRefs as never, read_pointers: pointers as never, forbidden_scopes: parsed.get('--forbidden-scope') ?? [], max_tokens: Number(one(parsed, '--max-tokens', false) ?? 6000)};
+    const event = {event_type: 'codex.turn.started' as const, ...(threadId === undefined ? {} : {thread_id: threadId}), ...traceLineageArgs(parsed), purpose: one(parsed, '--purpose')!, summary: one(parsed, '--summary')!, source_refs: sourceRefs as never, read_pointers: pointers as never, forbidden_scopes: parsed.get('--forbidden-scope') ?? [], max_tokens: Number(one(parsed, '--max-tokens', false) ?? 6000)};
     result({status: 'activated', ...activateCodexTurn(runtime, event)});
     return;
   }
@@ -428,17 +445,17 @@ export async function run(argv: string[]): Promise<void> {
   }
   if (group === 'continuity') {
     if (action === 'thread-create') {
-      const thread = runtime.createThread({title: one(parsed, '--title')!, current_summary: one(parsed, '--summary')!, open_questions: parsed.get('--question') ?? [], ...(one(parsed, '--next-action', false) === undefined ? {} : {next_action: one(parsed, '--next-action', false)!})});
+      const thread = runtime.createThread({title: one(parsed, '--title')!, current_summary: one(parsed, '--summary')!, open_questions: parsed.get('--question') ?? [], ...(one(parsed, '--next-action', false) === undefined ? {} : {next_action: one(parsed, '--next-action', false)!}), ...traceLineageArgs(parsed)});
       result({status: 'created', record: thread});
       return;
     }
     if (action === 'turn-create') {
-      const turn = runtime.appendDiscussionTurn({thread_id: one(parsed, '--thread-id')!, user_input_summary: one(parsed, '--input-summary')!, output_summary: one(parsed, '--output-summary')!, delta_type: one(parsed, '--delta-type')! as never, context_refs: parsed.get('--context-ref') ?? [], persisted_refs: parsed.get('--persisted-ref') ?? [], open_questions: parsed.get('--question') ?? []});
+      const turn = runtime.appendDiscussionTurn({thread_id: one(parsed, '--thread-id')!, user_input_summary: one(parsed, '--input-summary')!, output_summary: one(parsed, '--output-summary')!, delta_type: one(parsed, '--delta-type')! as never, context_refs: parsed.get('--context-ref') ?? [], persisted_refs: parsed.get('--persisted-ref') ?? [], open_questions: parsed.get('--question') ?? [], ...traceLineageArgs(parsed)});
       result({status: 'created', record: turn});
       return;
     }
     if (action === 'receipt-create') {
-      const receipt = runtime.createReceipt({thread_id: one(parsed, '--thread-id')!, receipt_kind: one(parsed, '--receipt-kind')! as 'persistence' | 'activation', summary: one(parsed, '--summary')!, persisted_refs: parsed.get('--persisted-ref') ?? [], activated_refs: parsed.get('--activated-ref') ?? [], not_persisted: parsed.get('--not-persisted') ?? [], next_prompts: parsed.get('--next-prompt') ?? [], ...(one(parsed, '--required-action', false) === undefined ? {} : {required_user_action: one(parsed, '--required-action', false)!})});
+      const receipt = runtime.createReceipt({thread_id: one(parsed, '--thread-id')!, receipt_kind: one(parsed, '--receipt-kind')! as 'persistence' | 'activation', summary: one(parsed, '--summary')!, persisted_refs: parsed.get('--persisted-ref') ?? [], activated_refs: parsed.get('--activated-ref') ?? [], not_persisted: parsed.get('--not-persisted') ?? [], next_prompts: parsed.get('--next-prompt') ?? [], ...(one(parsed, '--required-action', false) === undefined ? {} : {required_user_action: one(parsed, '--required-action', false)!}), ...traceLineageArgs(parsed)});
       result({status: 'created', record: receipt});
       return;
     }

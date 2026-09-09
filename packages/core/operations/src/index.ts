@@ -5,12 +5,14 @@ import {DatabaseSync} from 'node:sqlite';
 import {ProtocolError, validateChangeSet} from '../../protocol/src/index.js';
 import {validateDataEnvelope} from '../../data/src/index.js';
 import {validateContinuityEnvelope} from '../../continuity/src/index.js';
+import {traceEventFromSqliteRow, type TraceEvent} from '../../observability/src/index.js';
 
 export const BACKUP_PROTOCOL_ID = 'trace.backup' as const;
 export const BACKUP_PROTOCOL_VERSION = '0.1.0' as const;
 
 export interface DoctorCheck {name: string; status: 'pass' | 'warn' | 'error'; detail: string; count?: number;}
-export interface DoctorReport {status: 'healthy' | 'warnings' | 'failed'; database: string; node: string; checks: DoctorCheck[]; created_at: string;}
+export interface CorrelationTrace {correlation_id: string; events: TraceEvent[];}
+export interface DoctorReport {status: 'healthy' | 'warnings' | 'failed'; database: string; node: string; checks: DoctorCheck[]; created_at: string; correlation_trace?: CorrelationTrace;}
 export interface BackupManifest {protocol_id: typeof BACKUP_PROTOCOL_ID; protocol_version: typeof BACKUP_PROTOCOL_VERSION; database: string; backup_file: string; sha256: string; bytes: number; tables: string[]; created_at: string;}
 export interface BackupReport {status: 'created'; manifest: BackupManifest; manifest_file: string;}
 export interface RestoreReport {status: 'restored'; database: string; backup_file: string; previous_database?: string; sha256: string; verified: true;}
@@ -35,10 +37,26 @@ function validateRows(table: string, rows: Array<{payload: string}>): DoctorChec
   catch (error) { return {name: `${table}:schema`, status: 'error', detail: String(error), count: rows.length}; }
 }
 
-export function doctorSqlite(databaseFile: string): DoctorReport {
+function traceEvents(db: DatabaseSync, correlationId: string): TraceEvent[] {
+  const rows = db.prepare('SELECT event_id, occurred_at, component, operation, outcome, correlation_id, causation_id, thread_id, record_refs, duration_ms, error_code FROM trace_events WHERE correlation_id = ? ORDER BY occurred_at, event_id').all(correlationId) as Array<Record<string, unknown>>;
+  return rows.map(traceEventFromSqliteRow);
+}
+
+function validateTraceRows(db: DatabaseSync): DoctorCheck {
+  try {
+    const rows = db.prepare('SELECT event_id, occurred_at, component, operation, outcome, correlation_id, causation_id, thread_id, record_refs, duration_ms, error_code FROM trace_events ORDER BY occurred_at, event_id').all() as Array<Record<string, unknown>>;
+    rows.forEach(traceEventFromSqliteRow);
+    return {name: 'trace_events:schema', status: 'pass', detail: 'all trace events validate', count: rows.length};
+  } catch (error) {
+    return {name: 'trace_events:schema', status: 'error', detail: String(error)};
+  }
+}
+
+export function doctorSqlite(databaseFile: string, options: {correlation_id?: string} = {}): DoctorReport {
   const database = absolute(databaseFile, 'database'); const checks: DoctorCheck[] = [];
   if (!fs.existsSync(database)) return {status: 'failed', database, node: process.version, checks: [{name: 'database-exists', status: 'error', detail: 'database file does not exist'}], created_at: new Date().toISOString()};
   let db: DatabaseSync | undefined;
+  let correlationTrace: CorrelationTrace | undefined;
   try {
     db = new DatabaseSync(database, {readOnly: true});
     const integrity = db.prepare('PRAGMA integrity_check').get() as Record<string, unknown>;
@@ -48,10 +66,18 @@ export function doctorSqlite(databaseFile: string): DoctorReport {
       if (!tables.has(table)) { checks.push({name: `table:${table}`, status: table === 'continuity_records' ? 'warn' : 'error', detail: 'table is missing'}); continue; }
       const rows = tableRows(db, table); checks.push({name: `table:${table}`, status: 'pass', detail: `${rows.length} revisions`, count: rows.length}); checks.push(...revisionCheck(rows)); checks.push(validateRows(table, rows));
     }
+    if (!tables.has('trace_events')) checks.push({name: 'table:trace_events', status: 'warn', detail: 'trace event table is missing; open this database with Trace Runtime 0.6.0+ to initialize it'});
+    else {
+      const count = Number((db.prepare('SELECT COUNT(*) AS count FROM trace_events').get() as {count: number}).count);
+      checks.push({name: 'table:trace_events', status: 'pass', detail: `${count} events`, count});
+      checks.push(validateTraceRows(db));
+      if (options.correlation_id !== undefined) correlationTrace = {correlation_id: options.correlation_id, events: traceEvents(db, options.correlation_id)};
+    }
   } catch (error) { checks.push({name: 'database-open', status: 'error', detail: String(error)}); }
   finally { db?.close(); }
   const hasError = checks.some(check => check.status === 'error'); const hasWarn = checks.some(check => check.status === 'warn');
-  return {status: hasError ? 'failed' : hasWarn ? 'warnings' : 'healthy', database, node: process.version, checks, created_at: new Date().toISOString()};
+  if (options.correlation_id !== undefined && correlationTrace === undefined) correlationTrace = {correlation_id: options.correlation_id, events: []};
+  return {status: hasError ? 'failed' : hasWarn ? 'warnings' : 'healthy', database, node: process.version, checks, created_at: new Date().toISOString(), ...(correlationTrace === undefined ? {} : {correlation_trace: correlationTrace})};
 }
 
 export function backupSqlite(databaseFile: string, backupFile: string): BackupReport {

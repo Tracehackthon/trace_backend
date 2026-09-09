@@ -89,9 +89,15 @@ export function recordIdentity(record: VersionedRecord): string {
 export interface VersionedStore<T extends VersionedRecord> {
   all(): T[];
   latest(): T[];
+  /**
+   * Read a single identity (or an exact historical revision). SQLite can serve
+   * this through its primary-key index; JSONL keeps the compatible fallback.
+   */
+  read(recordId: string, revision?: number): T | undefined;
   append(record: T): void;
   appendIfAbsent(record: T): {record: T; inserted: boolean};
   compareAndSwap(recordId: string, expectedRevision: number, update: (current: T) => T): T;
+  close?(): void;
 }
 
 export class AppendOnlyStore<T extends VersionedRecord> implements VersionedStore<T> {
@@ -121,6 +127,16 @@ export class AppendOnlyStore<T extends VersionedRecord> implements VersionedStor
       latest.push(revisions.get(ordered.at(-1)!)!);
     }
     return latest;
+  }
+
+  read(recordId: string, revision?: number): T | undefined {
+    if (revision === undefined) return this.latest().find(item => recordIdentity(item) === recordId);
+    const records = this.all().filter(item => recordIdentity(item) === recordId && item.revision === revision);
+    if (records.length > 1) {
+      const first = records[0]!;
+      if (records.some(item => stableJson(item) !== stableJson(first))) throw new StorageError('DUPLICATE_REVISION', `Conflicting duplicate revision ${recordId}@${revision}`);
+    }
+    return records[0];
   }
 
   append(record: T): void {

@@ -1,5 +1,5 @@
 import type {CreateDataRecord, DataClassification, DataOrigin, DataProducer} from '../../data/src/index.js';
-import type {RecordRef} from '../../protocol/src/index.js';
+import {requireText as text, type RecordRef} from '../../protocol/src/index.js';
 
 export const PRECEDENT_PROTOCOL_ID = 'trace.candidate-precedent' as const;
 export const PRECEDENT_PROTOCOL_VERSION = '0.1.0' as const;
@@ -20,11 +20,6 @@ export interface CandidatePrecedentInput {
   correlation_id: string;
   change_id: string;
   extra_payload?: Record<string, unknown>;
-}
-
-function text(value: string, field: string, max = 4000): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) throw new Error(`${field} must be a non-empty string of at most ${max} characters`);
-  return value.trim();
 }
 
 function refKey(ref: RecordRef): string { return `${ref.record_id}@${ref.revision}`; }

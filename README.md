@@ -9,6 +9,8 @@ Trace Runtime 是一个可安装的 TypeScript 基座：它负责把「上下文
 - **认知源分两种。** `local/empty` 把项目认知源放在项目内；`external/team` 只保存一个用户选择的 profile，正式页面仍留在外部个人或团队源中。
 - **模板不是认知源。** 模板只提供协议、能力入口、上下文治理和冷启动结构；真正的语义内容必须由用户选择或在项目中逐步沉淀。
 - **所有写入可见且需要确认。** 候选、能力发布、正式 Wiki 写入和 Codex hooks/Skill 替换都有 proposal、版本、备份和回滚边界。
+- **高频 hook 不重扫整库。** SQLite 热写入只核验当前 identity 的 revision 历史；全库 integrity/schema/revision 检查保留在 `doctor`，不会让每轮 Codex 激活随着历史记录线性退化。
+- **每轮运行都有安全的关联追踪。** Codex activation 写入 `correlation_id`、receipt reference、耗时和错误码；事件表没有原始 prompt、页面正文、密钥或工具参数字段。
 
 ## 安装与检查
 
@@ -20,7 +22,7 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm check:all
 ```
 
-需要 Node.js `>=22.5.0` 和 pnpm `>=10.34.5`。`check:all` 包含 TypeScript 类型检查、模板资源审计、TS/SQLite 集成测试以及薄 Python SDK 测试。
+需要 Node.js `>=22.13.0` 和 pnpm `>=10.34.5`。`node:sqlite` 从 Node 22.13 起不再需要启动开关，但该 API 在 Node 22 中仍会显示 experimental warning；项目以 `mise.toml` 固定验证环境为 Node `22.23.1`。`check:all` 包含 TypeScript 类型检查、模板资源审计、TS/SQLite 集成测试以及薄 Python SDK 测试。
 
 ## 为一个项目建立本地边界
 
@@ -73,11 +75,20 @@ node <RUNTIME_DIR>/dist/apps/cli/src/main.js project init `
 node <RUNTIME_DIR>/dist/apps/cli/src/main.js continuity list --sqlite-state-file <STATE_FILE>
 node <RUNTIME_DIR>/dist/apps/cli/src/main.js codex activate --sqlite-state-file <STATE_FILE> --purpose "继续 Agent 协作问题" --summary "只使用受控来源指针" --source-ref '{"record_id":"source-1","revision":1,"label":"local"}'
 node <RUNTIME_DIR>/dist/apps/cli/src/main.js doctor run --sqlite-state-file <STATE_FILE>
+node <RUNTIME_DIR>/dist/apps/cli/src/main.js doctor run --sqlite-state-file <STATE_FILE> --correlation-id <CORRELATION_ID>
 node <RUNTIME_DIR>/dist/apps/cli/src/main.js backup create --sqlite-state-file <STATE_FILE> --backup-file <BACKUP_FILE>
 node <RUNTIME_DIR>/dist/apps/cli/src/main.js restore run --backup-file <BACKUP_FILE> --sqlite-state-file <RESTORED_STATE_FILE>
 ```
 
 来源、候选和能力的职责不能混淆：知乎或其他外部源先成为带 provenance 的 `source_snapshot`，讨论后才形成 `candidate_precedent`，再经 `capability_candidate` 的验证和用户采纳，最后才允许 Skill/能力发布。激活上下文只引用已授权的来源和版本，不把整库全文塞进 prompt。
+
+`doctor --correlation-id` 返回按时间排序的、可用户查看的运行事件：组件、操作、成功/失败、关联 ID、receipt/data 引用、耗时及错误码。它**不会**返回原始 prompt、完整来源正文、凭证、未采纳候选正文或工具参数。事件与运行状态保存在同一 SQLite 文件，因此 `backup` / `restore` 会一并处理。
+
+CLI 的成功/失败业务结果默认都是一行 JSON，便于 Codex、Python SDK、桌面端后续直接消费；`--help` 是正常的零退出码发现入口。需要传递较大的 JSON 对象时，所有 `JSON` 参数均可使用 `@<JSON_FILE>`，例如 `--source-ref @<ABS_SOURCE_REF_JSON>`，无需把对象正文塞进 shell 引号。
+
+### Continuity 协议升级
+
+新写入的 `trace.continuity` 使用 `0.2.0`，在 envelope 顶层保存 `correlation_id` 与 `causation_id`。历史 `0.1.0` continuity 记录会由明确的 in-memory upcaster 读取为 `0.2.0` 视图；它**不会重写历史 revision**。当旧 thread 后续更新时，才会追加一条 `0.2.0` revision。当前仅 Continuity 协议已接入该迁移链；其他协议仍是严格版本校验，遇到不支持版本会拒绝读取，而不会静默误读。
 
 ## 模板、Skill 与 hooks
 
@@ -92,7 +103,9 @@ preview 不会改变宿主。只有带明确 approval 的 install 才会原子�
 
 ## 目录边界
 
-- `packages/core/*`：协议、状态、数据链和运行时；不读用户 Wiki。
+- `packages/core/protocol`：协议身份、共享 validator primitive、状态门槛与显式 upcaster registry；领域包只维护自身语义，不复制基础 `object/text/list/unknown-field` 校验。
+- `packages/core/observability`：同库、无自由 payload 的运行事件；只记录 provenance，不保存敏感正文。
+- 其他 `packages/core/*`：状态、数据链和运行时；不读用户 Wiki。
 - `packages/integration/*`：知乎、MyWiKi 等真实来源 adapter；每个来源独立版本化。
 - `packages/host/*`、`apps/codex`：宿主安装与 Codex 触发边界。
 - `packages/sdk/*`、`python/sdk`：跨进程和薄 SDK，不复制核心状态机。
@@ -105,4 +118,4 @@ preview 不会改变宿主。只有带明确 approval 的 install 才会原子�
 corepack pnpm export:source -- --out <SOURCE_EXPORT_DIR> --replace
 ```
 
-导出会排除 `node_modules/`、`dist/`、缓存、SQLite、凭证和用户数据。发行包也不会包含用户认知源。
+导出会排除 `node_modules/`、`dist/`、缓存、SQLite、凭证和用户数据。导出时会保留目标目录的 `.git/` 与本地 `.workbuddy-ai/` 状态，但不会把依赖树放进 `trace-runtime.previous-*` 备份；需要依赖时在导出后执行 `corepack pnpm install --frozen-lockfile`。发行包也不会包含用户认知源。

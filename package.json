@@ -28,7 +28,7 @@
     "typescript": "catalog:devTools"
   },
   "engines": {
-    "node": ">=22.5.0",
+    "node": ">=22.13.0",
     "pnpm": ">=10.34.5"
   }
 }

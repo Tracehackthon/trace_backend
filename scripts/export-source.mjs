@@ -15,8 +15,6 @@ if (fs.existsSync(output) && fs.readdirSync(output).length > 0 && !replace) thro
 const staging = `${output}.staging-${process.pid}`;
 if (fs.existsSync(staging)) throw new Error(`Source export staging exists: ${staging}`);
 fs.mkdirSync(staging, {recursive: true});
-const preservedGit = fs.existsSync(path.join(output, '.git')) ? `${output}.git-preserve-${Date.now()}` : undefined;
-if (preservedGit) fs.renameSync(path.join(output, '.git'), preservedGit);
 
 const entries = [
   '.changeset', '.gitignore', 'apps', 'AUDIT_20260909.md', 'GIT_REMOTE_SETUP.md', 'MIGRATION_STATUS.md', 'README.md',
@@ -25,6 +23,39 @@ const entries = [
   'templates', 'tests', 'tsconfig.build.json', 'tsconfig.json',
 ];
 const excluded = new Set(['node_modules', 'dist', '.pytest_cache', '.pnpm-store', 'release', 'tmp']);
+const preservedLocalEntries = new Set(['.git', '.workbuddy-ai']);
+const generatedEntries = ['node_modules', 'dist', '.pytest_cache', '.pnpm-store', 'release', 'tmp'];
+
+function isSafeEntry(entry) {
+  return typeof entry === 'string'
+    && entry.length > 0
+    && !path.isAbsolute(entry)
+    && !entry.includes('/')
+    && !entry.includes('\\')
+    && entry !== '.'
+    && entry !== '..';
+}
+
+function readPreviousManagedEntries() {
+  const manifestFile = path.join(output, 'SOURCE_EXPORT_MANIFEST.json');
+  if (!fs.existsSync(manifestFile)) return [];
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    if (Array.isArray(manifest.managed_entries)) {
+      return manifest.managed_entries.filter(isSafeEntry);
+    }
+    // Export manifests before v0.2 did not list top-level ownership. Recover
+    // it from their file inventory without ever considering user-local roots.
+    if (Array.isArray(manifest.files)) {
+      return [...new Set(manifest.files
+        .map((file) => typeof file?.path === 'string' ? file.path.split('/')[0] : undefined)
+        .filter(isSafeEntry))];
+    }
+  } catch {
+    // An unreadable old manifest must not make us touch unlisted paths.
+  }
+  return [];
+}
 
 function copyRecursive(source, destination) {
   const stat = fs.lstatSync(source);
@@ -60,9 +91,77 @@ function walk(directory) {
 }
 walk(staging);
 const runtime = JSON.parse(fs.readFileSync(path.join(staging, 'package.json'), 'utf8'));
-fs.writeFileSync(path.join(staging, 'SOURCE_EXPORT_MANIFEST.json'), JSON.stringify({manifest_id: 'trace.runtime.source-export', manifest_version: '0.1.0', runtime_version: runtime.version, files, created_at: new Date().toISOString()}, null, 2) + '\n', 'utf8');
+fs.writeFileSync(path.join(staging, 'SOURCE_EXPORT_MANIFEST.json'), JSON.stringify({
+  manifest_id: 'trace.runtime.source-export',
+  manifest_version: '0.2.0',
+  runtime_version: runtime.version,
+  managed_entries: entries,
+  files,
+  created_at: new Date().toISOString(),
+}, null, 2) + '\n', 'utf8');
 
-if (fs.existsSync(output)) fs.renameSync(output, `${output}.previous-${Date.now()}`);
-fs.renameSync(staging, output);
-if (preservedGit) fs.renameSync(preservedGit, path.join(output, '.git'));
-process.stdout.write(JSON.stringify({status: 'exported', output, runtime_version: runtime.version, files: files.length, manifest: path.join(output, 'SOURCE_EXPORT_MANIFEST.json')}) + '\n');
+// Do not rename the output root: it may contain a running local tool that has
+// a file handle under .workbuddy-ai. Move only known source-export entries.
+// This keeps Git and local tool state in place and makes the backup contain
+// source only, not dependency/build trees that can be regenerated.
+const backup = `${output}.previous-${Date.now()}`;
+const previousEntries = readPreviousManagedEntries();
+const managedEntries = [...new Set([...previousEntries, ...entries, 'SOURCE_EXPORT_MANIFEST.json'])]
+  .filter((entry) => isSafeEntry(entry) && !preservedLocalEntries.has(entry));
+const movedEntries = [];
+const deployedEntries = [];
+let cleanupWarnings = [];
+
+try {
+  if (!fs.existsSync(output)) {
+    fs.renameSync(staging, output);
+    deployedEntries.push(...entries, 'SOURCE_EXPORT_MANIFEST.json');
+  } else {
+    fs.mkdirSync(backup, {recursive: true});
+    for (const entry of managedEntries) {
+      const current = path.join(output, entry);
+      if (!fs.existsSync(current)) continue;
+      const saved = path.join(backup, entry);
+      fs.renameSync(current, saved);
+      movedEntries.push(entry);
+    }
+
+    for (const entry of [...entries, 'SOURCE_EXPORT_MANIFEST.json']) {
+      const source = path.join(staging, entry);
+      if (!fs.existsSync(source)) continue;
+      fs.renameSync(source, path.join(output, entry));
+      deployedEntries.push(entry);
+    }
+    fs.rmSync(staging, {recursive: true, force: true});
+  }
+} catch (error) {
+  for (const entry of deployedEntries.reverse()) {
+    const deployed = path.join(output, entry);
+    if (fs.existsSync(deployed)) fs.rmSync(deployed, {recursive: true, force: true});
+  }
+  for (const entry of movedEntries.reverse()) {
+    const saved = path.join(backup, entry);
+    if (fs.existsSync(saved)) fs.renameSync(saved, path.join(output, entry));
+  }
+  throw new Error(`Source export failed and attempted rollback. Staging: ${staging}; backup: ${backup}; cause: ${error.message}`);
+}
+
+for (const entry of generatedEntries) {
+  const generated = path.join(output, entry);
+  if (!fs.existsSync(generated)) continue;
+  try {
+    fs.rmSync(generated, {recursive: true, force: true});
+  } catch (error) {
+    cleanupWarnings.push({entry, message: error.message});
+  }
+}
+
+process.stdout.write(JSON.stringify({
+  status: 'exported',
+  output,
+  backup: fs.existsSync(backup) ? backup : null,
+  runtime_version: runtime.version,
+  files: files.length,
+  manifest: path.join(output, 'SOURCE_EXPORT_MANIFEST.json'),
+  cleanup_warnings: cleanupWarnings,
+}) + '\n');

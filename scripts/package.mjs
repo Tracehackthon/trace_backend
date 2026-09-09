@@ -11,6 +11,8 @@ if (!path.isAbsolute(configured)) throw new Error('Package output must be absolu
 const output = path.resolve(configured);
 if (fs.existsSync(output) && fs.readdirSync(output).length > 0) throw new Error(`Package output is not empty: ${output}`);
 fs.mkdirSync(output, {recursive: true});
+const packageInfo = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+fs.writeFileSync(path.join(output, 'runtime.json'), JSON.stringify({runtime_version: packageInfo.version, node_engine: packageInfo.engines?.node ?? 'unknown'}, null, 2) + '\n', 'utf8');
 
 function copy(relative, target = relative) {
   const source = path.join(root, relative);
@@ -55,7 +57,7 @@ walk(output);
 const manifest = {
   manifest_id: 'trace.runtime.distribution',
   manifest_version: '0.1.0',
-  runtime_version: JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version,
+  runtime_version: packageInfo.version,
   node_engine: '>=22.5.0',
   state_modes: ['sqlite', 'separate-jsonl-development'],
   files,

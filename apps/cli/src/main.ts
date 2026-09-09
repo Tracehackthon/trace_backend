@@ -16,6 +16,7 @@ import {MyWikiSourceProvider, type MyWikiSourceProfile} from '../../../packages/
 import {CodexSkillInstaller} from '../../../packages/host/codex-skill/src/index.js';
 import {CodexHookInstaller} from '../../../packages/host/codex-hooks/src/index.js';
 import {SELECTABLE_TEMPLATES} from '../../../packages/template/catalog/src/index.js';
+import {initializeProject, type ProjectSourceMode, type ProjectSourceProfileInput} from '../../../packages/core/instance/src/index.js';
 
 function usage(): never {
   throw new ProtocolError('INVALID_INPUT', [
@@ -36,6 +37,7 @@ function usage(): never {
     '  trace-runtime template lock --manifest ABS --runtime-version VERSION --instance-id ID [--output ABS]',
     '  trace-runtime template install --manifest ABS --runtime-version VERSION --instance-id ID --instance-dir ABS --confirm true [--source-profile ABS]',
     '  trace-runtime template list',
+    '  trace-runtime project init --project-dir ABS --user-id ID [--template ID] [--template-manifest ABS] [--source-mode local|external|team|empty] [--source-root ABS --source-id ID | --source-profile ABS] [--instance-id ID] [--runtime-version VERSION] --confirm true',
     '  trace-runtime migrate sqlite --change-state-file ABS --data-state-file ABS --sqlite-state-file ABS [--report ABS]',
     '  trace-runtime capability preview|stage|validate|publish|rollback ... [--sqlite-state-file <absolute-path>]',
     '  trace-runtime codex activate --sqlite-state-file ABS --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--thread-id ID] [--forbidden-scope TEXT]',
@@ -72,6 +74,56 @@ function one(parsed: Map<string, string[]>, name: string, required = true): stri
   return values[0];
 }
 
+function readJsonFile(file: string, field: string): Record<string, unknown> {
+  if (!path.isAbsolute(file)) throw new ProtocolError('INVALID_INPUT', `${field} must be absolute`);
+  try {
+    const value: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not object');
+    return value as Record<string, unknown>;
+  } catch { throw new ProtocolError('INVALID_INPUT', `${field} must point to a valid JSON object`); }
+}
+
+function manifestFor(parsed: Map<string, string[]>): {manifest: ReturnType<typeof validateTemplateManifest>; templateId: string} {
+  const explicit = one(parsed, '--template-manifest', false);
+  if (explicit !== undefined) return {manifest: validateTemplateManifest(readJsonFile(explicit, '--template-manifest')), templateId: validateTemplateManifest(readJsonFile(explicit, '--template-manifest')).bundle_id};
+  const templateId = one(parsed, '--template', false) ?? 'trace.codex-starter';
+  const entry = SELECTABLE_TEMPLATES.find(item => item.id === templateId);
+  if (!entry) throw new ProtocolError('INVALID_INPUT', `unknown template: ${templateId}`);
+  const roots = [
+    process.env.TRACE_TEMPLATE_ROOT,
+    path.resolve(process.cwd(), 'templates'),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../templates'),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../../templates'),
+  ].filter((value): value is string => typeof value === 'string' && path.isAbsolute(value));
+  for (const root of roots) {
+    const manifestPath = path.resolve(root, entry.manifest_path.replace(/^templates[\\/]/, ''));
+    if (fs.existsSync(manifestPath)) return {manifest: validateTemplateManifest(readJsonFile(manifestPath, '--template')), templateId};
+  }
+  throw new ProtocolError('IO_ERROR', `cannot locate manifest for ${templateId}; pass --template-manifest ABS`);
+}
+
+function runtimeVersionFor(parsed: Map<string, string[]>): string {
+  const explicit = one(parsed, '--runtime-version', false);
+  if (explicit !== undefined) return explicit;
+  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
+  const roots = [
+    runtimeRoot === undefined ? undefined : path.resolve(runtimeRoot, 'runtime.json'),
+    path.resolve(process.cwd(), 'package.json'),
+    path.resolve(process.cwd(), 'runtime.json'),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../package.json'),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../runtime.json'),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../../package.json'),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../../runtime.json'),
+  ].filter((value): value is string => value !== undefined);
+  for (const candidate of roots) {
+    if (!fs.existsSync(candidate)) continue;
+    try { const value = JSON.parse(fs.readFileSync(candidate, 'utf8')) as {version?: unknown; runtime_version?: unknown}; const version = value.version ?? value.runtime_version; if (typeof version === 'string' && version.length > 0) return version; } catch { /* keep looking */ }
+  }
+  throw new ProtocolError('INVALID_INPUT', 'cannot resolve runtime version; pass --runtime-version VERSION');
+}
+
+function defaultInstanceId(projectDir: string): string { return `trace-${path.basename(path.resolve(projectDir)).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'project'}`; }
+
 function jsonValue(raw: string | undefined, field: string): Record<string, unknown> {
   if (!raw) throw new ProtocolError('INVALID_INPUT', `${field} is required`);
   const source = raw.startsWith('@') ? fs.readFileSync(path.resolve(raw.slice(1)), 'utf8') : raw;
@@ -97,13 +149,36 @@ function runtimePaths(parsed: Map<string, string[]>): {changeStateFile?: string;
 
 export async function run(argv: string[]): Promise<void> {
   const [group, action, ...rest] = argv;
-  if (!['change', 'data', 'continuity', 'context', 'template', 'migrate', 'capability', 'codex', 'zhihu', 'mywiki', 'skill', 'hooks', 'doctor', 'backup', 'restore'].includes(group ?? '') || !action) usage();
+  if (!['change', 'data', 'continuity', 'context', 'template', 'project', 'migrate', 'capability', 'codex', 'zhihu', 'mywiki', 'skill', 'hooks', 'doctor', 'backup', 'restore'].includes(group ?? '') || !action) usage();
   const parsed = args(rest);
   if (group === 'context' && action === 'build') {
     const sourceRefs = parsed.get('--source-ref')?.map(value => jsonValue(value, '--source-ref')) ?? [];
     const pointers = parsed.get('--pointer')?.map(value => jsonValue(value, '--pointer')) ?? [];
     const pack = buildActivationPack({purpose: one(parsed, '--purpose')!, summary: one(parsed, '--summary')!, source_refs: sourceRefs as never, read_pointers: pointers as never, budget: {max_tokens: Number(one(parsed, '--max-tokens', false) ?? 6000), max_sources: Number(one(parsed, '--max-sources', false) ?? 16)}, forbidden_scopes: parsed.get('--forbidden-scope') ?? []});
     result({status: 'built', pack});
+    return;
+  }
+  if (group === 'project' && action === 'init') {
+    const projectDir = one(parsed, '--project-dir')!;
+    if (one(parsed, '--confirm') !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'project init requires --confirm true');
+    const {manifest, templateId} = manifestFor(parsed);
+    const requestedMode = one(parsed, '--source-mode', false) as ProjectSourceMode | undefined;
+    const sourceMode = requestedMode ?? (manifest.cognitive_source?.mode === 'team-shared' ? 'team' : manifest.cognitive_source?.mode === 'isolated-empty' ? 'empty' : 'local');
+    if (!['local', 'external', 'team', 'empty'].includes(sourceMode)) throw new ProtocolError('INVALID_INPUT', '--source-mode must be local, external, team, or empty');
+    const sourceProfilePath = one(parsed, '--source-profile', false);
+    const sourceProfile = sourceProfilePath === undefined ? undefined : readJsonFile(sourceProfilePath, '--source-profile') as unknown as ProjectSourceProfileInput;
+    const resultValue = initializeProject({
+      project_dir: projectDir,
+      manifest,
+      runtime_version: runtimeVersionFor(parsed),
+      instance_id: one(parsed, '--instance-id', false) ?? defaultInstanceId(projectDir),
+      user_id: one(parsed, '--user-id')!,
+      source_mode: sourceMode,
+      ...(one(parsed, '--source-root', false) === undefined ? {} : {source_root: one(parsed, '--source-root', false)!}),
+      ...(one(parsed, '--source-id', false) === undefined ? {} : {source_id: one(parsed, '--source-id', false)!}),
+      ...(sourceProfile === undefined ? {} : {source_profile: sourceProfile}),
+    });
+    result({status: 'initialized', template_id: templateId, ...resultValue});
     return;
   }
   if (group === 'template') {

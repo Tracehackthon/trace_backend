@@ -29,6 +29,7 @@
 | 用户级 Skill 替换 | `packages/host/codex-skill` + `apps/cli` | 已迁移并验证 | preview、显式 approval、staging 原子替换、备份、rollback；不把旧 Skill 放进 discovery 目录 |
 | Codex hooks 切换 | `packages/host/codex-hooks` + `apps/cli` | 已迁移并验证 | 读写真实 `hooks.json` 形状，移除旧 Python Trace command、保留无关 hooks、备份、CAS preview、rollback；默认不静默修改用户配置 |
 | 可选择认知源模板 | `packages/template/catalog` + `templates/*` | 已迁移并验证 | `trace.codex-starter`/`empty`/`team`；模板只提供结构/权限/source-pack，语义源由用户选择并写入 instance lock |
+| 项目实例初始化与本地认知源边界 | `packages/core/instance` + `apps/cli project init` | 已迁移并验证 | create-only `.trace/`；local/empty 使用项目源，external/team 使用 profile；lock 只记录 source id、hash 和 scope，不把外部绝对路径写入 project descriptor |
 | 旧 Python `tools/trace_core` | `tmp/trace-python-runtime-legacy-20260909/` | 已移出 active tree | 不参与 build、package、CLI、RPC 或测试；归档仅用于显式恢复，不作为产品 runtime |
 
 ## 结论
@@ -40,18 +41,18 @@
 ## 发布前检查
 
 ```powershell
-Set-Location D:\文档\MyWiKi\tools\trace_runtime
+Set-Location <RUNTIME_DIR>
 corepack pnpm install --frozen-lockfile
 corepack pnpm check:all
-corepack pnpm package -- --out C:\abs\trace-runtime-package
-node C:\abs\trace-runtime-package\native\install.mjs --target C:\abs\trace-runtime-installed
+corepack pnpm package -- --out <PACKAGE_DIR>
+node <PACKAGE_DIR>\native\install.mjs --target <INSTALL_DIR>
 ```
 
 模板资源和源码导出：
 
 ```powershell
 corepack pnpm audit:templates
-corepack pnpm export:source -- --out D:\abs\trace-runtime-source
+corepack pnpm export:source -- --out <SOURCE_EXPORT_DIR>
 ```
 
 `AUDIT_20260909.md` 是当前底层后端、模板、预设上下文和能力的审查结论；它明确区分 Codex 基线已完成项和 DeepSeek Harness/Desktop/认证接口等尚未验收项。

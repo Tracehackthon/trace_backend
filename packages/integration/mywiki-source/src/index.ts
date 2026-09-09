@@ -13,6 +13,8 @@ export interface MyWikiSourceProfile {
   read_enabled?: boolean;
   write_enabled?: boolean;
   user_id: string;
+  scope_type?: 'personal' | 'project' | 'team' | 'domain';
+  source_mode?: 'local' | 'external' | 'team' | 'empty';
 }
 
 export interface MyWikiPage {

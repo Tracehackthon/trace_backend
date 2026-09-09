@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.source-profile.0.1",
+  "title": "Trace cognitive source profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_id", "root", "formal_prefix", "read_enabled", "write_enabled", "user_id", "scope_type", "source_mode"],
+  "properties": {
+    "source_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "root": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "formal_prefix": {"type": "string", "minLength": 1, "maxLength": 200},
+    "read_enabled": {"type": "boolean"},
+    "write_enabled": {"type": "boolean"},
+    "user_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "scope_type": {"enum": ["personal", "project", "team", "domain"]},
+    "source_mode": {"enum": ["local", "external", "team", "empty"]},
+    "policy": {"type": "string", "maxLength": 2000}
+  }
+}

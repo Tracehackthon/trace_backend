@@ -137,6 +137,12 @@ importers:
         specifier: workspace:*
         version: link:../storage
 
+  packages/core/instance:
+    dependencies:
+      '@trace/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/core/migration:
     dependencies:
       '@trace/data':

@@ -25,8 +25,8 @@
     },
     {
       "path": "apps/cli/src/main.ts",
-      "sha256": "8200a8075d4c632c79c9bcd6d6be2011b6f561efbb5f89c316f6ceee7fb33992",
-      "bytes": 29070
+      "sha256": "94218165140282b5a6cbb21944c0047b127630a73e0f528ebb25aff1f514ddbb",
+      "bytes": 34676
     },
     {
       "path": "apps/codex/package.json",
@@ -35,8 +35,8 @@
     },
     {
       "path": "apps/codex/README.md",
-      "sha256": "f095627993462258dea0aa8a2b9fb5d92e7485cbe885b5993349d03e163d674c",
-      "bytes": 994
+      "sha256": "a62a849e91cef34175f90a496b2f0867e0a0b882e70cf34f3b2155913bb4ecc6",
+      "bytes": 1697
     },
     {
       "path": "apps/codex/src/index.ts",
@@ -60,8 +60,8 @@
     },
     {
       "path": "AUDIT_20260909.md",
-      "sha256": "4e9f24dd837cfb82d1125d34b33d4b53717b8d7fa6a9dd7484bd7869f77643b7",
-      "bytes": 5159
+      "sha256": "5039c1620f9478fac06b709377651c753ee96ef27b9235495a3d40b9db8fbfd5",
+      "bytes": 5391
     },
     {
       "path": "GIT_REMOTE_SETUP.md",
@@ -70,8 +70,8 @@
     },
     {
       "path": "MIGRATION_STATUS.md",
-      "sha256": "26ae335756417eb94691c66f2775c771d17730133d283c3b79a43590656ffe6e",
-      "bytes": 6370
+      "sha256": "5eb13b9b757f92650f33cbe19a1f77f82aafff92265f59991eddbb52132482ab",
+      "bytes": 6592
     },
     {
       "path": "mise.toml",
@@ -234,6 +234,21 @@
       "bytes": 7257
     },
     {
+      "path": "packages/core/instance/package.json",
+      "sha256": "2e36ad0e6bb4944e98e9822449268b7087967e592658be4c586c35144031d95a",
+      "bytes": 286
+    },
+    {
+      "path": "packages/core/instance/README.md",
+      "sha256": "0e770b2903909cfaea9ed2635d53ccda5a3f75c5b64b5cef139e5cb6fe8e20b0",
+      "bytes": 569
+    },
+    {
+      "path": "packages/core/instance/src/index.ts",
+      "sha256": "16cf9264ae4878403159f1cfff7626fe8f9b80f19799cdb707d223e6b686f90f",
+      "bytes": 8830
+    },
+    {
       "path": "packages/core/migration/package.json",
       "sha256": "846fa76546e695fdc96b9d8b742a6de79b146ca09132c72bfe6d1eeae5d57bc7",
       "bytes": 350
@@ -380,8 +395,8 @@
     },
     {
       "path": "packages/integration/deepseek-harness/README.md",
-      "sha256": "50f2f298444ea8a41b393d9b5d2df79e3effca46a4e0607cd67b18711451c826",
-      "bytes": 788
+      "sha256": "19a649e01bcce8981a28e250719c29ed8292588a78d5dadb69858996c232b942",
+      "bytes": 839
     },
     {
       "path": "packages/integration/mywiki-source/package.json",
@@ -390,8 +405,8 @@
     },
     {
       "path": "packages/integration/mywiki-source/src/index.ts",
-      "sha256": "29c722702a907ffbebfdb11e4e4f3ac77cb91f7ebe84f8042fc82eacc9283bfa",
-      "bytes": 11378
+      "sha256": "0ddad6aa999a41d18635dfefc5043caca1a773133754ba7e19ff41538383b156",
+      "bytes": 11494
     },
     {
       "path": "packages/integration/zhihu-precedent/package.json",
@@ -515,8 +530,8 @@
     },
     {
       "path": "pnpm-lock.yaml",
-      "sha256": "c1b3d2cc1eec688d08b13a83e8c66afda93b6dc1231de301f7b8931edba0d747",
-      "bytes": 40636
+      "sha256": "bd23968781991d6834faa781dfc0b8607902eca191175976521ce83fb8aeee5d",
+      "bytes": 40771
     },
     {
       "path": "pnpm-workspace.yaml",
@@ -540,8 +555,8 @@
     },
     {
       "path": "profiles/mywiki.json",
-      "sha256": "d192463797aca881e10d421984192a46039b4e65911666b2d00a632e68721936",
-      "bytes": 315
+      "sha256": "81ac8a95f9e0d72eef947029503a290d7fe02c396885e5440853f2c0f78af58f",
+      "bytes": 366
     },
     {
       "path": "profiles/zhihu.json",
@@ -575,13 +590,13 @@
     },
     {
       "path": "README.md",
-      "sha256": "29d758b2a9885e2125ce7716100531874c470220e095064b8089c59c8fe801b1",
-      "bytes": 10368
+      "sha256": "a9175f1f5a82030a95e3b5bef31460a9ea3e37fe2ce7691571add159ed1cb0cc",
+      "bytes": 6245
     },
     {
       "path": "schemas/README.md",
-      "sha256": "dceca1e0f594c8c45e73b2c6bc40c6b266929bff7d8e65a605f1a2c2198d2e8c",
-      "bytes": 956
+      "sha256": "adea3201a3740ef7493db5bc6373510198412ca404b590c00a57edd5eb63e3f6",
+      "bytes": 991
     },
     {
       "path": "schemas/trace.candidate-precedent.0.1.schema.json",
@@ -619,6 +634,16 @@
       "bytes": 3341
     },
     {
+      "path": "schemas/trace.project-instance.0.1.schema.json",
+      "sha256": "fb4f09e1c2323dce6b06ad20f93d0d02256518cc36b18f513eb83024c8826934",
+      "bytes": 1145
+    },
+    {
+      "path": "schemas/trace.source-profile.0.1.schema.json",
+      "sha256": "0ed9dd8333211f5278f25ef39856681f4b8355a22fd968ebcd27570760a248d7",
+      "bytes": 907
+    },
+    {
       "path": "schemas/trace.template-bundle.0.1.schema.json",
       "sha256": "a82da927bc467ba415adea55290c1da9230bb272304949d3f5f6bc567a901793",
       "bytes": 904
@@ -635,8 +660,8 @@
     },
     {
       "path": "scripts/package.mjs",
-      "sha256": "a947b6e0a1e0cf9cab9ae21ad0e70dd1593ac346900c5198834025f5da5c29b2",
-      "bytes": 2850
+      "sha256": "676d4f2536518662df43ce49ef3c8afd4c622a171793b8f37de05a70e3c74290",
+      "bytes": 3069
     },
     {
       "path": "scripts/test-python.py",
@@ -710,8 +735,8 @@
     },
     {
       "path": "templates/README.md",
-      "sha256": "e9032eb7ca3886c3749adc946febe03591a45904929da4a7ea9ee255d9857fee",
-      "bytes": 1117
+      "sha256": "12ab539f42fe70cd222aa44f39528c6e1b59d7c79f9208ed04c76464db922c93",
+      "bytes": 1637
     },
     {
       "path": "tests/capability_candidate.test.mjs",
@@ -769,6 +794,11 @@
       "bytes": 6458
     },
     {
+      "path": "tests/project_init.test.mjs",
+      "sha256": "f7914d588009a25f24aa41d60760d6898edc8348dcf042635fcf6d7db61a38bb",
+      "bytes": 2737
+    },
+    {
       "path": "tests/python/test_sdk.py",
       "sha256": "5f4d66780e6b2c966ad9cd96c2cc2fa99b567abdf64a200d363e18bd015224e2",
       "bytes": 1418
@@ -809,5 +839,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T11:59:55.103Z"
+  "created_at": "2026-09-09T12:28:22.281Z"
 }

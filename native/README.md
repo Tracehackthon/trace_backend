@@ -1,43 +1,42 @@
-# native/
+# Native 发行与安装边界
 
-`native/` 是 Trace 的**发行与安装边界**，不是领域逻辑。Change Set、上下文、候选、能力和数据规则仍全部由 TypeScript runtime 实现；native 只负责启动、校验、安装及平台相关 sidecar。
+`native/` 负责把已构建的 Trace runtime 安全地交给用户运行：打包、完整性校验、staging 安装、launcher 与一次性的 Codex Plugin 连接。它不承载认知变化、候选、能力或存储领域逻辑。
 
-桌面端 shell 位于 `apps/desktop/`，不放在 `native/`。native 可以为它提供 launcher/sidecar，但不能承载窗口状态、插件发现或 Trace 数据规则。
+普通用户不需要日常打开此目录。日常协作入口始终是 Codex 中的 `$trace`；CLI 只在 Plugin 不可用、需要备份/恢复或进行自动化时使用。
 
-## 用户入口
+## 两个独立的安装动作
 
-安装完成后，在项目目录执行：
+### 1. 安装或更新 Trace runtime
 
-```powershell
-trace init
-trace codex enable
-trace status
-```
-
-Windows 安装目录同时提供 `trace.cmd` 与兼容别名 `trace-runtime.cmd`。两者都会启动同一份发行包 runtime；日常使用优先 `trace`。
-
-从源码制作和安装发行包：
+发行包安装器校验 `release-manifest.json` 的 SHA-256 与字节数，写入 staging 后才原子替换目标。默认拒绝覆盖；显式 `--replace` 时保留旧安装为 `.previous-*` 并写入 receipt。
 
 ```powershell
-corepack pnpm package -- --out C:\abs\trace-release
-node C:\abs\trace-release\native\install.mjs --target C:\abs\trace-installed
-C:\abs\trace-installed\native\launcher\trace.cmd --help
+corepack pnpm package -- --out <release-directory>
+node <release-directory>
+ative\install.mjs --target <installed-runtime-directory>
 ```
 
-`install.mjs` 会先验证 `release-manifest.json` 中每个文件的 SHA-256 与字节数，然后写入 staging 目录并原子替换目标。默认拒绝覆盖；需要升级时显式传 `--replace`。旧安装会保留为 `.previous-*`，安装回执写在目标目录内。
+### 2. 一次性连接 Codex Plugin
+
+runtime 已安装后，先预览再确认：
+
+```powershell
+node <installed-runtime-directory>
+ative\install-codex-plugin.mjs --dry-run
+node <installed-runtime-directory>
+ative\install-codex-plugin.mjs --confirm true
+```
+
+它会复制受管理的 Plugin marketplace、注册 `trace-codex` 并为其 MCP 写入 runtime 位置；**不会**创建或升级项目 `.trace/`、读取认知源、迁移 profile，或启用 hooks。更新 Plugin 才显式追加 `--replace`，且只刷新 `trace-codex@trace-runtime-local`。
+
+完整的项目状态和版本行为见[Codex Plugin 文档](../docs/codex-plugin.md)与[版本、协议与发布](../docs/versioning.md)。
 
 ## 当前分发能力
 
-- `launcher/trace.mjs` / `trace.cmd`：默认产品 CLI；
-- `launcher/trace-runtime.mjs` / `trace-runtime.cmd`：兼容命名的同一 launcher；
-- `install.mjs`：清单校验、staging 安装、原子替换与安装回执；
-- 发行包 materialize 纯 JavaScript `sql.js`（asm build）及运行资产。Node 22–24.1 默认使用它，以避免加载实验性的 `node:sqlite`；Node `>=24.2.0` 默认使用稳定内置 driver。`release-manifest.json.sqlite_driver_bundle` 记录 fallback 身份。
+- `launcher/trace.mjs` / `trace.cmd`：CLI 回退与自动化入口；
+- `launcher/trace-runtime.mjs` / `trace-runtime.cmd`：兼容名称；
+- `install.mjs`：runtime 清单校验、staging 安装、原子替换与 receipt；
+- `install-codex-plugin.mjs`：Plugin 的显式、可预览、可替换安装；
+- SQLite driver materialization：Node `>=24.2.0` 可用稳定内置 driver；较早受支持 Node 使用发行包内的 `sql.js`，避免实验性 warning。
 
-## 维护者边界
-
-- `launcher/` 只负责参数、环境和退出码，不能实现 Change Set 或上下文规则；
-- `sidecars/` 只可放平台相关的沙箱、文件观察或进程辅助程序；
-- `releases/` 记录生成物清单、平台/架构矩阵和哈希，不把二进制提交为源码；
-- native 发行物必须携带 `runtime_version`、`protocol_versions` 和源码/构建哈希；`install.mjs` 不接受未经清单校验的目录。
-
-当前 installer 是跨平台 Node 安装器，不等同于免 Node 的单文件二进制。Node SEA 仍需要单独的目标平台构建、签名和回放门禁；在行为和协议稳定前不把它伪装成已完成的 native binary。
+Node SEA 单文件、签名和真正桌面安装器仍是未来发行物，不因本目录存在而宣称已经完成。

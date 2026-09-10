@@ -4,17 +4,17 @@
 
 ```text
 transient raw prompt
-  → prompt_capture_proposal (hash + 用户摘要/理由，无正文)
-  → user chooses summary | redacted_excerpt | full_private
+  → prompt_capture_proposal（hash + 用户摘要/理由，无正文）
+  → 用户选择 summary | redacted_excerpt | full_private
   → explicit approval + selected content
   → source_snapshot
   → outcome evidence + Change Set
   → candidate_precedent
 ```
 
-- `propose()` 不接收 raw prompt bytes，只接收调用方在 transient 阶段计算的 `prompt_hash`；proposal 默认 `private`，用户可以在回执中看到它和下一步 approval token。
-- `capture()` 需要精确的 `approve:<proposal_record_id>`，并要求在该时刻重新提供用户选择的内容。它不会从 hook、thread 或 event 回读原 prompt。
-- `full_private` 强制为 private snapshot，且 selected content 的 SHA-256 必须与 transient proposal hash 相同；`summary` 与 `redacted_excerpt` 默认 private。只有这一步、且用户明确选择 full private 时，完整 prompt 才会存入 SQLite。
-- `createPrecedent()` 必须有已捕获 prompt source、至少一条 outcome evidence 及 Change Set；案例本身不等于已发布能力。
+- `propose()` 不接收 raw prompt bytes，只接收 transient 阶段计算的 `prompt_hash`；
+- `capture()` 要求精确 approval token，并要求在该时刻重新提供用户选择的内容；不会从 hook/thread/event 回读原 prompt；
+- `full_private` 强制 private snapshot，并校验 selected content SHA-256；`summary` 和 `redacted_excerpt` 默认 private；
+- `createPrecedent()` 需要已捕获的 prompt source、至少一条 outcome evidence 及 Change Set；案例不等于已发布能力。
 
-CLI 对应 `prompt-case propose|capture|precedent`。正常响应只含 refs、mode、classification 和下一步，不回显 selected content。
+在 Codex 中，用户先通过 `$trace-review` 看“有什么候选、为什么值得保留、尚未保存什么”；只有明确表达要沉淀后，Agent 才进入 capture proposal。正常响应只包含 refs、mode、classification 与下一步，不回显 selected content。

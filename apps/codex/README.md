@@ -6,16 +6,15 @@ Codex 是 Trace 当前的第一个真实宿主。它保留 Codex 的原生能力
 
 ## 用户接入
 
-在项目根目录：
+日常入口是 Codex 中的 `$trace`，而不是要求用户了解 hook、SQLite 或 CLI 参数：
 
-```powershell
-trace init
-trace codex enable --dry-run
-trace codex enable
-trace codex status
+```text
+$trace 帮我开始这个项目。
+$trace 在 Codex 中启用接续。
+$trace 现在的来源使用状态是什么？
 ```
 
-`codex enable` 以预览、明确确认、备份和 rollback receipt 更新用户级 `hooks.json`。安装的是不绑定任何项目路径的入口：
+`$trace` 会先展示项目边界与 hook proposal；用户明确采用后，MCP 才调用同一套安装器更新用户级 `hooks.json`。CLI `trace codex enable --dry-run` / `trace codex enable` 是无 Plugin 场景下的等价运维回退。安装的是不绑定任何项目路径的入口：
 
 ```text
 Codex event cwd
@@ -61,7 +60,7 @@ Codex event cwd
 - `source_read`：Codex 实际读到某些相对页，Trace 核验并保存 locator + revision/hash；
 - `source_access_unclassified`：检测到来源访问但不能可靠分类，绝不冒充已读。
 
-用户运行 `trace sources` 或 `trace status` 就能看到这些状态。默认不显示 prompt、页面正文、绝对路径、工具参数或工具输出。
+用户通过 `$trace` 查看这些状态；`trace sources` 或 `trace status` 只保留为 CLI 回退。默认不显示 prompt、页面正文、绝对路径、工具参数或工具输出。
 
 ## profile 和边界
 
@@ -79,7 +78,11 @@ Codex event cwd
 
 `native_observed` 是**可观测、可预算**边界，不是文件系统 ACL。Codex 官方 hook 覆盖 Bash、MCP 和多数本地函数工具，但不是所有专用工具路径；需要硬 per-file 隔离的来源不得暴露给此模式，应设为 `disabled` 并等待具备真实权限契约的 brokered adapter。[官方 Codex Hooks 文档](https://learn.chatgpt.com/zh-Hans/docs/hooks)
 
-`activation_excluded_paths` 保留给显式 MyWiKi interactive search 的候选过滤；它不能用于宣称 native host 不会访问某个文件。这样避免把旧的“自动 activation”语义误当作安全控制。
+`activation_excluded_paths` 只保留给旧式显式来源搜索的候选过滤；它不能用于宣称 native host 不会访问某个文件。这样避免把旧的“自动 activation”语义误当作安全控制。
+
+## Plugin 更新与维护者接口
+
+安装或更新 `trace-codex` Plugin 不会启用 hooks，也不会迁移任何项目。hooks 仍需单独 proposal → 用户采用 → 备份/receipt；旧项目仍按当前 cwd 找到自己的 `.trace/`。
 
 ## 维护者接口
 

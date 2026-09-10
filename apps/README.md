@@ -1,26 +1,28 @@
-# apps/
+# 产品入口与宿主边界
 
-`apps/` 只做**产品入口或宿主边界适配**，不承载领域判断。协议、状态机和存储位于 `packages/`，不依赖某个宿主。
+`apps/` 放置用户接触到的入口和宿主适配层。它们不拥有领域规则：协议、版本、状态机和 SQLite 语义全部在 `packages/`，因此 Codex、未来桌面端和 SDK 可以共享同一个项目本地 `.trace/`。
 
-## 用户从哪里开始
+## 用户应该从哪里开始
 
-日常 Codex 用户从 `trace-codex` Plugin 的 `$trace` 开始；它通过本地 MCP 显示状态、提案与回执，不要求用户填写 CLI 参数。CLI 是脚本、恢复与无 Plugin 环境的后备入口：
+日常 Codex 使用者从 `trace-codex` Plugin 开始，而不是从 CLI 命令列表开始：
 
-```powershell
-trace init
-trace codex enable
-trace status
-trace inbox
+```text
+$trace 帮我开始这个项目，并说明什么会被保存。
+$trace-adapt 我希望你更适配我的协作方式。
+$trace-review 看看有哪些候选正在等我决定。
 ```
 
-它会把项目状态放在 `<项目>/.trace/`，不会要求用户理解 SQLite、protocol version、lineage 或内部 JSON 参数。完整说明见根目录 [README](../README.md)。
+Plugin 的 Skill 负责理解意图和解释选择；本地 MCP 负责读取安全摘要、生成 proposal，并且只在用户明确采用后执行变更。完整接入见[Trace Codex Plugin](../docs/codex-plugin.md)。
+
+CLI 仅是恢复、备份、诊断、脚本和无 Plugin 环境的回退入口；它不是面向普通用户的主流程。
 
 ## 目录职责
 
-- `mcp/`：标准 stdio MCP server。直接调用 product application service，不 shell-out 到 CLI；所有写操作都走 proposal + explicit adoption；
-- `cli/`：产品 CLI 与维护者的协议命令。默认 `trace` 呈现 init/status/inbox/review/sources/abilities/codex/doctor/backup；内部自动化使用 `trace internal ...`；
-- `codex/`：当前 Codex hook adapter，只把受控事件映射到 runtime。原始 prompt 只作 transient lookup，不会自动进入持久化状态；
-- SDK server：位于 `packages/sdk/server/`，给 TypeScript/Python SDK 提供 stdio JSONL RPC；
-- `desktop/`：**刻意保留、尚未实现**的 desktop shell/main/renderer 边界。没有真实桌面事件协议前，不伪造完成状态；未来只能通过 SDK/RPC 驱动 runtime，不能直接读写 core storage。
+| 目录 | 作用 | 不做什么 |
+|---|---|---|
+| `mcp/` | 标准 stdio MCP server，将 Codex 的自然语言入口接到 application service | 不保存 raw prompt、来源正文、凭证或工具参数；不 shell-out 拼 CLI |
+| `cli/` | 发行包 CLI、运维和兼容入口 | 不定义日常交互产品模型 |
+| `codex/` | 将 Codex hook 事件变成 source lease、预算检查与安全 evidence | 不替 Codex 搜索、读取、推理或决定采纳 |
+| `desktop/` | 未来桌面工作台的明确宿主边界 | 当前没有伪造的 desktop 实现 |
 
-产品入口可替换；任何新宿主都必须先定义事件、权限、回放和验收边界，再接入 runtime。
+任何新宿主先定义事件、权限、回放与验收契约，再通过 application service / SDK 接入；不得直接读写 core storage。

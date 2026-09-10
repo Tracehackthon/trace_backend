@@ -1,26 +1,22 @@
 # Trace Templates
 
-模板是冷启动输入，不是用户认知源本身。一个 Bundle 分开声明三类内容：
+模板是冷启动输入，不是用户认知源、聊天记录或人格画像。它把可替换的默认能力、来源路由与协作治理分开，让新用户有一个可用起点，同时不伪造“系统已经理解你”。
 
-- `capabilities/`：预设行动能力；
-- `sources/`：预设认知源路由、作用域和权限；
-- `contexts/`：Trace 的激活、可见性、回执和治理上下文。
+## 用户选择方式
 
-## 用户如何选择
+在 Codex 中优先说：
 
-`trace-runtime project init` 会在项目下创建 `.trace/`。默认的 `local` 模式建立空的项目认知源目录，适合冷启动；`external` 模式通过用户自己提供的 source profile 连接已有个人认知源；`team` 模式连接明确授权的团队认知源；`empty` 模式完全不读取认知源。
-
-```powershell
-node <RUNTIME_DIR>/dist/apps/cli/src/main.js template list
-node <RUNTIME_DIR>/dist/apps/cli/src/main.js template preview --manifest <TEMPLATE_MANIFEST>
+```text
+$trace 帮我开始这个项目，并说明可选模板和来源边界。
 ```
 
-确认 additions、权限和兼容性后，再使用带 `--confirm true` 的 `project init` 或 `template install`。模板更新必须保留用户 overlay，并通过三方 diff、Change Set 和验收后才激活。
+Trace 先展示 template / source mode proposal；用户明确 adopt 后才创建项目 `.trace/`。CLI `template list`、`template preview`、`project init` 只保留为自动化或无 Plugin 环境的回退入口。
 
-可选冷启动模板：
+| 模式 | 用途 | 默认边界 |
+|---|---|---|
+| `local` | 冷启动或项目自己的认知源 | 在项目内创建空来源目录 |
+| `external` | 用户已授权的个人来源 | profile 只保存为本地配置，lock 不含 root |
+| `team` | 明确授权的团队来源 | 需要显式团队 profile / 项目副本 |
+| `empty` | 不授权任何认知源 | 只安装协议与空上下文 |
 
-- `trace.codex-starter`：Codex + 共同思考治理结构；可使用项目本地认知源，也可显式连接用户选择的外部 profile。
-- `trace.codex-empty`：只安装协议和空上下文，适合不授权认知源的用户。
-- `trace.codex-team`：默认 team 作用域，要求显式选择团队认知源或使用项目内团队副本。
-
-认知源 profile 至少包含 `source_id`、`root`、`user_id`。项目 lockfile 只保存 `source_id`、`profile_hash` 和 `scope_type`，不把 root 或凭证写入模板锁；profile 本身作为本地配置管理。
+可选 starter：`trace.codex-starter`、`trace.codex-empty`、`trace.codex-team`。模板更新只影响以后初始化的新项目；已有项目必须有独立 preview、三方 diff 和 adoption，当前不自动合并。

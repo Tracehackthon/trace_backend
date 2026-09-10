@@ -114,27 +114,20 @@ trace backup create
 
 从源码仓库开发时使用 `corepack pnpm exec trace <command>`；发行包安装后的 Windows launcher 同时提供 `trace` 与兼容名称 `trace-runtime`。已有 CLI 项目不会因为安装 Plugin 或升级 runtime 自动被改写。
 
-## 日常使用：从协作到可见沉淀
+## 当 Plugin 暂不可用：CLI 恢复与自动化
+
+不应把下面的命令当成普通用户的每日流程。它们服务于脚本、诊断、备份，或尚未安装 Plugin 的环境：
 
 ```powershell
-trace status       # 当前工作线、来源、候选与能力概览
-trace inbox        # 仍等待你讨论或决定的候选
-trace review <ID>  # 查看候选的理由、范围、保存状态和下一步
-trace sources      # 查看当前项目已授权认知源，以及 Codex 实际检索/读取的安全证据
-trace profile      # 查看 Agent 当前的协作契约、认知源地图及版本 lock
-trace upgrade      # 只读检查运行版本变化和需要你确认的迁移动作
-trace abilities    # 查看候选能力，而非把它们误当作已发布能力
+trace status
+trace upgrade      # 只读检查 runtime 与项目 lock 的差异
+trace doctor
+trace backup create
 ```
 
-若一个 prompt 值得留下，Trace 首先只保存一个**不含正文**的候选。你在 `trace inbox` 中看见它，审阅后才可以：
+`trace inbox`、`trace review`、`trace sources`、`trace profile` 与 `trace abilities` 仍可作为 CLI 回退入口；在 Codex 中优先让 `$trace` / `$trace-review` 将相同状态翻译成用户能审阅的提案、候选与下一步。
 
-```powershell
-trace review <ID> --save <绝对内容文件路径>
-```
-
-候选指定保存方式为 `summary`、`redacted_excerpt` 或 `full_private`。只有明确选择 `full_private` 且内容与最初 transient hash 匹配时，完整私有 prompt 才会被保存。
-
-保存案例也不等于发布能力：它先成为可追溯的来源快照；只有补充结果证据、形成候选前例、经过验证并由用户采用后，才可以进入能力发布流程。
+一次 prompt 值得留下时，Trace 仍先创建不含正文的候选。完整案例必须由用户后续明确选择 `summary`、`redacted_excerpt` 或 `full_private`，随后才进入 `source_snapshot → candidate_precedent`；保存案例不等于发布能力。
 
 ## 保持可恢复、可审计
 

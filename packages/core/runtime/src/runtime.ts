@@ -7,6 +7,7 @@ import type {CreateDataRecord, DataEnvelope, DataKind, UpdateDataRecord} from '.
 import {buildCapabilityCandidateRecord, type CapabilityCandidateInput} from '../../capability-candidate/src/index.js';
 import {SqliteTraceEventStore, type CreateTraceEvent, type TraceEvent} from '../../observability/src/index.js';
 import {PromptCaseCaptureService, type CapturePromptCase, type CreatePromptCaptureProposal, type CreatePromptCasePrecedent} from '../../case-capture/src/index.js';
+import {buildHostRetrievalEvidenceRecord, type CreateHostRetrievalEvidence} from '../../retrieval-evidence/src/index.js';
 
 export interface TraceRuntimePaths {
   changeStateFile?: string;
@@ -85,6 +86,11 @@ export class TraceRuntime {
   }
 
   createPromptCasePrecedent(input: CreatePromptCasePrecedent) { return this.promptCases.createPrecedent(input); }
+
+  /** Persist only the defined, provenance-only evidence contract for host source use. */
+  recordHostRetrievalEvidence(input: CreateHostRetrievalEvidence) {
+    return this.data.create(buildHostRetrievalEvidenceRecord(input));
+  }
 
   updateData(recordId: string, input: UpdateDataRecord) {
     return this.data.update(recordId, input);

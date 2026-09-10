@@ -1,6 +1,6 @@
 {
   "bundle_id": "trace.codex",
-  "bundle_version": "0.2.0",
+  "bundle_version": "0.3.0",
   "runtime": "trace-runtime@0.6.0",
   "host": "codex",
   "packages": [
@@ -10,6 +10,7 @@
     "core/change-set",
     "core/continuity",
     "core/context",
+    "core/retrieval-evidence",
     "core/migration",
     "core/runtime",
     "core/precedent",
@@ -26,7 +27,7 @@
   ],
   "protocols": [
     "trace.change-set@0.2.0",
-    "trace.data-envelope@0.2.0",
+    "trace.data-envelope@0.3.0",
     "trace.context-record@0.2.0",
     "trace.continuity@0.2.0",
     "trace.template-bundle@0.2.0",
@@ -47,7 +48,9 @@
     "event_type": "codex.turn.started",
     "hook_event_types": [
       "SessionStart",
-      "UserPromptSubmit"
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse"
     ],
     "routing": "event-cwd-to-nearest-trace-project",
     "command": "trace internal codex hook-stdio --route-from-event-cwd"

@@ -28,12 +28,11 @@ test('effect evaluation runner writes privacy-safe paired baseline and Trace man
   assert.equal(evaluation.trace.cases.length, 12);
   assert.equal(evaluation.baseline.model, null);
   assert.equal(evaluation.trace.model, null);
-  assert.equal(evaluation.baseline.metrics.recall_at_k, 0);
-  assert.equal(evaluation.trace.metrics.precision_at_k, 1);
-  assert.equal(evaluation.trace.metrics.recall_at_k, 1);
+  assert.equal(evaluation.baseline.metrics.evidence_coverage, 0);
+  assert.equal(evaluation.trace.metrics.evidence_coverage, 1);
+  assert.ok(evaluation.trace.metrics.observed_read_evidence > 0);
   assert.equal(evaluation.trace.metrics.forbidden_read_rate, 0);
-  assert.equal(evaluation.trace.metrics.irrelevant_activation_rate, 0);
-  assert.equal(evaluation.pair.delta.recall_at_k, 1);
+  assert.equal(evaluation.pair.delta.evidence_coverage, 1);
   const durableText = JSON.stringify(evaluation.trace);
   assert.equal(durableText.includes('private finance budget forecast'), false, 'raw prompts do not enter evaluation snapshots');
   assert.equal(durableText.includes('Private finance budget forecast must never'), false, 'source bodies do not enter evaluation snapshots');

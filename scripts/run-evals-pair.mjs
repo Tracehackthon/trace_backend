@@ -56,9 +56,8 @@ function main() {
     baseline: {manifest: 'baseline/eval-manifest.json', metrics: baseline.metrics},
     trace: {manifest: 'trace/eval-manifest.json', metrics: trace.metrics},
     delta: {
-      precision_at_k: trace.metrics.precision_at_k - baseline.metrics.precision_at_k,
-      recall_at_k: trace.metrics.recall_at_k - baseline.metrics.recall_at_k,
-      irrelevant_activation_rate: trace.metrics.irrelevant_activation_rate - baseline.metrics.irrelevant_activation_rate,
+      evidence_coverage: trace.metrics.evidence_coverage - baseline.metrics.evidence_coverage,
+      observed_read_evidence: trace.metrics.observed_read_evidence - baseline.metrics.observed_read_evidence,
       forbidden_read_rate: trace.metrics.forbidden_read_rate - baseline.metrics.forbidden_read_rate,
     },
   };

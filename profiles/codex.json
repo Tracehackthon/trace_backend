@@ -3,10 +3,10 @@
   "host": "codex",
   "runtime_package": "trace-runtime",
   "runtime_version": "0.6.0",
-  "bundle": "trace.codex@0.2.0",
+  "bundle": "trace.codex@0.3.0",
   "protocols": [
     "trace.change-set@0.2.0",
-    "trace.data-envelope@0.2.0",
+    "trace.data-envelope@0.3.0",
     "trace.context-record@0.2.0",
     "trace.continuity@0.2.0",
     "trace.template-bundle@0.2.0",
@@ -27,10 +27,13 @@
     "event_type": "codex.turn.started",
     "hook_event_types": [
       "SessionStart",
-      "UserPromptSubmit"
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse"
     ],
     "routing": "event-cwd-to-nearest-trace-project",
-    "command": "trace internal codex hook-stdio --route-from-event-cwd"
+    "command": "trace internal codex hook-stdio --route-from-event-cwd",
+    "source_retrieval": "host-native-observed-with-provenance-evidence"
   },
   "state_files": {
     "project_sqlite": ".trace/state/trace.sqlite",

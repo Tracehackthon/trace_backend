@@ -12,13 +12,13 @@ const origin = {provider: 'test', source_id: 'legacy-source', captured_at: '2026
 const producer = {component: 'test', version: '1.0.0', run_id: 'run-legacy'};
 const lineage = {parent_refs: [], source_refs: [], correlation_id: 'corr-legacy', causation_id: 'cause-legacy'};
 
-test('Data envelope validates historical integrity before an in-memory v0.1 to v0.2 upcast', () => {
+test('Data envelope validates historical integrity before an in-memory v0.1 to v0.2 to v0.3 upcast', () => {
   const current = buildDataEnvelope({kind: 'source_snapshot', schema_id: 'test.source', schema_version: '0.1.0', subject: {type: 'source', id: 'legacy-source'}, scope: {type: 'personal', id: 'user'}, origin, producer, lineage, classification: 'private', payload: {source_id: 'legacy-source', provider: 'test', external_id: 'legacy-source', title: 'Legacy source', content: 'content', captured_at: origin.captured_at, content_hash: origin.content_hash}});
   const legacy = structuredClone(current);
   legacy.protocol_version = '0.1.0';
   legacy.integrity = {algorithm: 'sha256', payload_hash: payloadHash(legacy.payload), envelope_hash: envelopeHash({...legacy, integrity: undefined})};
   const upgraded = validateDataEnvelope(legacy);
-  assert.equal(upgraded.protocol_version, '0.2.0');
+  assert.equal(upgraded.protocol_version, '0.3.0');
   assert.equal(upgraded.integrity.envelope_hash, envelopeHash({...upgraded, integrity: undefined}));
   assert.throws(() => validateDataEnvelope({...legacy, protocol_version: '9.9.9'}), error => error?.code === 'PROTOCOL_MIGRATION_REQUIRED');
 });

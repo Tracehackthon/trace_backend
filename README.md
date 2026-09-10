@@ -69,14 +69,14 @@ Trace 当前先服务于长期使用 Codex 的个人与团队。每个项目有�
 
 已实现的基础能力包括：
 
-- 为 Codex 提供受控的 Activation Pack：只传来源引用、读取指针、预算、禁止范围，不灌入完整 Wiki 或全部聊天；用户级 hook 按每次事件的 cwd 路由到对应项目，不会被最后一次启用的项目绑死；
+- 为 Codex 提供受控的认知源 access lease：Trace 只给正式来源根、前缀、预算与隐私规则；**Codex 自己**用原生搜索/读取工具决定和执行检索。Trace 不再用词法算法预选页面；用户级 hook 按每次事件的 cwd 路由到对应项目，不会被最后一次启用的项目绑死；
 - 把 prompt 和外部材料先做成可见候选；raw prompt 不会静默写入状态库；
 - 让用户明确选择保存摘要、脱敏片段或完整私有案例；
 - 让知乎等外部来源先成为带相似性、差异和风险的候选前例，而非自动真理；
 - 将候选前例与能力候选、来源、版本和验证证据连成可追溯链；
-- 记录 activation / persistence receipt，让用户知道本轮激活了哪些持久化引用和读取指针、没有沉淀什么；读取指针的绝对路径只发给当前 Codex 进程，状态库只保存相对 locator、revision、hash 与用途；
-- 通过 `doctor`、backup、restore、revision、hash 与 lineage 保证数据可核验、可恢复。
-- 用 12 条可审阅的合成 golden case 回放 MyWiKi 读取指针、禁止自动激活页面和 Codex cwd 路由；每次可生成 privacy-safe baseline / Trace 评估清单，而不是把“测试通过”当成效果结论。
+- 记录 activation / persistence receipt 与 host retrieval evidence，让用户知道来源是“已提供、已检索、已读取还是未分类访问”，以及哪些内容没有沉淀；状态库只保存相对 locator、revision/hash 和事件 hash，不保存绝对路径、来源正文、prompt 或工具参数；
+- 通过 `doctor`、backup、restore、revision、hash 与 lineage 保证数据可核验、可恢复；
+- 用 hook 回放验证真实的 Codex `UserPromptSubmit` / `PreToolUse` / `PostToolUse` 路径、项目 cwd 路由、读取预算和 privacy boundary；评估清单只衡量 evidence coverage，不把“测试通过”或 fixture 回放冒充为模型效果结论。
 
 > 当前版本已经打好候选、来源、接续、审计与发布治理的底座；完整的「判断采用 → 激活 → 验证 / 限制 / 撤回」用户工作流仍在持续产品化。Trace 不会把尚未完成的 UI 或宿主适配伪装成已实现能力。
 
@@ -103,7 +103,7 @@ trace status
 trace status       # 当前工作线、来源、候选与能力概览
 trace inbox        # 仍等待你讨论或决定的候选
 trace review <ID>  # 查看候选的理由、范围、保存状态和下一步
-trace sources      # 查看当前项目已授权的认知源
+trace sources      # 查看当前项目已授权认知源，以及 Codex 实际检索/读取的安全证据
 trace abilities    # 查看候选能力，而非把它们误当作已发布能力
 ```
 
@@ -134,6 +134,7 @@ trace backup restore --file <备份文件绝对路径> --replace
 - [维护、备份与恢复](docs/operations.md)
 - [产品边界与架构](docs/architecture.md)
 - [版本、协议与发布](docs/versioning.md)
+- [Codex 原生检索与 Trace 证据架构](docs/host-native-retrieval.md)
 - [效果评估 fixtures 与边界](tests/evals/README.md)
 - [完整文档导航](docs/README.md)
 

@@ -6,7 +6,7 @@ import path from 'node:path';
 import {MyWikiSourceProvider} from '../../dist/packages/integration/mywiki-source/src/index.js';
 import {aggregateEvaluation, evaluateCase, fixtureSourceProfile, loadEvalCases, materializeFixtureSource} from './lib.mjs';
 
-test('MyWiKi activation retrieval meets the synthetic golden set without activating excluded pages', () => {
+test('MyWiKi interactive source search meets the synthetic golden set without returning excluded pages', () => {
   const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-eval-source-'));
   materializeFixtureSource(sourceRoot);
   const provider = new MyWikiSourceProvider(fixtureSourceProfile(sourceRoot));
@@ -19,5 +19,5 @@ test('MyWiKi activation retrieval meets the synthetic golden set without activat
   assert.equal(metrics.recall_at_k, 1);
   assert.equal(metrics.irrelevant_activation_rate, 0);
   assert.equal(metrics.forbidden_read_rate, 0);
-  assert.deepEqual(provider.search('private finance budget forecast', 3), [], 'excluded private content must not enter automatic activation');
+  assert.deepEqual(provider.search('private finance budget forecast', 3), [], 'excluded private content must not enter interactive source search');
 });

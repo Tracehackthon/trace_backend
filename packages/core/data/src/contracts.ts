@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {canonicalize, ProtocolError, ProtocolVersionRegistry, rejectUnknown, requireObject, requireText, type ProtocolVersioned, type RecordRef, validateRecordRef} from '../../protocol/src/index.js';
 
 export const DATA_PROTOCOL_ID = 'trace.data-envelope' as const;
-export const DATA_PROTOCOL_VERSION = '0.2.0' as const;
+export const DATA_PROTOCOL_VERSION = '0.3.0' as const;
 
 export const DATA_KINDS = [
   'source_snapshot',
@@ -12,6 +12,7 @@ export const DATA_KINDS = [
   'capability_candidate',
   'prompt_pack',
   'runtime_event',
+  'host_retrieval_evidence',
   'artifact',
 ] as const;
 export type DataKind = (typeof DATA_KINDS)[number];
@@ -111,6 +112,10 @@ export const REQUIRED_PAYLOAD_FIELDS: Readonly<Record<DataKind, readonly string[
   capability_candidate: ['capability_id', 'activation_contract', 'input_contract', 'output_contract', 'acceptance_contract', 'evidence_record_ids'],
   prompt_pack: ['pack_id', 'capability_record_id', 'sections', 'runtime_budget'],
   runtime_event: ['run_id', 'event_name', 'input_refs', 'output_refs', 'outcome'],
+  // Provenance-only record of what a host actually did with an authorized
+  // cognitive source. Its specialised builder rejects prompt/source/tool
+  // bodies before this generic envelope validator sees the payload.
+  host_retrieval_evidence: ['evidence_id', 'event_kind', 'source_id', 'host', 'host_session_id', 'locators', 'page_versions', 'policy', 'observed_at', 'content_hash'],
   artifact: ['artifact_id', 'artifact_version', 'manifest', 'content_hash'],
 };
 
@@ -121,9 +126,17 @@ const dataUpcasters = new ProtocolVersionRegistry<AnyDataProtocol>();
 dataUpcasters.register({
   protocol_id: DATA_PROTOCOL_ID,
   from_version: '0.1.0',
-  to_version: DATA_PROTOCOL_VERSION,
+  to_version: '0.2.0',
   // v0.2 adds explicit prompt-capture admission semantics at the kind layer;
   // existing envelope fields remain compatible.
+  upcast(value) { return {...value, protocol_version: '0.2.0'}; },
+});
+dataUpcasters.register({
+  protocol_id: DATA_PROTOCOL_ID,
+  from_version: '0.2.0',
+  to_version: DATA_PROTOCOL_VERSION,
+  // v0.3 adds the closed host_retrieval_evidence kind. Historical envelopes
+  // keep their persisted bytes and are only upgraded in memory on read.
   upcast(value) { return {...value, protocol_version: DATA_PROTOCOL_VERSION}; },
 });
 
@@ -165,6 +178,60 @@ function validateRefList(value: unknown, field: string): RecordRef[] {
   return refs;
 }
 
+function safeEvidenceLocator(value: unknown, field: string): string {
+  const locator = requireText(value, field, 2000).replaceAll('\\', '/');
+  if (!locator.toLowerCase().endsWith('.md') || locator.startsWith('/') || locator.split('/').some(part => part === '' || part === '.' || part === '..')) throw new ProtocolError('INVALID_FIELD', `${field} must be a safe relative Markdown locator`);
+  return locator;
+}
+
+/**
+ * This record is deliberately stricter than a normal data payload. The
+ * generic Data Ledger must not become a bypass that can put a raw prompt,
+ * source body, absolute root, tool input or tool output beside the evidence.
+ */
+function validateHostRetrievalEvidencePayload(payload: Record<string, unknown>): void {
+  const allowed = ['evidence_id', 'event_kind', 'source_id', 'host', 'host_session_id', 'host_turn_id', 'host_tool_name', 'host_tool_use_id', 'input_hash', 'output_hash', 'locators', 'page_versions', 'policy', 'observed_at', 'content_hash'];
+  rejectUnknown(payload, allowed, 'host_retrieval_evidence.payload');
+  requireText(payload.evidence_id, 'host_retrieval_evidence.evidence_id', 240);
+  if (!['source_access_offered', 'source_search', 'source_read', 'source_access_unclassified'].includes(payload.event_kind as string)) throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.event_kind is invalid');
+  requireText(payload.source_id, 'host_retrieval_evidence.source_id', 240);
+  if (payload.host !== 'codex') throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.host is invalid');
+  requireText(payload.host_session_id, 'host_retrieval_evidence.host_session_id', 240);
+  if (payload.host_turn_id !== undefined) requireText(payload.host_turn_id, 'host_retrieval_evidence.host_turn_id', 240);
+  if (payload.host_tool_name !== undefined) requireText(payload.host_tool_name, 'host_retrieval_evidence.host_tool_name', 160);
+  if (payload.host_tool_use_id !== undefined) requireText(payload.host_tool_use_id, 'host_retrieval_evidence.host_tool_use_id', 240);
+  if (payload.input_hash !== undefined) requireHash(payload.input_hash, 'host_retrieval_evidence.input_hash');
+  if (payload.output_hash !== undefined) requireHash(payload.output_hash, 'host_retrieval_evidence.output_hash');
+  if (!Array.isArray(payload.locators) || payload.locators.length > 64) throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.locators must contain at most 64 locators');
+  const locators = payload.locators.map((value, index) => safeEvidenceLocator(value, `host_retrieval_evidence.locators[${index}]`));
+  if (new Set(locators).size !== locators.length) throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.locators contains duplicates');
+  if (!Array.isArray(payload.page_versions) || payload.page_versions.length > 64) throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.page_versions must contain at most 64 pages');
+  const versions = payload.page_versions.map((value, index) => {
+    const page = requireObject(value, `host_retrieval_evidence.page_versions[${index}]`);
+    rejectUnknown(page, ['locator', 'revision', 'content_hash'], `host_retrieval_evidence.page_versions[${index}]`);
+    const locator = safeEvidenceLocator(page.locator, `host_retrieval_evidence.page_versions[${index}].locator`);
+    if (!Number.isInteger(page.revision) || Number(page.revision) < 1) throw new ProtocolError('INVALID_FIELD', `host_retrieval_evidence.page_versions[${index}].revision must be positive`);
+    requireHash(page.content_hash, `host_retrieval_evidence.page_versions[${index}].content_hash`);
+    return locator;
+  });
+  if (new Set(versions).size !== versions.length) throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.page_versions contains duplicates');
+  if (payload.event_kind === 'source_read' && (locators.length === 0 || versions.length === 0 || locators.length !== versions.length || locators.some(locator => !versions.includes(locator)))) throw new ProtocolError('INVALID_FIELD', 'source_read evidence must have matching locators and page_versions');
+  if (payload.event_kind !== 'source_read' && versions.length > 0) throw new ProtocolError('INVALID_FIELD', 'only source_read evidence may have page_versions');
+  if (payload.event_kind !== 'source_access_offered' && (payload.host_tool_name === undefined || payload.input_hash === undefined)) throw new ProtocolError('INVALID_FIELD', 'tool evidence requires host_tool_name and input_hash');
+  const policy = requireObject(payload.policy, 'host_retrieval_evidence.policy');
+  rejectUnknown(policy, ['mode', 'allowed_prefixes', 'max_reads_per_turn', 'policy_hash'], 'host_retrieval_evidence.policy');
+  if (policy.mode !== 'native_observed' && policy.mode !== 'disabled') throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.policy.mode is invalid');
+  if (!Array.isArray(policy.allowed_prefixes) || policy.allowed_prefixes.length === 0 || policy.allowed_prefixes.length > 32) throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.policy.allowed_prefixes is invalid');
+  for (const [index, prefixValue] of policy.allowed_prefixes.entries()) {
+    const prefix = requireText(prefixValue, `host_retrieval_evidence.policy.allowed_prefixes[${index}]`, 500).replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
+    if (!prefix || prefix.split('/').some(part => part === '' || part === '.' || part === '..')) throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.policy.allowed_prefixes contains an unsafe prefix');
+  }
+  if (!Number.isInteger(policy.max_reads_per_turn) || Number(policy.max_reads_per_turn) < 1 || Number(policy.max_reads_per_turn) > 64) throw new ProtocolError('INVALID_FIELD', 'host_retrieval_evidence.policy.max_reads_per_turn is invalid');
+  requireHash(policy.policy_hash, 'host_retrieval_evidence.policy.policy_hash');
+  requireIsoTimestamp(payload.observed_at, 'host_retrieval_evidence.observed_at');
+  requireHash(payload.content_hash, 'host_retrieval_evidence.content_hash');
+}
+
 export function payloadHash(payload: Record<string, unknown>): string {
   return jsonHash(payload);
 }
@@ -193,10 +260,10 @@ export function validateDataEnvelope(value: unknown, checkIntegrity = true): Dat
   const raw = requireObject(value, 'data_envelope');
   if (raw.protocol_id !== DATA_PROTOCOL_ID) throw new ProtocolError('PROTOCOL_MISMATCH', 'Unsupported data envelope protocol');
   let object: Record<string, unknown> = raw;
-  if (raw.protocol_version === '0.1.0') {
-    // Verify the historical hash against the historical bytes before creating
-    // an in-memory v0.2 view. The persisted revision remains untouched; a
-    // later update appends the canonical version with a new envelope hash.
+  if (raw.protocol_version === '0.1.0' || raw.protocol_version === '0.2.0') {
+    // Verify historical bytes before creating an in-memory v0.3 view. The
+    // persisted revision remains untouched; a later update appends the
+    // canonical version with a new envelope hash.
     const legacyIntegrity = requireObject(raw.integrity, 'data_envelope.integrity');
     const legacyEnvelope = {...raw, integrity: legacyIntegrity};
     const {integrity: _legacyIntegrity, ...legacyWithoutIntegrity} = legacyEnvelope;
@@ -225,7 +292,8 @@ export function validateDataEnvelope(value: unknown, checkIntegrity = true): Dat
   const kind = object.kind as DataKind;
   const missing = REQUIRED_PAYLOAD_FIELDS[kind].filter(field => !hasPath(payload, field));
   if (missing.length > 0) throw new ProtocolError('MISSING_REQUIRED_DATA', `${kind} payload is missing: ${missing.join(', ')}`);
-  const sourceLike = kind === 'source_snapshot' || kind === 'prompt_capture_proposal';
+  if (kind === 'host_retrieval_evidence') validateHostRetrievalEvidencePayload(payload);
+  const sourceLike = kind === 'source_snapshot' || kind === 'prompt_capture_proposal' || kind === 'host_retrieval_evidence';
   if (sourceLike && (object.lineage as Record<string, unknown> | undefined)?.['parent_refs'] && ((object.lineage as Record<string, unknown>).parent_refs as unknown[]).length > 0) throw new ProtocolError('INVALID_LINEAGE', `${kind} cannot have parent_refs`);
   if (!sourceLike && !Array.isArray((object.lineage as Record<string, unknown> | undefined)?.['source_refs']) && !Array.isArray((object.lineage as Record<string, unknown> | undefined)?.['parent_refs'])) throw new ProtocolError('INVALID_LINEAGE', `${kind} requires lineage refs`);
   const lineage = validateDataLineage(object.lineage);

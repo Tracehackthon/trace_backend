@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.source-profile.0.2",
+  "title": "Trace cognitive source profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_id", "root", "formal_prefix", "read_enabled", "write_enabled", "user_id", "scope_type", "source_mode"],
+  "properties": {
+    "source_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "root": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "formal_prefix": {"type": "string", "minLength": 1, "maxLength": 200},
+    "read_enabled": {"type": "boolean"},
+    "write_enabled": {"type": "boolean"},
+    "user_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "scope_type": {"enum": ["personal", "project", "team", "domain"]},
+    "source_mode": {"enum": ["local", "external", "team", "empty"]},
+    "activation_excluded_paths": {"type": "array", "maxItems": 128, "items": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/).+\\.md$"}},
+    "host_retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["native_observed", "disabled"]},
+        "allowed_prefixes": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1}},
+        "max_reads_per_turn": {"type": "integer", "minimum": 1, "maximum": 64}
+      }
+    },
+    "policy": {"type": "string", "maxLength": 2000}
+  }
+}

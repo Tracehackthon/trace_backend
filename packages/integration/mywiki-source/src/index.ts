@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import type {CreateDataRecord} from '../../../core/data/src/index.js';
 import {requireText as text} from '../../../core/protocol/src/index.js';
+import {normalizeHostRetrievalPolicy, type HostRetrievalPolicy} from '../../../core/retrieval-evidence/src/index.js';
 
 export const MYWIKI_SOURCE_ID = 'trace.mywiki-formal-source' as const;
 export const MYWIKI_SOURCE_VERSION = '0.1.0' as const;
@@ -18,6 +19,12 @@ export interface MyWikiSourceProfile {
   source_mode?: 'local' | 'external' | 'team' | 'empty';
   /** Formal pages that may exist in a source but must never enter automatic activation. */
   activation_excluded_paths?: string[];
+  /**
+   * Controls host-native source work. `native_observed` lets Codex search/read
+   * this explicit formal source using its own tools, while Trace records safe
+   * evidence after each tool event. It is deliberately not a filesystem ACL.
+   */
+  host_retrieval?: Partial<HostRetrievalPolicy>;
 }
 
 export interface MyWikiPage {
@@ -114,14 +121,15 @@ function relevance(query: string, text: string): number {
 }
 
 export class MyWikiSourceProvider {
-  readonly profile: Required<Pick<MyWikiSourceProfile, 'source_id' | 'root' | 'user_id' | 'read_enabled' | 'write_enabled' | 'activation_excluded_paths'>> & {formal_prefix: string};
+  readonly profile: Required<Pick<MyWikiSourceProfile, 'source_id' | 'root' | 'user_id' | 'read_enabled' | 'write_enabled' | 'activation_excluded_paths'>> & {formal_prefix: string; host_retrieval: HostRetrievalPolicy};
   constructor(profile: MyWikiSourceProfile) {
     const root = path.resolve(text(profile.root, 'root', 2000));
     if (!path.isAbsolute(root)) throw new Error('root must be absolute');
     const excluded = profile.activation_excluded_paths ?? [];
     if (!Array.isArray(excluded) || excluded.length > 128) throw new Error('activation_excluded_paths must contain at most 128 formal page paths');
     const activationExcludedPaths = [...new Set(excluded.map(item => safeRelative(text(item, 'activation_excluded_paths item', 2000))))];
-    this.profile = {source_id: text(profile.source_id, 'source_id', 240), root, user_id: text(profile.user_id, 'user_id', 240), formal_prefix: profile.formal_prefix ?? 'wiki', read_enabled: profile.read_enabled ?? true, write_enabled: profile.write_enabled ?? false, activation_excluded_paths: activationExcludedPaths};
+    const formalPrefix = profile.formal_prefix ?? 'wiki';
+    this.profile = {source_id: text(profile.source_id, 'source_id', 240), root, user_id: text(profile.user_id, 'user_id', 240), formal_prefix: formalPrefix, read_enabled: profile.read_enabled ?? true, write_enabled: profile.write_enabled ?? false, activation_excluded_paths: activationExcludedPaths, host_retrieval: normalizeHostRetrievalPolicy(profile.host_retrieval, formalPrefix)};
   }
   private target(relative: string): {relative: string; absolute: string} {
     const safe = safeRelative(relative); const absolute = path.resolve(this.profile.root, safe);

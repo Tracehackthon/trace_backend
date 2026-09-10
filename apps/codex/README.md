@@ -1,10 +1,12 @@
 # Codex adapter
 
-Codex adapter 把受控的 Codex hook 事件映射成 Trace 的 Activation Pack、activation receipt 和候选入口。它不修改 core 状态机，也不会把宿主授权推断为 Trace 的能力采纳。
+Codex 是 Trace 当前的第一个真实宿主。它保留 Codex 的原生能力：判断是否需要来源、搜索文件、读取文件、调用工具、推理和交付；Trace 只负责将这些工作放进可治理、可追溯、用户可见的长期协作链路。
 
-## 正常用户接入
+> Trace 不再根据用户 prompt 用自己的 lexical provider 预选页面或把页面指针当作“Agent 已读”。
 
-在项目根目录运行：
+## 用户接入
+
+在项目根目录：
 
 ```powershell
 trace init
@@ -13,61 +15,80 @@ trace codex enable
 trace codex status
 ```
 
-第一次 `init` 创建项目本地 `.trace/`；`codex enable` 会更新用户级 `hooks.json`，保留原配置备份并保存可回滚 receipt。`--dry-run` 只展示计划，不写用户配置。
-
-### 多项目不会串线
-
-`hooks.json` 是用户级的，但 Trace 写入的命令**不带固定 `--project-dir`**。每次 `SessionStart` / `UserPromptSubmit` 事件会用事件自己的绝对 `cwd` 向上寻找最近的 `.trace/project.json`：
+`codex enable` 以预览、明确确认、备份和 rollback receipt 更新用户级 `hooks.json`。安装的是不绑定任何项目路径的入口：
 
 ```text
 Codex event cwd
   → nearest .trace/project.json
-  → this project state.sqlite + source.profile.json
-  → bounded activation output
+  → this project source.profile.json + state.sqlite
+  → Trace source lease / evidence handler
 ```
 
-所以在项目 A、项目 B 都启用 Trace 后，A 只读取 A 的 profile 和 SQLite，B 只读取 B 的 profile 和 SQLite。没有 `.trace/` 的普通项目会得到成功的 `{}` no-op：不创建 Trace 状态，也不会拿到别的项目来源。旧版固定项目 hook 会被 `trace codex status` 标为“需要升级”；重新执行 `trace codex enable` 即可替换为 cwd 路由。
+所以项目 A、B 可共用用户级 hooks，仍各自使用自己的 profile 和 SQLite。没有 `.trace/` 的项目得到成功 `{}` no-op，不会创建状态或读取其他项目来源。
 
-## 指针模式与可见性
+## 四个 hook 事件
 
-外部或本地来源 profile 会在对应项目 hook 中自动读取。对匹配当前 prompt 的正式页，adapter 返回给**当前 Codex 进程**：
+| 事件 | Trace 的行为 | Codex 的行为 |
+|---|---|---|
+| `SessionStart` | 根据 cwd 找项目，可提供 source lease | 获得当前项目的协作边界 |
+| `UserPromptSubmit` | 提供 formal source root、prefix、预算和隐私约束；不持久化 prompt | 决定是否需要并怎样使用来源 |
+| `PreToolUse` | 对可识别的 formal Markdown native read 检查单轮预算 | 工具调用仍由 Codex 发起；超过预算的可识别读会被拒绝 |
+| `PostToolUse` | 观察实际 native tool 访问，写入安全 evidence | 保持原始工具结果和推理控制权 |
 
-- `read_pointers`：绝对路径、用途、优先级、停止条件；Codex 按需读取，不应全量加载。
-- `pages_considered`：相对路径、标题、content hash、内容 revision。
+安装器为 `PreToolUse` / `PostToolUse` 使用 `matcher: "*"`，让 Bash、MCP 及其他本地函数工具都可进入同一观察路径；handler 只有在当前项目的正式来源根被触及时才写状态。
 
-Trace 不会把完整认知源正文、原始 prompt、工具参数或凭证塞进 Activation Pack，也不会因为找到了页面就创建 `source_snapshot`。它只在项目 SQLite 的 activation receipt 中保存安全身份：`source_id`、相对 `locator`、`revision`、`content_hash`、用途与停止条件。绝对路径和正文不持久化。
+## 原生检索，不是预选指针
 
-如果某个正式页虽然可由用户手动查阅、但绝不能随 prompt 自动激活（例如个人财务、病历或尚未讨论的草稿），在项目 source profile 中配置相对正式页路径：
+当 source profile 启用 `host_retrieval.mode: "native_observed"` 时，hook 给当前 Codex 进程一个短暂 source lease：
 
 ```json
 {
-  "activation_excluded_paths": [
-    "wiki/private-finance.md"
-  ]
+  "source_id": "my-cognitive-source",
+  "mode": "native_observed",
+  "allowed_roots": ["<current-host-only>/wiki"],
+  "allowed_prefixes": ["wiki"],
+  "max_reads_per_turn": 8,
+  "evidence_contract": "trace.host-retrieval-evidence@0.1.0"
 }
 ```
 
-该列表只影响自动 activation；它不删除来源、不改变正式页的权限，也不等于把页面发布给 Agent。路径必须是 profile root 下的 `.md` 相对路径。Trace 自动 activation 最多返回两个高相关读取指针，并以精度优先的阈值过滤弱 token 重叠；当需要更多材料时，由用户或 Codex 显式查询来源，而不是静默扩展上下文。
+绝对 `allowed_roots` 只出现在本次 hook 的开发者上下文中，永不写入 SQLite。Codex 可用自己的 Bash、本地函数或 MCP 工具检索和读取这些正式页；Trace 不注入全文、不替它挑选两页、不替它声称“已经理解”。
 
-用户可以用 `trace status` 看到最近一次 activation 的持久化引用、读取指针和未自动保存内容；用 `trace inbox` / `trace review <ID>` 决定是否让真实协作结果进入候选沉淀。
+`PostToolUse` 后的 Data Ledger evidence 有四种状态：
 
-## 宿主和集成维护者
+- `source_access_offered`：本轮给 Codex 提供了来源入口；
+- `source_search`：Codex 确实搜索过该来源；
+- `source_read`：Codex 实际读到某些相对页，Trace 核验并保存 locator + revision/hash；
+- `source_access_unclassified`：检测到来源访问但不能可靠分类，绝不冒充已读。
 
-实际安装命令是：
+用户运行 `trace sources` 或 `trace status` 就能看到这些状态。默认不显示 prompt、页面正文、绝对路径、工具参数或工具输出。
+
+## profile 和边界
+
+```json
+{
+  "read_enabled": true,
+  "write_enabled": false,
+  "host_retrieval": {
+    "mode": "native_observed",
+    "allowed_prefixes": ["wiki"],
+    "max_reads_per_turn": 8
+  }
+}
+```
+
+`native_observed` 是**可观测、可预算**边界，不是文件系统 ACL。Codex 官方 hook 覆盖 Bash、MCP 和多数本地函数工具，但不是所有专用工具路径；需要硬 per-file 隔离的来源不得暴露给此模式，应设为 `disabled` 并等待具备真实权限契约的 brokered adapter。[官方 Codex Hooks 文档](https://learn.chatgpt.com/zh-Hans/docs/hooks)
+
+`activation_excluded_paths` 保留给显式 MyWiKi interactive search 的候选过滤；它不能用于宣称 native host 不会访问某个文件。这样避免把旧的“自动 activation”语义误当作安全控制。
+
+## 维护者接口
+
+实际 hook command：
 
 ```text
 trace internal codex hook-stdio --route-from-event-cwd
 ```
 
-这个入口给 hooks、SDK 和宿主自动化使用；它不属于日常用户命令。若要在隔离环境中手动回放事件，可使用高级命令：
+此入口供 hooks、SDK 和宿主自动化使用，不是日常用户命令。它的输入是官方 Codex hook JSON；输出从不回显 raw prompt 或 tool body。实现与协议细节见：[Codex 原生检索与 Trace 证据架构](../../docs/host-native-retrieval.md)。
 
-```powershell
-trace --help --advanced
-trace internal codex trigger `
-  --sqlite-state-file <PROJECT_DIR>/.trace/state/trace.sqlite `
-  --event-file <CODEX_TURN_EVENT_JSON>
-```
-
-事件必须明确声明 `codex.turn.started`、目的、摘要和来源引用。`codex trigger` 只产生 Activation Pack 和用户可见 activation receipt，不发布能力，也不把来源全文注入宿主。
-
-任何新 hook/MCP host 都必须保持同样边界：只读取授权 source profile 与版本化引用；项目认知源位于 `<PROJECT_DIR>/.trace/source/wiki/`，外部个人/团队认知源由 profile 指向正式页面；正式页写入仍走 proposal + explicit approval + revision/hash CAS + backup + atomic write。
+任何未来的 host adapter 都要保留同样的责任切分：host 拥有检索、推理和执行；Trace 拥有授权来源边界、provenance evidence、候选/采用/发布和用户回执。正式页写入继续走 proposal → explicit approval → revision/hash CAS → backup → atomic write。

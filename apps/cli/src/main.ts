@@ -291,6 +291,32 @@ function productInbox(context: ProductProjectContext) {
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
+/** A user-visible, body-free account of what the host actually did with a source. */
+function hostSourceUsage(records: ReturnType<TraceRuntime['listData']>) {
+  const evidence = records.filter(record => record.kind === 'host_retrieval_evidence')
+    .map(record => {
+      const payload = record.payload;
+      return {
+        evidence_id: textField(payload, 'evidence_id', record.record_id),
+        event_kind: textField(payload, 'event_kind'),
+        source_id: textField(payload, 'source_id'),
+        host: textField(payload, 'host'),
+        session_id: textField(payload, 'host_session_id'),
+        turn_id: textField(payload, 'host_turn_id', '未提供'),
+        tool_name: textField(payload, 'host_tool_name', '无（访问授权）'),
+        locators: Array.isArray(payload.locators) ? payload.locators.filter((value): value is string => typeof value === 'string') : [],
+        page_versions: Array.isArray(payload.page_versions) ? payload.page_versions : [],
+        observed_at: textField(payload, 'observed_at', record.created_at),
+      };
+    })
+    .sort((left, right) => right.observed_at.localeCompare(left.observed_at));
+  const count = (kind: string) => evidence.filter(item => item.event_kind === kind).length;
+  return {
+    offered: count('source_access_offered'), searched: count('source_search'), read: count('source_read'),
+    unclassified: count('source_access_unclassified'), recent: evidence.slice(0, 20),
+  };
+}
+
 function productReview(context: ProductProjectContext, identifier: string): {record: ReturnType<TraceRuntime['listData']>[number]; view: Record<string, unknown>} {
   const runtime = productRuntime(context);
   if (runtime === undefined) throw new ProtocolError('NOT_FOUND', 'This project has no persisted Trace records yet.');
@@ -420,6 +446,7 @@ export async function run(argv: string[]): Promise<void> {
         not_persisted: Array.isArray(latestActivationRecord.payload.not_persisted) ? latestActivationRecord.payload.not_persisted : [],
         created_at: latestActivationRecord.created_at,
       };
+      const sourceUsage = hostSourceUsage(state.data);
       const snapshot = {
         status: 'ready', project: context.project_dir, template: context.descriptor.template_id, source_mode: context.descriptor.source_mode,
         source_id: typeof sources.source_id === 'string' ? sources.source_id : '未配置', codex: '运行 trace codex status 查看',
@@ -428,6 +455,7 @@ export async function run(argv: string[]): Promise<void> {
         candidate_precedents: state.data.filter(item => item.kind === 'candidate_precedent').length,
         candidate_capabilities: state.data.filter(item => item.kind === 'capability_candidate').length,
         latest_activation: latestActivation,
+        host_source_usage: sourceUsage,
         next_action: inbox.length > 0 ? 'trace inbox' : '继续在 Codex 中协作；值得沉淀的内容会进入 inbox。',
       };
       productResult(parsed, [
@@ -438,8 +466,9 @@ export async function run(argv: string[]): Promise<void> {
         `待确认沉淀：${snapshot.pending_reviews}`,
         `候选前例：${snapshot.candidate_precedents}`,
         `候选能力：${snapshot.candidate_capabilities}`,
+        `宿主认知源实际使用：已提供 ${sourceUsage.offered} 次；检索 ${sourceUsage.searched} 次；读取 ${sourceUsage.read} 页；未分类访问 ${sourceUsage.unclassified} 次`,
         `最近一次接续：${latestActivation === null ? '尚无（在 Codex 中开始协作后出现）' : latestActivation.summary}`,
-        ...(latestActivation === null ? [] : [`受控读取指针：${latestActivation.activated_pointers.length}；持久化来源/能力引用：${latestActivation.activated_refs.length}`, `未自动保存：${latestActivation.not_persisted.join('、') || '无'}`]),
+        ...(latestActivation === null ? [] : [`Activation Pack 显式指针：${latestActivation.activated_pointers.length}；持久化来源/能力引用：${latestActivation.activated_refs.length}`, `未自动保存：${latestActivation.not_persisted.join('、') || '无'}`]),
         '', `下一步：${snapshot.next_action}`,
       ].join('\n'), snapshot);
       return;
@@ -451,16 +480,31 @@ export async function run(argv: string[]): Promise<void> {
     }
     if (group === 'sources') {
       const profile = readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile');
+      const state = productState(context);
+      const usage = hostSourceUsage(state.data);
+      const policy = profile.host_retrieval && typeof profile.host_retrieval === 'object' && !Array.isArray(profile.host_retrieval)
+        ? profile.host_retrieval as Record<string, unknown>
+        : {};
       const source = {
         source_id: textField(profile, 'source_id'), mode: context.descriptor.source_mode, scope: context.descriptor.source_scope,
         read_enabled: profile.read_enabled === true, write_enabled: profile.write_enabled === true,
+        host_retrieval: {
+          mode: textField(policy, 'mode', 'native_observed'),
+          allowed_prefixes: Array.isArray(policy.allowed_prefixes) ? policy.allowed_prefixes.filter((item): item is string => typeof item === 'string') : ['wiki'],
+          max_reads_per_turn: typeof policy.max_reads_per_turn === 'number' ? policy.max_reads_per_turn : 8,
+          boundary: 'observed-and-budgeted-not-filesystem-sandbox',
+        },
       };
       productResult(parsed, [
         `认知源：${source.source_id}`,
         `模式：${source.mode}；作用域：${source.scope}`,
         `读取：${source.read_enabled ? '已授权' : '未授权'}；写入：${source.write_enabled ? '已授权' : '未授权'}`,
-        'Trace 不会自动复制外部个人或团队认知源；需要变更来源时使用项目配置或由 Codex 提出候选。',
-      ].join('\n'), {status: 'listed', project: context.project_dir, sources: [source]});
+        `宿主检索：${source.host_retrieval.mode}；单轮读取预算：${source.host_retrieval.max_reads_per_turn}；正式前缀：${source.host_retrieval.allowed_prefixes.join(', ')}`,
+        `实际证据：提供 ${usage.offered} 次；检索 ${usage.searched} 次；读取 ${usage.read} 页；未分类 ${usage.unclassified} 次`,
+        usage.recent.length === 0 ? '尚无宿主访问证据。Codex 开始一次相关协作后，Trace 会显示它实际检索/读取的安全定位符。' : '最近活动（仅 locator/revision/hash，不含 prompt、正文、工具参数或绝对路径）：',
+        ...usage.recent.slice(0, 5).map(item => `  ${item.observed_at}｜${item.event_kind}｜${item.locators.length === 0 ? '无页面定位符' : item.locators.join(', ')}`),
+        'Trace 不会自动复制外部个人或团队认知源；native_observed 会复用 Codex 自己的检索/读取能力，但不是文件系统隔离边界。需要硬隔离的来源不能暴露给该模式。',
+      ].join('\n'), {status: 'listed', project: context.project_dir, sources: [source], host_source_usage: usage});
       return;
     }
     const abilities = productState(context).data.filter(item => item.kind === 'capability_candidate').map(item => ({id: item.record_id, title: textField(item.payload, 'title', item.subject.id), status: item.status, created_at: item.created_at}));
@@ -508,13 +552,14 @@ export async function run(argv: string[]): Promise<void> {
       const raw = fs.existsSync(installer.hooksFile) ? fs.readFileSync(installer.hooksFile, 'utf8') : '{}';
       const hasTraceHook = /codex\s+hook-stdio|trace\.codex-managed\.v1/i.test(raw);
       const routedByEventCwd = /--route-from-event-cwd(?:\s|"|$)/i.test(raw);
-      const status = routedByEventCwd ? 'enabled' : hasTraceHook ? 'needs_reenable' : 'disabled';
+      const hasNativeEvidenceEvents = /"PreToolUse"\s*:/i.test(raw) && /"PostToolUse"\s*:/i.test(raw);
+      const status = routedByEventCwd && hasNativeEvidenceEvents ? 'enabled' : hasTraceHook ? 'needs_reenable' : 'disabled';
       const message = status === 'enabled'
-        ? 'Trace 会按每次 Codex 事件的 cwd 找到当前项目；不会被上一次启用的项目或认知源绑死。完整 prompt 不会自动入库。'
+        ? 'Trace 会按每次 Codex 事件的 cwd 找到当前项目；Codex 自己检索/读取来源，Trace 只记录实际访问证据。完整 prompt 不会自动入库。'
         : status === 'needs_reenable'
-          ? '发现旧版固定项目 hook。运行 trace codex enable，将它升级为按事件 cwd 路由。'
+          ? '发现旧版或不完整 hook。运行 trace codex enable，启用按事件 cwd 路由和宿主检索证据。'
           : '下一步：trace codex enable';
-      productResult(parsed, [`Codex：${status === 'enabled' ? '已启用' : status === 'needs_reenable' ? '需要升级' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, `路由：${routedByEventCwd ? '事件 cwd → 当前项目 .trace/' : hasTraceHook ? '旧版固定项目（不安全）' : '未配置'}`, message].join('\n'), {status, hooks_file: installer.hooksFile, project: context.project_dir, routing: routedByEventCwd ? 'event_cwd' : hasTraceHook ? 'legacy_project_binding' : 'none'});
+      productResult(parsed, [`Codex：${status === 'enabled' ? '已启用' : status === 'needs_reenable' ? '需要升级' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, `路由：${routedByEventCwd ? '事件 cwd → 当前项目 .trace/' : hasTraceHook ? '旧版固定项目（不安全）' : '未配置'}`, `宿主检索证据：${hasNativeEvidenceEvents ? 'PreToolUse + PostToolUse 已配置' : '缺失，需升级'}`, message].join('\n'), {status, hooks_file: installer.hooksFile, project: context.project_dir, routing: routedByEventCwd ? 'event_cwd' : hasTraceHook ? 'legacy_project_binding' : 'none', host_retrieval_evidence: hasNativeEvidenceEvents});
       return;
     }
     const command = productHookCommand();
@@ -899,4 +944,3 @@ run(process.argv.slice(2)).catch((error) => {
   process.stdout.write(JSON.stringify({ok: false, code: known.code ?? (error instanceof StorageError ? error.code : 'IO_ERROR'), message: known.message ?? String(error)}) + '\n');
   process.exitCode = 1;
 });
-

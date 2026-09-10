@@ -55,7 +55,9 @@ trace codex enable --dry-run
 trace codex enable
 ```
 
-Trace 只添加自己管理的 `SessionStart` 与 `UserPromptSubmit` hook，保留其他 hook，并把旧配置备份与本次 receipt 放入可追溯位置。`hooks.json` 虽然是用户级配置，但安装的是一个不绑定项目路径的路由入口：每次 Codex 事件都用自己的 `cwd` 向上找到最近的 `.trace/`。因此在项目 A、B 都执行 enable 后，A 只会使用 A 的状态和来源，B 也只会使用 B 的。
+Trace 添加自己管理的 `SessionStart`、`UserPromptSubmit`、`PreToolUse` 和 `PostToolUse` hook，保留其他 hook，并把旧配置备份与本次 receipt 放入可追溯位置。`hooks.json` 虽然是用户级配置，但安装的是一个不绑定项目路径的路由入口：每次 Codex 事件都用自己的 `cwd` 向上找到最近的 `.trace/`。因此在项目 A、B 都执行 enable 后，A 只会使用 A 的状态和来源，B 也只会使用 B 的。
+
+Trace 不会先替 Codex 挑两个页面。它只把当前项目已授权的 formal source root、范围与单轮读取预算交给 Codex；Codex 用自己的原生搜索/读取工具完成工作。随后 Trace 记录安全 evidence，区分“来源已提供 / 已搜索 / 已读取 / 未分类访问”。
 
 接着执行：
 
@@ -63,4 +65,4 @@ Trace 只添加自己管理的 `SessionStart` 与 `UserPromptSubmit` hook，保�
 trace status
 ```
 
-如果看到“Codex：尚未启用”或“待确认沉淀：0”，这不是错误：前者表示尚未执行 enable，后者表示尚未出现需要你判断的候选。开始一次 Codex 协作后，`trace status` 还会显示最近一次 activation 的安全回执：持久化引用数量、读取指针数量和未自动保存的内容；不会显示 raw prompt 或来源正文。
+如果看到“Codex：尚未启用”或“待确认沉淀：0”，这不是错误：前者表示尚未执行 enable，后者表示尚未出现需要你判断的候选。开始一次 Codex 协作后，`trace status` 显示最近一次 activation 的安全回执和宿主来源实际使用计数；`trace sources` 显示相对 locator、revision/hash 层面的搜索/读取证据。二者都不会显示 raw prompt、来源正文、绝对路径或工具参数。

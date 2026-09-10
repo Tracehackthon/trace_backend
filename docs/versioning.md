@@ -12,7 +12,7 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 
 - 发布分支是 `main`；Changesets 也以 `main` 计算发布差异。
 - 包发布的唯一计划来源是 `.changeset/`。在没有明确发布决策前，不能执行 `pnpm version-packages`。
-- `trace.continuity`、`trace.context-record` 与 `trace.project-instance` 当前各自处于 `0.2.0`。它们都有显式历史 in-memory upcaster；未知版本继续 fail-closed。
+- `trace.data-envelope` 当前为 `0.3.0`，通过 `0.1.0 → 0.2.0 → 0.3.0` in-memory upcaster 引入闭合的 `host_retrieval_evidence` kind；`trace.continuity`、`trace.context-record` 与 `trace.project-instance` 当前各自处于 `0.2.0`。未知版本继续 fail-closed。
 - 产品 `trace-runtime` 当前是 `0.6.0`。它不表示每个 workspace 包或每个协议都等于 `0.6.0`。
 - 发布前必须运行 `corepack pnpm audit:versions`、`corepack pnpm audit:release-plan`、`corepack pnpm changeset status`、`corepack pnpm check:all`。
 
@@ -37,10 +37,10 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 
 ## 效果基线与发布证据
 
-发布前还应保留一次可比较的 activation 结果，而不是只报告“测试通过”：
+发布前还应保留一次可比较的宿主来源访问 evidence，而不是只报告“测试通过”：
 
 ```powershell
 corepack pnpm eval:pair
 ```
 
-该命令在 `snapshots/evals/<pair-id>/baseline/eval-manifest.json` 和 `snapshots/evals/<pair-id>/trace/eval-manifest.json` 写入不可覆盖的评估清单，并生成 `pair-manifest.json` 对比指标。清单只保存 fixture hash、运行时/协议/bundle 身份、指标和相对页面 locator；不保存 raw prompt、来源正文、绝对来源路径或凭证。`baseline` 是无 Trace 激活的对照，`trace` 是当前确定性 MyWiKi pointer activation；它们证明检索/路由边界，不替代真实用户或模型质量评估。
+该命令在 `snapshots/evals/<pair-id>/baseline/eval-manifest.json` 和 `snapshots/evals/<pair-id>/trace/eval-manifest.json` 写入不可覆盖的评估清单，并生成 `pair-manifest.json` 对比指标。清单只保存 fixture hash、运行时/协议/bundle 身份、指标和相对页面 locator；不保存 raw prompt、来源正文、绝对来源路径或凭证。`baseline` 是无 Trace host-retrieval evidence 的对照，`trace` 是 fixture native-read replay 的 evidence coverage；它证明 hook/evidence/隐私边界，不替代 Codex 的语义检索、真实用户或模型质量评估。

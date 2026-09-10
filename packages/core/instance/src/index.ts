@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {ProtocolError, ProtocolVersionRegistry, requireObject, requireText as text, type ProtocolVersioned} from '../../protocol/src/index.js';
 import {buildTemplateLock, validateTemplateManifest, type TemplateBundleManifest, type TemplateInstanceLock} from '../../../template/contract/src/index.js';
+import {normalizeHostRetrievalPolicy, type HostRetrievalPolicy} from '../../retrieval-evidence/src/index.js';
 
 export const PROJECT_INSTANCE_PROTOCOL_ID = 'trace.project-instance' as const;
 export const PROJECT_INSTANCE_PROTOCOL_VERSION = '0.2.0' as const;
@@ -19,6 +20,7 @@ export interface ProjectSourceProfileInput {
   scope_type?: ProjectScopeType;
   source_mode?: ProjectSourceMode;
   activation_excluded_paths?: string[];
+  host_retrieval?: Partial<HostRetrievalPolicy>;
 }
 export interface ProjectInitInput {
   project_dir: string;
@@ -95,7 +97,7 @@ function profileFor(input: ProjectInitInput, traceDir: string): {profile: Projec
   if (mode === 'local' || mode === 'empty') {
     if (input.source_root !== undefined || input.source_id !== undefined || input.source_profile !== undefined) throw new ProtocolError('INVALID_INPUT', `source options are not accepted for ${mode} mode`);
     const sourceRoot = path.join(traceDir, 'source');
-    return {scope, sourceRoot, profile: {source_id: mode === 'empty' ? 'isolated-empty-source' : 'project-cognitive-source', root: sourceRoot, formal_prefix: 'wiki', read_enabled: mode !== 'empty', write_enabled: false, activation_excluded_paths: [], user_id: input.user_id, scope_type: scope, source_mode: mode}};
+    return {scope, sourceRoot, profile: {source_id: mode === 'empty' ? 'isolated-empty-source' : 'project-cognitive-source', root: sourceRoot, formal_prefix: 'wiki', read_enabled: mode !== 'empty', write_enabled: false, activation_excluded_paths: [], host_retrieval: {mode: mode === 'empty' ? 'disabled' : 'native_observed', allowed_prefixes: ['wiki'], max_reads_per_turn: 8}, user_id: input.user_id, scope_type: scope, source_mode: mode}};
   }
   if (input.source_profile === undefined && input.source_root === undefined) throw new ProtocolError('SOURCE_SELECTION_REQUIRED', `${mode} mode requires --source-profile or --source-root`);
   const supplied = input.source_profile;
@@ -107,9 +109,10 @@ function profileFor(input: ProjectInitInput, traceDir: string): {profile: Projec
   const readEnabled = supplied?.read_enabled ?? true;
   const writeEnabled = supplied?.write_enabled ?? false;
   const activationExcludedPaths = supplied?.activation_excluded_paths ?? [];
+  const hostRetrieval = normalizeHostRetrievalPolicy(supplied?.host_retrieval, formalPrefix);
   if (typeof readEnabled !== 'boolean' || typeof writeEnabled !== 'boolean') throw new ProtocolError('INVALID_INPUT', 'source profile read_enabled/write_enabled must be boolean');
   if (!Array.isArray(activationExcludedPaths) || activationExcludedPaths.length > 128 || activationExcludedPaths.some(item => typeof item !== 'string')) throw new ProtocolError('INVALID_INPUT', 'source profile activation_excluded_paths must be a list of at most 128 strings');
-  const profile: ProjectSourceProfileInput = {source_id: sourceId, root: sourceRoot, formal_prefix: formalPrefix, read_enabled: readEnabled, write_enabled: writeEnabled, activation_excluded_paths: activationExcludedPaths, user_id: profileUserId, scope_type: scope, source_mode: mode};
+  const profile: ProjectSourceProfileInput = {source_id: sourceId, root: sourceRoot, formal_prefix: formalPrefix, read_enabled: readEnabled, write_enabled: writeEnabled, activation_excluded_paths: activationExcludedPaths, host_retrieval: hostRetrieval, user_id: profileUserId, scope_type: scope, source_mode: mode};
   return {profile, sourceRoot, scope};
 }
 
@@ -149,7 +152,6 @@ export function initializeProject(input: ProjectInitInput): ProjectInitResult {
     return {project_dir: projectDir, trace_dir: traceDir, descriptor, lock, source_profile: finalProfile, created_paths: createdPaths};
   } catch (error) { fs.rmSync(staging, {recursive: true, force: true}); throw error; }
 }
-
 
 
 

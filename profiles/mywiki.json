@@ -5,8 +5,13 @@
   "read_enabled": true,
   "write_enabled": false,
   "activation_excluded_paths": [],
+  "host_retrieval": {
+    "mode": "native_observed",
+    "allowed_prefixes": ["wiki"],
+    "max_reads_per_turn": 8
+  },
   "user_id": "<caller-provided-user-id>",
   "scope_type": "personal",
   "source_mode": "external",
-  "policy": "read-authorized-formal-pages; write-proposal-then-explicit-approval; raw-is-immutable"
+  "policy": "host-native-search-read-with-provenance-evidence; write-proposal-then-explicit-approval; raw-is-immutable"
 }

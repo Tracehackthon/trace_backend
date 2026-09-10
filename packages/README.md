@@ -10,6 +10,7 @@
 | `core/change-set` | 变化提案、影响分析门槛、采用/发布/回滚 | 宿主 UI、Python |
 | `core/runtime` | 组合领域服务，提供应用调用接口 | CLI 参数解析 |
 | `core/context` | 作用域受限的 Activation Pack、读取指针、预算和禁止范围 | 宿主 prompt 拼接 |
+| `core/retrieval-evidence` | 宿主原生 source lease policy、search/read/unclassified evidence、相对 locator/revision/hash 与隐私哈希 | prompt、来源正文、绝对路径、工具参数/输出 |
 | `core/continuity` | 主题、讨论回合、认知变化、沉淀回执、激活回执 | 完整聊天转录、宿主推理 |
 | `core/migration` | JSONL → SQLite staging、计数和源文件保留 | 删除旧证据 |
 | `template/contract` | 能力/来源/上下文模板 Bundle、preview、instance lockfile | 直接覆盖用户实例 |

@@ -1,7 +1,10 @@
 import {buildActivationPack, type ActivationPack, type ContextSourceRef, type ContextReadPointer} from '../../../packages/core/context/src/index.js';
 import type {ActivatedPointer, CreateReceipt} from '../../../packages/core/continuity/src/index.js';
 import type {TraceRuntime} from '../../../packages/core/runtime/src/index.js';
-import {MyWikiSourceProvider, type MyWikiPage, type MyWikiSourceProfile} from '../../../packages/integration/mywiki-source/src/index.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import {MyWikiSourceProvider, type MyWikiSourceProfile} from '../../../packages/integration/mywiki-source/src/index.js';
+import {classifyNativeSourceAccess, type HostPageVersion, type HostRetrievalPolicy} from '../../../packages/core/retrieval-evidence/src/index.js';
 import type {TraceEvent} from '../../../packages/core/observability/src/index.js';
 import {randomUUID} from 'node:crypto';
 
@@ -110,74 +113,152 @@ export function activateCodexTurn(runtime: TraceRuntime, event: CodexTurnStarted
   }
 }
 
-export interface CodexHookInput {hook_event_name?: string; session_id?: string; cwd?: string; prompt?: string; source?: string; [key: string]: unknown;}
+export interface CodexHookInput {
+  hook_event_name?: string;
+  session_id?: string;
+  turn_id?: string;
+  cwd?: string;
+  prompt?: string;
+  source?: string;
+  tool_name?: string;
+  tool_use_id?: string;
+  tool_input?: unknown;
+  tool_response?: unknown;
+  [key: string]: unknown;
+}
 
 type SourceAvailability = 'unconfigured' | 'disabled' | 'available' | 'unavailable';
 
-function pointerFor(page: MyWikiPage): {host: ContextReadPointer; durable: ActivatedPointer} {
-  const purpose = `读取正式认知源页面：${page.title}`;
-  const priority = 'should' as const;
-  const stopCondition = '只在当前问题需要时读取，并保留页面 revision/hash';
-  return {
-    // Absolute host paths are intentionally delivered only to the current
-    // Codex process. They never cross into the durable activation receipt.
-    host: {path: page.absolute_path, purpose, priority, stop_condition: stopCondition},
-    durable: {source_id: page.source_id, locator: page.relative_path, revision: page.revision, content_hash: page.content_hash, purpose, priority, stop_condition: stopCondition},
-  };
+interface HostNativeSourceAccess {
+  source_id: string;
+  mode: 'native_observed';
+  /** Absolute paths exist only in this hook response for the live Codex host. */
+  allowed_roots: string[];
+  allowed_prefixes: string[];
+  max_reads_per_turn: number;
+  evidence_contract: 'trace.host-retrieval-evidence@0.1.0';
+  boundary: 'observed-and-budgeted-not-filesystem-sandbox';
 }
 
-function findAuthorizedPages(sourceProfile: MyWikiSourceProfile | undefined, prompt: string): {pages: MyWikiPage[]; status: SourceAvailability} {
-  if (sourceProfile === undefined) return {pages: [], status: 'unconfigured'};
-  if (sourceProfile.read_enabled === false) return {pages: [], status: 'disabled'};
-  if (prompt.trim().length === 0) return {pages: [], status: 'available'};
-  // Automatic activation is deliberately narrower than an interactive source
-  // search: the host can always ask for more, while each extra pointer makes
-  // context routing less precise and increases accidental-source exposure.
-  try { return {pages: new MyWikiSourceProvider(sourceProfile).search(prompt, 2), status: 'available'}; }
-  // A transient external-source failure must not make a normal Codex prompt
-  // fail. The user can inspect source status/doctor and retry after repairing it.
-  catch { return {pages: [], status: 'unavailable'}; }
+interface ResolvedSourceAccess {
+  provider: MyWikiSourceProvider;
+  policy: HostRetrievalPolicy;
+  source_access: HostNativeSourceAccess;
 }
 
-/**
- * Stdio boundary for the real Codex hooks.json format. It never writes a
- * formal page or installs a Skill. It gives the active Codex process bounded
- * read pointers, then keeps only safe pointer identities in the receipt.
- */
-export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntime, sourceProfile?: MyWikiSourceProfile): Record<string, unknown> {
+function sourceScope(profile: MyWikiSourceProfile): {type: 'personal' | 'project' | 'team' | 'domain'; id: string} {
+  const type = profile.scope_type ?? 'personal';
+  return {type, id: profile.user_id};
+}
+
+function sourceAvailability(sourceProfile: MyWikiSourceProfile | undefined): {status: SourceAvailability; resolved?: ResolvedSourceAccess} {
+  if (sourceProfile === undefined) return {status: 'unconfigured'};
+  if (sourceProfile.read_enabled === false) return {status: 'disabled'};
+  try {
+    const provider = new MyWikiSourceProvider(sourceProfile);
+    const policy = provider.profile.host_retrieval;
+    if (policy.mode === 'disabled') return {status: 'disabled'};
+    const allowedRoots = policy.allowed_prefixes.map(prefix => path.resolve(provider.profile.root, prefix));
+    // Do not offer an unavailable directory to Codex: it would turn a source
+    // configuration mistake into speculative host work.
+    if (allowedRoots.some(root => !fs.existsSync(root) || !fs.statSync(root).isDirectory())) return {status: 'unavailable'};
+    return {
+      status: 'available',
+      resolved: {
+        provider,
+        policy,
+        source_access: {
+          source_id: provider.profile.source_id,
+          mode: 'native_observed',
+          allowed_roots: allowedRoots,
+          allowed_prefixes: policy.allowed_prefixes,
+          max_reads_per_turn: policy.max_reads_per_turn,
+          evidence_contract: 'trace.host-retrieval-evidence@0.1.0',
+          boundary: 'observed-and-budgeted-not-filesystem-sandbox',
+        },
+      },
+    };
+  } catch { return {status: 'unavailable'}; }
+}
+
+function hookThreadId(input: CodexHookInput): string {
+  return typeof input.session_id === 'string' && input.session_id.length > 0 ? input.session_id : `codex-hook-${Date.now()}`;
+}
+function hookTurnId(input: CodexHookInput): string | undefined {
+  return typeof input.turn_id === 'string' && input.turn_id.length > 0 ? input.turn_id : undefined;
+}
+function hookToolName(input: CodexHookInput): string | undefined {
+  return typeof input.tool_name === 'string' && input.tool_name.length > 0 ? input.tool_name : undefined;
+}
+function hookToolUseId(input: CodexHookInput): string | undefined {
+  return typeof input.tool_use_id === 'string' && input.tool_use_id.length > 0 ? input.tool_use_id : undefined;
+}
+
+function hostAccessDeveloperContext(source: HostNativeSourceAccess): string {
+  return [
+    'Trace cognitive source access is available for this turn.',
+    'Use Codex native file/search tools—not a Trace preselected-page list—only when this source is relevant.',
+    `Allowed formal roots: ${source.allowed_roots.join(', ')}`,
+    `Read budget: at most ${source.max_reads_per_turn} formal Markdown files in this turn.`,
+    'Treat results as evidence: distinguish searched from read; do not claim an unread page as a source.',
+    'Trace will retain only access evidence (source id, safe relative locator, revision/hash, and input/output hashes). It will not retain the prompt, source body, raw tool arguments, output, or absolute source root.',
+    'This native-host path is observed and budgeted, not a filesystem sandbox. Do not use it for source material requiring a hard per-file access boundary.',
+  ].join('\n');
+}
+
+function recordHostEvidence(runtime: TraceRuntime, input: Parameters<TraceRuntime['recordHostRetrievalEvidence']>[0]) {
+  try { return runtime.recordHostRetrievalEvidence(input); } catch { return undefined; }
+}
+
+function recordHostEvidenceEvent(runtime: TraceRuntime, input: Parameters<TraceRuntime['recordTraceEvent']>[0]): void {
+  recordActivationEvent(runtime, input);
+}
+
+function buildSourceOffer(runtime: TraceRuntime, source: ResolvedSourceAccess, sessionId: string, turnId: string | undefined, correlationId: string, causationId: string): void {
+  const evidence = recordHostEvidence(runtime, {
+    event_kind: 'source_access_offered',
+    source_id: source.provider.profile.source_id,
+    source_scope: sourceScope(source.provider.profile),
+    policy: source.policy,
+    host: 'codex',
+    host_session_id: sessionId,
+    ...(turnId === undefined ? {} : {host_turn_id: turnId}),
+    causation_id: causationId,
+    correlation_id: correlationId,
+    producer: {component: 'trace.codex-adapter', version: '0.3.0', run_id: `codex:${sessionId}`},
+  });
+  if (evidence !== undefined) recordHostEvidenceEvent(runtime, {
+    component: 'codex-adapter', operation: 'source-access-offered', outcome: 'success', correlation_id: correlationId,
+    causation_id: causationId, thread_id: sessionId, record_refs: [`${evidence.record_id}@${evidence.revision}`],
+  });
+}
+
+function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRuntime, sourceProfile: MyWikiSourceProfile | undefined): Record<string, unknown> {
   const eventName = input.hook_event_name;
   if (eventName !== 'SessionStart' && eventName !== 'UserPromptSubmit') return {};
-  const sessionId = typeof input.session_id === 'string' && input.session_id.length > 0 ? input.session_id : `codex-hook-${Date.now()}`;
-  const prompt = typeof input.prompt === 'string' ? input.prompt : '';
-  const source = findAuthorizedPages(sourceProfile, prompt);
-  const pointers = source.pages.map(pointerFor);
-  // Codex already owns the raw prompt. Trace may use it transiently to locate
-  // authorized read pointers, but must never turn it into a durable thread
-  // summary, receipt, event, or hook response.
+  const sessionId = hookThreadId(input);
+  const turnId = hookTurnId(input);
+  const source = sourceAvailability(sourceProfile);
   const summary = eventName === 'SessionStart'
-    ? 'Codex session activation; no raw prompt is persisted by Trace.'
-    : 'Codex user prompt received; raw prompt is not persisted by Trace.';
-  const event: CodexTurnStartedEvent = {
+    ? 'Codex session activation; Trace did not persist raw prompt or source body.'
+    : 'Codex user prompt received; Trace did not persist raw prompt or source body.';
+  const activation = activateCodexTurn(runtime, {
     event_type: 'codex.turn.started',
     thread_id: sessionId,
     purpose: eventName === 'SessionStart' ? 'Codex session activation' : 'Codex user prompt activation',
     summary,
     source_refs: [],
-    read_pointers: pointers.map(pointer => pointer.host),
-    activated_pointers: pointers.map(pointer => pointer.durable),
+    read_pointers: [],
     forbidden_scopes: ['raw/**', 'unscoped-user-data/**'],
     max_tokens: 6000,
-  };
-  const activation = activateCodexTurn(runtime, event);
+  });
+  if (source.resolved !== undefined) buildSourceOffer(runtime, source.resolved, sessionId, turnId, activation.correlation_id, `codex-source-offer:${turnId ?? randomUUID()}`);
   const visible = {
     trace: 'activation',
-    activation_mode: 'pointer_only',
+    activation_mode: 'host_native_evidence',
     source_profile: typeof sourceProfile?.source_id === 'string' ? sourceProfile.source_id : null,
     source_status: source.status,
-    pages_considered: source.pages.map(page => ({path: page.relative_path, title: page.title, revision: page.revision, content_hash: page.content_hash})),
-    // This is the only place the absolute source path appears: it is returned
-    // to the current host so Codex can read an already-authorized page.
-    read_pointers: activation.pack.read_pointers,
+    ...(source.resolved === undefined ? {} : {source_access: source.resolved.source_access}),
     activation_receipt: {
       receipt_id: activation.receipt.record_id,
       activated_refs: activation.receipt.payload.activated_refs ?? [],
@@ -187,7 +268,108 @@ export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntim
     pack_id: activation.pack.pack_id,
     correlation_id: activation.correlation_id,
     trace_event_id: activation.trace_event?.event_id ?? null,
-    user_notice: activation.user_notice,
+    user_notice: source.resolved === undefined
+      ? activation.user_notice
+      : 'Trace 已提供受控的宿主原生认知源访问；Codex 自己检索和读取，Trace 只记录实际访问证据。',
   };
-  return {hookSpecificOutput: {hookEventName: eventName, additionalContext: JSON.stringify(visible)}};
+  return {hookSpecificOutput: {hookEventName: eventName, additionalContext: JSON.stringify(visible) + (source.resolved === undefined ? '' : `\n${hostAccessDeveloperContext(source.resolved.source_access)}`)}};
+}
+
+function readVersions(provider: MyWikiSourceProvider, locators: string[]): HostPageVersion[] | undefined {
+  try {
+    const versions = locators.map(locator => {
+      const page = provider.readPage(locator);
+      return {locator: page.relative_path, revision: page.revision, content_hash: page.content_hash};
+    });
+    return versions.length === locators.length ? versions : undefined;
+  } catch { return undefined; }
+}
+
+/**
+ * A single native command can read several Markdown files. Budget the actual
+ * page locators, not merely the number of PostToolUse events, so batching
+ * `Get-Content a.md, b.md` cannot bypass a per-turn page-read limit.
+ */
+function currentReadCount(runtime: TraceRuntime, sourceId: string, sessionId: string, turnId: string | undefined): number {
+  if (turnId === undefined) return 0;
+  return runtime.listData('host_retrieval_evidence')
+    .filter(record =>
+      record.payload.event_kind === 'source_read'
+      && record.payload.source_id === sourceId
+      && record.payload.host_session_id === sessionId
+      && record.payload.host_turn_id === turnId,
+    )
+    .reduce((total, record) => total + (Array.isArray(record.payload.locators) ? record.payload.locators.length : 0), 0);
+}
+
+function buildPreToolHookOutput(input: CodexHookInput, runtime: TraceRuntime, sourceProfile: MyWikiSourceProfile | undefined): Record<string, unknown> {
+  if (input.hook_event_name !== 'PreToolUse') return {};
+  const source = sourceAvailability(sourceProfile);
+  const sessionId = hookThreadId(input);
+  const turnId = hookTurnId(input);
+  const toolName = hookToolName(input);
+  const toolUseId = hookToolUseId(input);
+  if (source.resolved === undefined || toolName === undefined) return {};
+  const classified = classifyNativeSourceAccess({host: 'codex', host_session_id: sessionId, ...(turnId === undefined ? {} : {host_turn_id: turnId}), host_tool_name: toolName, ...(toolUseId === undefined ? {} : {host_tool_use_id: toolUseId}), tool_input: input.tool_input}, {root: source.resolved.provider.profile.root, formal_prefix: source.resolved.provider.profile.formal_prefix, policy: source.resolved.policy});
+  if (classified?.event_kind !== 'source_read') return {};
+  const used = currentReadCount(runtime, source.resolved.provider.profile.source_id, sessionId, turnId);
+  const requested = classified.locators.length;
+  if (used + requested <= source.resolved.policy.max_reads_per_turn) return {};
+  return {hookSpecificOutput: {
+    hookEventName: 'PreToolUse',
+    permissionDecision: 'deny',
+    permissionDecisionReason: `Trace native source read budget (${source.resolved.policy.max_reads_per_turn} pages per turn) would be exceeded by this ${requested}-page read after ${used} recorded pages. Continue from evidence already read or start a new turn.`,
+  }};
+}
+
+function buildPostToolHookOutput(input: CodexHookInput, runtime: TraceRuntime, sourceProfile: MyWikiSourceProfile | undefined): Record<string, unknown> {
+  if (input.hook_event_name !== 'PostToolUse') return {};
+  const source = sourceAvailability(sourceProfile);
+  const sessionId = hookThreadId(input);
+  const turnId = hookTurnId(input);
+  const toolName = hookToolName(input);
+  if (source.resolved === undefined || toolName === undefined) return {};
+  const toolUseId = hookToolUseId(input);
+  const classified = classifyNativeSourceAccess({
+    host: 'codex', host_session_id: sessionId, ...(turnId === undefined ? {} : {host_turn_id: turnId}), host_tool_name: toolName,
+    ...(toolUseId === undefined ? {} : {host_tool_use_id: toolUseId}), tool_input: input.tool_input, ...(input.tool_response === undefined ? {} : {tool_response: input.tool_response}),
+  }, {root: source.resolved.provider.profile.root, formal_prefix: source.resolved.provider.profile.formal_prefix, policy: source.resolved.policy});
+  if (classified === undefined) return {};
+  const versions = classified.event_kind === 'source_read' ? readVersions(source.resolved.provider, classified.locators) : [];
+  const eventKind = classified.event_kind === 'source_read' && versions === undefined ? 'source_access_unclassified' : classified.event_kind;
+  const evidence = recordHostEvidence(runtime, {
+    event_kind: eventKind,
+    source_id: source.resolved.provider.profile.source_id,
+    source_scope: sourceScope(source.resolved.provider.profile),
+    policy: source.resolved.policy,
+    host: 'codex', host_session_id: sessionId,
+    ...(turnId === undefined ? {} : {host_turn_id: turnId}),
+    host_tool_name: toolName,
+    ...(toolUseId === undefined ? {} : {host_tool_use_id: toolUseId}),
+    input_hash: classified.input_hash,
+    ...(classified.output_hash === undefined ? {} : {output_hash: classified.output_hash}),
+    ...(eventKind === 'source_read' ? {locators: classified.locators, page_versions: versions!} : {locators: []}),
+    causation_id: `codex-tool:${toolUseId ?? randomUUID()}`,
+    correlation_id: `codex-session:${sessionId}`,
+    producer: {component: 'trace.codex-adapter', version: '0.3.0', run_id: `codex:${sessionId}`},
+  });
+  if (evidence !== undefined) recordHostEvidenceEvent(runtime, {
+    component: 'codex-adapter', operation: `host-${eventKind}`, outcome: 'success', correlation_id: `codex-session:${sessionId}`,
+    causation_id: `codex-tool:${toolUseId ?? 'unknown'}`, thread_id: sessionId, record_refs: [`${evidence.record_id}@${evidence.revision}`],
+  });
+  // PostToolUse output is intentionally empty: the native tool result remains
+  // under Codex control; Trace only contributes durable provenance for status.
+  return {};
+}
+
+/**
+ * Real Codex hook boundary. Trace does not perform semantic retrieval here.
+ * It offers a bounded source lease to Codex, then observes the host's actual
+ * native search/read calls without persisting prompt/source/tool bodies.
+ */
+export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntime, sourceProfile?: MyWikiSourceProfile): Record<string, unknown> {
+  if (input.hook_event_name === 'SessionStart' || input.hook_event_name === 'UserPromptSubmit') return buildSourceActivationHookOutput(input, runtime, sourceProfile);
+  if (input.hook_event_name === 'PreToolUse') return buildPreToolHookOutput(input, runtime, sourceProfile);
+  if (input.hook_event_name === 'PostToolUse') return buildPostToolHookOutput(input, runtime, sourceProfile);
+  return {};
 }

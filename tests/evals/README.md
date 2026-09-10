@@ -1,46 +1,44 @@
-# Trace Effect Evaluation Foundation
+# Trace Host-Retrieval Evidence Evaluation
 
-这套目录先验证 **不依赖模型的第一层效果**：Trace 是否为正确项目选择正确正式页、生成受控读取指针、保持 pointer-only 边界，以及是否拒绝被 profile 排除的来源。它不把“模型写出更好文字”伪装成已经证明的结论。
+这套目录验证 **Trace 不抢占宿主检索，而是能如实证明宿主实际访问了什么**。Codex 自己决定是否检索、怎样检索、读取哪些正式页；Trace 的责任是：按项目提供受控来源入口、在本地工具事件后保留安全访问证据、让用户看到“已提供 / 已检索 / 已读取 / 未分类访问”的区别。
+
+它**不**把 fixture 或宿主 hook 回放伪装成模型效果评估，更不声称 Trace 的 lexical provider 代表 Codex 的语义检索能力。
 
 ## Case contract
 
-每个 `cases/*.json` 是一个 synthetic golden case：
+每个 `cases/*.json` 仍定义 synthetic fixture 的预期页面与禁止页：
 
 ```json
 {
   "case_id": "retrieval-zh-001",
   "prompt": "只用于测试执行，不写入 eval snapshot",
   "expected_pages": ["wiki/context-boundary.md"],
-  "forbidden_pages": ["wiki/private-finance.md"],
-  "max_pointers": 3
+  "forbidden_pages": ["wiki/private-finance.md"]
 }
 ```
 
-fixture prompt 和 fixture source body 是测试输入；`scripts/run-evals.mjs` 输出的 snapshot 不保存它们，只保存 case ID、hash、相对页面引用、指标和 artifact hash。
+`hook-replay.test.mjs` 将 `expected_pages` 作为**测试提供的宿主 native-read 回放决策**，而非 Trace 自动选择结果。它验证：
 
-## Layer 1：确定性 activation evaluation
+- `UserPromptSubmit` 只提供正式来源根与预算，不返回预选页面或 `read_pointers`；
+- 真实 `PostToolUse` 输入会产生 `source_read` evidence，保存相对 locator、当时 revision/hash 与输入/输出 hash；
+- 搜索只能标成 `source_search`，不会伪造成已读取；
+- prompt、来源正文、工具输入/输出与绝对根路径不进入 SQLite 或 snapshot；
+- `PreToolUse` 对可识别的 native read 执行单轮预算；它不是文件系统隔离边界。
+
+fixture prompt 与 fixture source body 都是测试输入；`scripts/run-evals.mjs` 的 snapshot 不保存它们，只保存 case ID、fixture hash、相对页面定位符和**evidence 覆盖率**。
+
+## 运行
 
 ```powershell
 corepack pnpm eval:pair
-# 或分别运行：node scripts/run-evals.mjs --variant baseline / --variant trace
 corepack pnpm test:evals
 ```
 
-- `baseline`：相同 cases，但不进行 Trace retrieval；用于建立“没有 activation”这一确定性对照。
-- `trace`：使用 profile 的 MyWiKi retrieval 与 `activation_excluded_paths`。
-- `eval:pair`：为同一 fixture 生成 `baseline` 与 `trace`，输出 `snapshots/evals/<pair-id>/baseline/eval-manifest.json`、`trace/eval-manifest.json` 和汇总 `pair-manifest.json`；此目录默认不进入 Git。
-- `test:evals`：除 golden retrieval 外，还会以真实 `trace internal codex hook-stdio --route-from-event-cwd` 回放全部 cases、验证双项目 cwd 路由和 SQLite 的 pointer-only 边界。
+- `baseline`：不写 Trace host-retrieval evidence 的对照；
+- `trace`：以相同 fixture native-read replay 写入预期 evidence；
+- `eval:pair` 的 delta 是 evidence coverage，不是 precision/recall 或模型质量提升；
+- `test:evals` 同时回放真实 `trace internal codex hook-stdio --route-from-event-cwd`，验证 cwd 项目隔离和 SQLite privacy boundary。
 
-当前 hard gates：
+## 真实 Agent 效果验收
 
-- expected pages 必须命中；
-- forbidden pages 必须为 0；
-- 无关任务不得激活页面；
-- 返回数不得超过 `max_pointers`；
-- hook replay 必须保持项目路由正确、pointer-only snapshot count 为 0、durable locator 为相对安全路径。
-
-## Layer 2：真实 Agent 语义 evaluation（尚未自动化）
-
-Layer 2 要对同一个干净项目分别运行 `baseline` 与 `trace`，固定模型、模型版本、工具权限、cwd、上下文预算与 prompt，并记录最终 artifact、实际读页证据、scope/adoption 判断、用户纠正次数、完成 turns 与延迟。
-
-Codex 目前的 hook contract 没有提供通用“文件已读取”事件，因此不能仅从 `pages_considered` 推断 Agent 已读来源。接入真实 Codex read/tool trace 后，才能把“指针已提供”升级为“页面已读取”；在此之前 Layer 2 必须用来源引用和最终 artifact 进行人工或宿主级判定。
+要评估“Codex 在真实问题上是否检索得更好”，必须另行在干净项目、固定模型/权限/cwd/上下文预算下运行可复现任务，并记录最终 artifact、宿主实际 `source_search` / `source_read` evidence、用户纠正次数、完成 turns 与延迟。Trace 现在已经可以提供这条**实际访问证据**；它不会再把“给了两个页面指针”误报成“Agent 已读并有效利用”。

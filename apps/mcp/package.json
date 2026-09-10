@@ -1,0 +1,15 @@
+{
+  "name": "@trace/app-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "trace-mcp": "dist/main.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@trace/instance": "workspace:*",
+    "@trace/product-application": "workspace:*",
+    "zod": "3.25.76"
+  }
+}

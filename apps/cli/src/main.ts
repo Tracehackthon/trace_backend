@@ -18,6 +18,7 @@ import {CodexHookInstaller} from '../../../packages/host/codex-hooks/src/index.j
 import {SELECTABLE_TEMPLATES} from '../../../packages/template/catalog/src/index.js';
 import {initializeProject, loadProjectActivationConfiguration, migrateProjectActivationConfiguration, updateProjectActivationConfiguration, validateProjectInstanceDescriptor, type ProjectSourceMode, type ProjectSourceProfileInput, type ProjectInstanceDescriptor, type ProjectActivationConfigurationInput} from '../../../packages/core/instance/src/index.js';
 import {hashTransientPrompt} from '../../../packages/core/case-capture/src/index.js';
+import {startTraceMcpServer} from '../../mcp/src/main.js';
 
 const PRODUCT_USAGE = [
     'Trace — 管理当前项目中的 Agent 协作、认知源与可审核沉淀',
@@ -77,6 +78,7 @@ const ADVANCED_USAGE = [
     '  trace-runtime codex activate --sqlite-state-file ABS --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--thread-id ID] [--correlation-id ID --causation-id ID] [--forbidden-scope TEXT]',
     '  trace-runtime codex trigger --sqlite-state-file ABS --event-file ABS',
     '  trace-runtime codex hook-stdio --route-from-event-cwd',
+    '  trace internal mcp stdio  # local MCP server used by the Trace Codex plugin',
     '  trace-runtime codex hook-stdio --sqlite-state-file ABS [--source-profile ABS]',
     '  trace-runtime zhihu search|global-search|hot --profile ABS --query TEXT|--limit N [--capture-run-id ID --sqlite-state-file ABS]',
     '  trace-runtime mywiki read|search|propose|apply --profile ABS ...',
@@ -429,6 +431,10 @@ export async function run(argv: string[]): Promise<void> {
   if (argv[0] === 'internal') {
     if (argv.length === 1 || argv.slice(1).includes('--help') || argv.slice(1).includes('-h')) { printUsage(true); return; }
     await run(argv.slice(1));
+    return;
+  }
+  if (argv[0] === 'mcp' && argv[1] === 'stdio' && argv.length === 2) {
+    await startTraceMcpServer();
     return;
   }
   if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) { printUsage(argv.includes('--advanced')); return; }

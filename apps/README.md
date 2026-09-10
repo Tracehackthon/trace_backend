@@ -4,7 +4,7 @@
 
 ## 用户从哪里开始
 
-日常用户只需要产品 CLI：
+日常 Codex 用户从 `trace-codex` Plugin 的 `$trace` 开始；它通过本地 MCP 显示状态、提案与回执，不要求用户填写 CLI 参数。CLI 是脚本、恢复与无 Plugin 环境的后备入口：
 
 ```powershell
 trace init
@@ -17,6 +17,7 @@ trace inbox
 
 ## 目录职责
 
+- `mcp/`：标准 stdio MCP server。直接调用 product application service，不 shell-out 到 CLI；所有写操作都走 proposal + explicit adoption；
 - `cli/`：产品 CLI 与维护者的协议命令。默认 `trace` 呈现 init/status/inbox/review/sources/abilities/codex/doctor/backup；内部自动化使用 `trace internal ...`；
 - `codex/`：当前 Codex hook adapter，只把受控事件映射到 runtime。原始 prompt 只作 transient lookup，不会自动进入持久化状态；
 - SDK server：位于 `packages/sdk/server/`，给 TypeScript/Python SDK 提供 stdio JSONL RPC；

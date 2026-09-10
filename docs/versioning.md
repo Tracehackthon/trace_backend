@@ -13,7 +13,7 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 - 发布分支是 `main`；Changesets 也以 `main` 计算发布差异。
 - 包发布的唯一计划来源是 `.changeset/`。在没有明确发布决策前，不能执行 `pnpm version-packages`。
 - `trace.data-envelope` 当前为 `0.3.0`，通过 `0.1.0 → 0.2.0 → 0.3.0` in-memory upcaster 引入闭合的 `host_retrieval_evidence` kind；`trace.continuity`、`trace.context-record` 与 `trace.project-instance` 当前各自处于 `0.2.0`。`trace.collaboration-model@0.1.0` 与 `trace.source-activation@0.1.0` 是独立的本地配置协议；`trace.source-profile@0.3.0` 仅用于 import。未知版本继续 fail-closed。
-- 产品 `trace-runtime` 当前是 `0.7.1`，Codex bundle 为 `trace.codex@0.4.1`，Codex starter/team/empty template 为 `0.4.0`。它们不表示每个 workspace 包或每个协议都等于相同版本。
+- 产品 `trace-runtime` 当前是 `0.7.1`，Codex bundle 为 `trace.codex@0.4.1`，Codex starter/team/empty template 为 `0.4.0`。它们不表示每个 workspace 包或每个协议都等于相同版本。`trace-codex` Plugin/MCP 已由 Changeset 列入下一次发行计划；在产品 runtime、bundle 与 profile 得到同一次明确发布决策前，不把源码 checkout 误称为用户已安装版本。
 - 发布前必须运行 `corepack pnpm audit:versions`、`corepack pnpm audit:release-plan`、`corepack pnpm changeset status`、`corepack pnpm check:all`。
 
 `governance/version-policy.json` 是机器可检查的版本事实。`audit:versions` 会检查发布分支、根发行版、workspace package 版本、受管协议版本，以及 Changeset 中引用的包是否真实存在。它不自动改版本，也不替代真实行为验证。
@@ -43,6 +43,17 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 - **Codex hooks / 用户 Skill 更新**：只在用户执行 `trace codex enable` 或 installer 的显式 approval 后变化；检测到旧 hook 时显示 `needs_reenable`，不在 runtime 安装时修改用户级配置。
 
 因此，仓库可以持续演化，同时每个用户项目保留自己的稳定状态。新版本提供“可识别、可审阅、可选择”的迁移，不把“最新仓库内容”误当成“应立即覆盖用户的认知与工作流”。
+
+## Codex Plugin / MCP 的版本边界
+
+`trace-codex` Plugin、Skills 和本地 MCP 是产品入口，不是新的项目状态格式。它们的更新遵循以下边界：
+
+- **安装或刷新 Plugin 不迁移项目**：它只更新 Codex 能调用的 Skills/MCP；不会改 `.trace/`、SQLite、认知源、starter/template、能力或 hooks。
+- **旧项目先被识别，再被迁移**：MCP `trace_upgrade_inspect` 与 `$trace` 先显示 runtime/profile 状态；`legacy_unlocked` 必须经过 proposal → 用户采用 → `trace_profile_migrate_apply` 才写 lock。
+- **提案包含状态指纹**：profile、初始化与 hooks apply 前会重新计算 proposal；状态变化后 fail `STALE_PROPOSAL`，不会按旧提案覆盖新状态。
+- **入口与宿主配置独立更新**：Plugin 的 managed marketplace 更新需显式 `--replace`；Codex hooks 仍需单独 proposal/adoption。两者都不是 runtime 更新的副作用。
+
+这让“我拿到了新版 Plugin”“这个项目采用了新版协作模型”“这个项目的数据协议已经升级”成为三个可分别检查、回滚和讨论的事实。详见 [Trace Codex Plugin](codex-plugin.md)。
 
 ## 协作模型与来源地图的本地版本
 

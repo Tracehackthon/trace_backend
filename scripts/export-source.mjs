@@ -22,7 +22,7 @@ fs.mkdirSync(staging, {recursive: true});
 
 const entries = [
   '.changeset', '.gitignore', 'apps', 'governance', 'AUDIT_20260909.md', 'docs', 'GIT_REMOTE_SETUP.md', 'MIGRATION_STATUS.md', 'README.md',
-  'mise.toml', 'native', 'package.json', 'packages', 'patches', 'pnpm-lock.yaml',
+  'marketplace.json', 'mise.toml', 'native', 'package.json', 'packages', 'patches', 'plugins', 'pnpm-lock.yaml',
   'pnpm-workspace.yaml', 'profiles', 'python', 'schemas', 'scripts', 'snapshots',
   'templates', 'tests', 'tsconfig.build.json', 'tsconfig.json',
 ];

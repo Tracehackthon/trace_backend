@@ -1,0 +1,20 @@
+{
+  "name": "trace-runtime-local",
+  "interface": {
+    "displayName": "Trace Runtime"
+  },
+  "plugins": [
+    {
+      "name": "trace-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/trace-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

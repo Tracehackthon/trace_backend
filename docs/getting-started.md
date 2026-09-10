@@ -1,5 +1,7 @@
 # 第一次使用 Trace
 
+> **Codex 用户优先入口**：完成一次性 [Trace Codex Plugin](codex-plugin.md) 安装后，直接在项目中使用 `$trace 帮我开始这个项目`。本页保留 CLI 流程，适用于自动化、恢复或尚未安装 Plugin 的环境。
+
 ## 你会得到什么
 
 在项目中运行 `trace init` 后，Trace 创建一个本地 `.trace/` 边界：
@@ -18,7 +20,7 @@
 
 它不复制你的个人 Wiki，不会隐式读取外部目录，也不会让另一个项目共享状态。
 
-## 初始化
+## 初始化（CLI 后备入口）
 
 进入项目目录：
 
@@ -45,7 +47,7 @@ trace init --source team --source-profile <团队来源配置绝对路径>
 
 外部 / 团队 profile 是用户本地配置；项目 descriptor 只保存其身份与 hash，不把外部 root 写进可提交的项目记录。
 
-## 启用 Codex
+## 启用 Codex hooks（CLI 后备入口）
 
 先预览：
 

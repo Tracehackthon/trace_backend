@@ -6,10 +6,11 @@ Trace 的核心对象是**认知变更**，不是内容存储：真实协作中�
 
 ## 使用 Trace
 
-1. [第一次使用](getting-started.md)：初始化项目、启用 Codex、理解 `.trace/`。
-2. [日常协作、认知变化与沉淀](daily-workflow.md)：查看 Agent 发现的候选，理解什么已保存、什么未保存、何时可以采用或发布。
-3. [维护、备份与恢复](operations.md)：健康检查、备份、恢复与常见边界。
-4. [让 Agent 逐步适配使用者](personalization.md)：冷启动协作方式、个人/项目协作模型、认知源地图与版本更新。
+1. [Trace Codex Plugin](codex-plugin.md)：一次性安装后，在 Codex 中用 `$trace` 开始、适配和查看 Trace。
+2. [第一次使用](getting-started.md)：初始化项目、启用 Codex、理解 `.trace/`。
+3. [日常协作、认知变化与沉淀](daily-workflow.md)：查看 Agent 发现的候选，理解什么已保存、什么未保存、何时可以采用或发布。
+4. [维护、备份与恢复](operations.md)：健康检查、备份、恢复与常见边界。
+5. [让 Agent 逐步适配使用者](personalization.md)：冷启动协作方式、个人/项目协作模型、认知源地图与版本更新。
 
 ## 开发 Trace
 

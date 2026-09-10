@@ -38,6 +38,8 @@ copy('packages/bundle', 'bundle');
 copy('schemas', 'schemas');
 copy('python/sdk', 'python-sdk');
 copy('native', 'native');
+copy('plugins', 'plugins');
+copy('marketplace.json', 'marketplace.json');
 // The Node 22–24.1 runtime selects this pure-JS/WASM fallback before loading
 // experimental node:sqlite. Materialize its JS assets so native distribution
 // installation never depends on node-gyp or a platform-specific prebuild.

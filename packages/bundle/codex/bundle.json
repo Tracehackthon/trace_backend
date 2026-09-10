@@ -25,7 +25,8 @@
     "host/codex-skill",
     "host/codex-hooks",
     "core/collaboration-context",
-    "core/instance"
+    "core/instance",
+    "product/application"
   ],
   "protocols": [
     "trace.change-set@0.2.0",
@@ -46,7 +47,8 @@
     "integration/zhihu-transport",
     "integration/mywiki-source",
     "host/codex-skill",
-    "host/codex-hooks"
+    "host/codex-hooks",
+    "apps/mcp"
   ],
   "trigger": {
     "mode": "ts-runtime",

@@ -8,6 +8,7 @@ import {createHash} from 'node:crypto';
 
 const root = path.resolve(process.cwd());
 const installer = path.join(root, 'native', 'install.mjs');
+const codexPluginInstaller = path.join(root, 'native', 'install-codex-plugin.mjs');
 const packager = path.join(root, 'scripts', 'package.mjs');
 const hash = value => createHash('sha256').update(value).digest('hex');
 
@@ -55,8 +56,35 @@ test('distribution retains product documentation and the trace launcher', () => 
     assert.equal(fs.existsSync(path.join(output, 'docs', 'daily-workflow.md')), true);
     assert.equal(fs.existsSync(path.join(output, 'native', 'launcher', 'trace.mjs')), true);
     assert.equal(fs.existsSync(path.join(output, 'native', 'launcher', 'trace.cmd')), true);
+    assert.equal(fs.existsSync(path.join(output, 'native', 'install-codex-plugin.mjs')), true);
+    assert.equal(fs.existsSync(path.join(output, 'plugins', 'trace-codex', '.codex-plugin', 'plugin.json')), true);
+    assert.equal(fs.existsSync(path.join(output, 'dist', 'apps', 'mcp', 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', 'server', 'mcp.js')), true);
     const manifest = JSON.parse(fs.readFileSync(path.join(output, 'release-manifest.json'), 'utf8'));
     assert.equal(manifest.files.some(file => file.path === 'docs/getting-started.md'), true);
+    const installed = path.join(directory, 'installed');
+    const installedRuntime = spawnSync(process.execPath, [installer, '--package', output, '--target', installed], {encoding: 'utf8'});
+    assert.equal(installedRuntime.status, 0, installedRuntime.stderr);
+    assert.equal(fs.existsSync(path.join(installed, 'plugins', 'trace-codex', '.mcp.json')), true);
+    assert.equal(fs.existsSync(path.join(installed, 'dist', 'apps', 'mcp', 'node_modules', 'zod', 'v3', 'index.js')), true);
+    const pluginPlan = spawnSync(process.execPath, [path.join(installed, 'native', 'install-codex-plugin.mjs'), '--runtime-root', installed, '--marketplace-root', path.join(directory, 'codex-marketplace'), '--dry-run'], {encoding: 'utf8'});
+    assert.equal(pluginPlan.status, 0, pluginPlan.stderr);
+    assert.equal(JSON.parse(pluginPlan.stdout).plugin, 'trace-codex');
+  } finally {
+    fs.rmSync(directory, {recursive: true, force: true});
+  }
+});
+
+test('Codex plugin installer is explicit and its dry run never alters a user marketplace', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-plugin-installer-'));
+  const marketplace = path.join(directory, 'marketplace');
+  try {
+    const dryRun = spawnSync(process.execPath, [codexPluginInstaller, '--runtime-root', root, '--marketplace-root', marketplace, '--dry-run'], {encoding: 'utf8'});
+    assert.equal(dryRun.status, 0, dryRun.stderr);
+    const plan = JSON.parse(dryRun.stdout);
+    assert.equal(plan.status, 'planned');
+    assert.equal(plan.dry_run, true);
+    assert.equal(plan.automatic_upgrade, false);
+    assert.equal(fs.existsSync(marketplace), false);
   } finally {
     fs.rmSync(directory, {recursive: true, force: true});
   }

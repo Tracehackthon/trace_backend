@@ -13,11 +13,12 @@
   "bin": {
     "trace": "dist/apps/cli/src/main.js",
     "trace-runtime": "dist/apps/cli/src/main.js",
+    "trace-mcp": "dist/apps/mcp/src/main.js",
     "trace-runtime-rpc": "dist/packages/sdk/server/src/main.js"
   },
   "scripts": {
     "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit",
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && pnpm exec tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && pnpm exec tsc -p tsconfig.build.json && node scripts/materialize-mcp-dependencies.mjs",
     "test": "pnpm build && node --test tests/*.test.mjs tests/evals/*.test.mjs",
     "package": "pnpm build && node scripts/package.mjs",
     "audit:templates": "node scripts/audit-templates.mjs",
@@ -43,6 +44,8 @@
     "pnpm": ">=10.34.5"
   },
   "dependencies": {
-    "sql.js": "1.14.2"
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "sql.js": "1.14.2",
+    "zod": "3.25.76"
   }
 }

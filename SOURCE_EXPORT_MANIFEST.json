@@ -12,11 +12,13 @@
     "GIT_REMOTE_SETUP.md",
     "MIGRATION_STATUS.md",
     "README.md",
+    "marketplace.json",
     "mise.toml",
     "native",
     "package.json",
     "packages",
     "patches",
+    "plugins",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
     "profiles",
@@ -54,6 +56,11 @@
       "bytes": 908
     },
     {
+      "path": ".changeset/trace-codex-plugin-mcp.md",
+      "sha256": "d05331f04e9ad35177cecb0694aa9c4af8be0f9820cbd9b195b4f15477203d76",
+      "bytes": 373
+    },
+    {
       "path": ".gitignore",
       "sha256": "d6a925b4f5814baebf61b68bf623294f3761969412483bf186f14e0277df4986",
       "bytes": 131
@@ -65,8 +72,8 @@
     },
     {
       "path": "apps/cli/src/main.ts",
-      "sha256": "c6884d2468c33611510efd0fa228979d9a094a5695e5de3638390fc35812d3ed",
-      "bytes": 84618
+      "sha256": "c71cc43721aa47dfbefbbd568e07d730b1fe21c3c5fcc50248c04e9f7be0aba3",
+      "bytes": 84882
     },
     {
       "path": "apps/codex/package.json",
@@ -94,9 +101,19 @@
       "bytes": 1437
     },
     {
+      "path": "apps/mcp/package.json",
+      "sha256": "eb606eb6b528b4ba763815ead7c1058d65f17b4b9791a0a08d73883a4e4e6790",
+      "bytes": 316
+    },
+    {
+      "path": "apps/mcp/src/main.ts",
+      "sha256": "eb283edd97c55e6f0d3eca7ec5cd10ef732baceb5c836da79d25ea65ea9b5b58",
+      "bytes": 10494
+    },
+    {
       "path": "apps/README.md",
-      "sha256": "504501fa5d6b2d9ef0530526b4907f5a5ee9843b36832006cab1caa5b30d15b2",
-      "bytes": 1288
+      "sha256": "fcec3e0c999e67d9c9b526bbeb31696edf4a384554d2beaaeb9d76e7823dc6cf",
+      "bytes": 1626
     },
     {
       "path": "AUDIT_20260909.md",
@@ -109,14 +126,19 @@
       "bytes": 3792
     },
     {
+      "path": "docs/codex-plugin.md",
+      "sha256": "768828c3611a83f0124d961c7c07bb75fc572807f56cebf3f36f435d14b25cd1",
+      "bytes": 5663
+    },
+    {
       "path": "docs/daily-workflow.md",
       "sha256": "55d71dd757e4d2ceec89baeedf736b0ae2e758816a746e4ccb2b5e78f58662ae",
       "bytes": 3432
     },
     {
       "path": "docs/getting-started.md",
-      "sha256": "984b48e39c5bf4ff61f81d5282d59458266638b0f9c7277294c1447cec1a2b9a",
-      "bytes": 4434
+      "sha256": "dda03838b1ab71aeeca903332c6670520f132ed9da09967595f2269c8d769b80",
+      "bytes": 4734
     },
     {
       "path": "docs/host-native-retrieval.md",
@@ -135,13 +157,13 @@
     },
     {
       "path": "docs/README.md",
-      "sha256": "f4690753fc3ec1b9c420b8fc0c58fd6e734bbad0f648fb06dcd88b62c33c9faf",
-      "bytes": 1814
+      "sha256": "cfe08d618cbac85feef29579f8af368bd4b81c3c8cd2b8c12615d6f788b1ef9c",
+      "bytes": 1938
     },
     {
       "path": "docs/versioning.md",
-      "sha256": "c471b46caffe29993de08bb643bdab021bb69f4fd26470fad894263e387176e9",
-      "bytes": 7643
+      "sha256": "134400c3bc85887dec44c401206f6e1fd414814311e6a9b5698e4ab92e2cb013",
+      "bytes": 9023
     },
     {
       "path": "GIT_REMOTE_SETUP.md",
@@ -154,14 +176,24 @@
       "bytes": 1200
     },
     {
+      "path": "marketplace.json",
+      "sha256": "2ec45b43750dfd426a252a3626b0652518b80d10f3cad4843bf98b094e54ac26",
+      "bytes": 384
+    },
+    {
       "path": "MIGRATION_STATUS.md",
-      "sha256": "98f9b08763b853bd4605b514b6179a67df7c83a62d21e73916fa9b943aab13db",
-      "bytes": 11264
+      "sha256": "11c12088f861984b63db244a10ad3806b460e298063dddcf0a1c07abeefe654d",
+      "bytes": 12062
     },
     {
       "path": "mise.toml",
       "sha256": "783467c0b4e1eeb8dbbf096493d1e75f2bf243d8478d97125d570c165d6241ae",
       "bytes": 315
+    },
+    {
+      "path": "native/install-codex-plugin.mjs",
+      "sha256": "f1922da9490f2eda3f4e379f73a7035f9498925acf9765fb659088604e94e52b",
+      "bytes": 8816
     },
     {
       "path": "native/install.mjs",
@@ -195,18 +227,18 @@
     },
     {
       "path": "package.json",
-      "sha256": "92a73feef479a8f9e06a08e4bab70985f1d5c6ad9df69e1fcb35961b7ee60433",
-      "bytes": 1906
+      "sha256": "f5654b531aa62f9d25942391609e94c9e747c4aa017fc987bd18eb6623a3675c",
+      "bytes": 2019
     },
     {
       "path": "packages/bundle/codex/bundle.json",
-      "sha256": "e751ccff6dba59f6e60a9e153bdb1872e52bd6624d296f7b2ba68345c4c81cd4",
-      "bytes": 1840
+      "sha256": "15e5e045e6cd39e0d639f79724f31686b3d5651f76cf9b4da524a9a00c7b6952",
+      "bytes": 1881
     },
     {
       "path": "packages/bundle/codex/README.md",
-      "sha256": "b858d2ffd7007d255774301bcd8356d8e5192ac672ddc41b31c0e175b297dbcb",
-      "bytes": 1204
+      "sha256": "a347fe50655ee9577b0ec3ae0cc92ce875ef27599b2e21ae00da1721ec3f3d97",
+      "bytes": 1429
     },
     {
       "path": "packages/bundle/README.md",
@@ -609,6 +641,16 @@
       "bytes": 4607
     },
     {
+      "path": "packages/product/application/package.json",
+      "sha256": "398d29638e08de63b16af24f884db9ee572e64b2cbadb501f63151a1c464329b",
+      "bytes": 431
+    },
+    {
+      "path": "packages/product/application/src/index.ts",
+      "sha256": "c8209a63e14e5ae97504fc094c8ee1b157fab11d7137364ad601392f75c4a77e",
+      "bytes": 26595
+    },
+    {
       "path": "packages/README.md",
       "sha256": "b9ecca0ced737967c40ada0da24baa59af8d68fb991511ab9b8fd3eb7eced1bd",
       "bytes": 2594
@@ -689,9 +731,49 @@
       "bytes": 219
     },
     {
+      "path": "plugins/trace-codex/.codex-plugin/plugin.json",
+      "sha256": "0ead514d75ca1551c5ac42dfac3a9e44f11e6bd67a3dd36e623ecbe131b08909",
+      "bytes": 1301
+    },
+    {
+      "path": "plugins/trace-codex/.mcp.json",
+      "sha256": "e7049c7b9850e09ef85d406f5d04e4f54732529df98d4a4c9ccbd2cbcb3f95de",
+      "bytes": 225
+    },
+    {
+      "path": "plugins/trace-codex/README.md",
+      "sha256": "24831689d52a385e2d1d2fcfb599eea874b217456e84175ca4f2447838b4ece6",
+      "bytes": 1271
+    },
+    {
+      "path": "plugins/trace-codex/scripts/launch-trace-mcp.mjs",
+      "sha256": "1158fbd93a1dc155a625de5718ee5b31872897253965be4b1c8bee66826cee11",
+      "bytes": 1541
+    },
+    {
+      "path": "plugins/trace-codex/skills/trace/references/mcp-workflows.md",
+      "sha256": "4d734a2d46fac804cc3337f9382c3538dc4372539e0880a6e718c6a57fa0520f",
+      "bytes": 1684
+    },
+    {
+      "path": "plugins/trace-codex/skills/trace/SKILL.md",
+      "sha256": "c7e940e8d3062d8eb9e6dfb55a7bf918b930aa34d2d0d106b3ae73e886f0cace",
+      "bytes": 3557
+    },
+    {
+      "path": "plugins/trace-codex/skills/trace-adapt/SKILL.md",
+      "sha256": "40deac831969ae193f2f4cfcbf32a6b62fc300d2ef0b5228e2fd25156f6fdb0a",
+      "bytes": 1069
+    },
+    {
+      "path": "plugins/trace-codex/skills/trace-review/SKILL.md",
+      "sha256": "9465c85f180f2326c4e428e88ad812a7336cd3edc3cc51e811bfbcbced5bd2ff",
+      "bytes": 1161
+    },
+    {
       "path": "pnpm-lock.yaml",
-      "sha256": "018324971017168328d5bc1dfe0ce990cc9facdaa9f5c0aea3400f15db44b6e9",
-      "bytes": 42489
+      "sha256": "c827bdbb3a659e830125aca16a99def146fbab807671631a45fb7e6a81332f09",
+      "bytes": 65627
     },
     {
       "path": "pnpm-workspace.yaml",
@@ -700,8 +782,8 @@
     },
     {
       "path": "profiles/codex.json",
-      "sha256": "9c165c7646befaaa015eb7ded22c213b7d22f28fdd282f1b3fce856001707bc2",
-      "bytes": 1696
+      "sha256": "554a7666e0c4947e82d600047d94c7a2b659d1d12f995f2fbf5fdd4ab434bebc",
+      "bytes": 1738
     },
     {
       "path": "profiles/deepseek-harness.json",
@@ -770,8 +852,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "27cbaa9e4f4c6c5e322fea8dccdcc354cef781b1a1b0aad01d1aa0302e2ef6f8",
-      "bytes": 10279
+      "sha256": "fd59a22301c86e80cb3962ec828a40eca34bd3287f1d9a18d990dd258bc5475b",
+      "bytes": 10357
     },
     {
       "path": "schemas/README.md",
@@ -925,13 +1007,18 @@
     },
     {
       "path": "scripts/export-source.mjs",
-      "sha256": "5b0de5feb5cd8ffbe02cd088caa8ee88194db69a2b5ed3115d357270c3967610",
-      "bytes": 9199
+      "sha256": "8f6ef06fe7394a29609c731b63078480bf45de8dd3ced7e06b73ecfcad4bfab0",
+      "bytes": 9229
+    },
+    {
+      "path": "scripts/materialize-mcp-dependencies.mjs",
+      "sha256": "8a0f9dc1d4d1cd4a0bbf3e201226351e43bb05f0f8a033756d078c62c384c468",
+      "bytes": 6976
     },
     {
       "path": "scripts/package.mjs",
-      "sha256": "ff9596f6e9a79dcca99a8b10ea975514ec527d97da7032bd49ce23c839799fd0",
-      "bytes": 3662
+      "sha256": "c9544c2809b7d93a8b8f4f5f686999f8c41cb8e18dbc3ab51171e976b4be00a3",
+      "bytes": 3736
     },
     {
       "path": "scripts/run-evals-pair.mjs",
@@ -1199,9 +1286,14 @@
       "bytes": 1600
     },
     {
+      "path": "tests/mcp.test.mjs",
+      "sha256": "e30bcaffb6c32e3223ed212ac5cde8db8788d9797d3e070085074910ed749d14",
+      "bytes": 5297
+    },
+    {
       "path": "tests/native.test.mjs",
-      "sha256": "87c63a755d39038c354d8106394e63b3764a574263a187964fe65fefa24500ab",
-      "bytes": 3621
+      "sha256": "eef9fde5700d0cfee40401d3b96b71f2e112321131dd003c352be2b519b74303",
+      "bytes": 5722
     },
     {
       "path": "tests/plugin-contract.test.mjs",
@@ -1265,8 +1357,8 @@
     },
     {
       "path": "tests/release_plan.test.mjs",
-      "sha256": "abc9b490f162bfcea263e3bc6a8278eb8a8207f2f7c902dd8043f9ca0bedb876",
-      "bytes": 1639
+      "sha256": "d7880d3ee22c0ff7640193635c58373c65ea862e19a564da2972a932e53f9df9",
+      "bytes": 1728
     },
     {
       "path": "tests/sdk.test.mjs",
@@ -1334,5 +1426,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-10T13:26:12.199Z"
+  "created_at": "2026-09-10T14:18:51.438Z"
 }

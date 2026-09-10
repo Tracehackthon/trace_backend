@@ -70,6 +70,7 @@ Trace 当前先服务于长期使用 Codex 的个人与团队。每个项目有�
 已实现的基础能力包括：
 
 - 为冷启动用户提供一份**可查看、可替换、不会伪造熟悉感**的协作模型：它把“先接住未完成的思考、避免默认问卷、友好但不盲从、明确执行即执行、证据与沉淀分层”做成通用 starter，而不复制任何个人历史；个人/项目适配则由显式版本化的协作模型与认知源地图完成；
+- 为 Codex 提供 `trace-codex` Plugin：`$trace`、`$trace-adapt` 和 `$trace-review` 用自然语言引导用户，标准 MCP 负责读取状态、生成提案和执行已采用的变更；它不通过 shell 拼接 CLI，也不要求用户填写 JSON；
 - 为 Codex 提供受控的认知源 access lease：Trace 只给正式来源根、前缀、预算与隐私规则；**Codex 自己**用原生搜索/读取工具决定和执行检索。Trace 不再用词法算法预选页面；用户级 hook 按每次事件的 cwd 路由到对应项目，不会被最后一次启用的项目绑死；
 - 把 prompt 和外部材料先做成可见候选；raw prompt 不会静默写入状态库；
 - 让用户明确选择保存摘要、脱敏片段或完整私有案例；
@@ -83,26 +84,35 @@ Trace 当前先服务于长期使用 Codex 的个人与团队。每个项目有�
 
 ## 3 分钟开始
 
-安装 Trace 后，在你的**已有项目目录**中运行：
+### 推荐：在 Codex 中使用
+
+安装 Trace runtime 后，首次把它连接到 Codex（只需一次）：
 
 ```powershell
-trace init
-trace codex enable --dry-run
-trace codex enable
-trace profile
-trace status
-trace upgrade      # 只读检查 runtime 与本项目的版本/迁移状态
+node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --dry-run
+node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 ```
 
-`trace init` 创建项目本地 `.trace/`：项目状态、候选、回执、备份和本地认知源都在这里。它不会复制其他人的 Wiki，也不会自动连接外部个人来源；使用 `--source external --source-profile <配置绝对路径>` 后，来源只在该项目的 hook 事件中按 cwd 加载。
+第二条命令只会在你确认后创建一个受管理的本地 Codex plugin marketplace，并让 Codex 安装 `trace-codex`。它**不会**初始化、升级或改写任何项目，也不会启用 hooks。之后在你想使用的项目里直接对 Codex 说：
 
-`trace codex enable --dry-run` 先展示将要管理的 Codex hooks；确认执行 `trace codex enable` 后才会写入配置，同时保留原配置备份与回执。
+```text
+$trace 帮我开始这个项目的 Trace，并告诉我你会保存什么、不会保存什么。
+```
 
-`trace profile` 让用户查看本项目实际交给 Codex 的协作方式、认知源地图和版本 lock；它不显示或写入来源正文。冷启动使用通用 starter，不会假装认识你。需要个人/团队适配时，用本地 profile 显式提供协作契约与安全相对 locator；完整方式见[让 Agent 逐步适配使用者](docs/personalization.md)。
+Trace 会先给出可见提案；你说“采用/确认”后才创建项目本地 `.trace/`。日常可直接说：`$trace 我现在的协作方式是什么？`、`$trace-adapt 我希望你更适配我的工作方式`、`$trace-review 看看有哪些内容等我决定`。详细安装、权限与版本行为见 [Trace Codex Plugin](docs/codex-plugin.md)。
 
-之后拉取或安装新版 Trace 时，先执行 `trace upgrade`：它只显示“运行中的 runtime、项目初始化版本、模板 lock 与协作配置”是否有变化，**不会**自动改写你的 SQLite、认知源、模板、能力、Skill 或 Codex hooks。旧项目若显示 `legacy_unlocked`，可在确认后执行 `trace profile migrate --confirm true`，只把当前兼容协作配置固化为本地 profile/hash lock。完整更新规则见[版本、协议与发布](docs/versioning.md)。
+### CLI 是恢复与自动化入口
 
-> 从源码仓库开发时，使用 `corepack pnpm exec trace <command>`；发行包安装后的 Windows launcher 同时提供 `trace` 与兼容名称 `trace-runtime`。
+CLI 仍然存在，面向脚本、诊断、备份和没有 Plugin 的环境，而不是日常协作界面：
+
+```powershell
+trace status
+trace upgrade      # 只读检查 runtime 与本项目的版本/迁移状态
+trace doctor
+trace backup create
+```
+
+从源码仓库开发时使用 `corepack pnpm exec trace <command>`；发行包安装后的 Windows launcher 同时提供 `trace` 与兼容名称 `trace-runtime`。已有 CLI 项目不会因为安装 Plugin 或升级 runtime 自动被改写。
 
 ## 日常使用：从协作到可见沉淀
 
@@ -144,6 +154,7 @@ trace backup restore --file <备份文件绝对路径> --replace
 - [产品边界与架构](docs/architecture.md)
 - [版本、协议与发布](docs/versioning.md)
 - [Codex 原生检索与 Trace 证据架构](docs/host-native-retrieval.md)
+- [Trace Codex Plugin：日常入口、MCP 与一次性安装](docs/codex-plugin.md)
 - [让 Agent 逐步适配使用者](docs/personalization.md)
 - [效果评估 fixtures 与边界](tests/evals/README.md)
 - [完整文档导航](docs/README.md)

@@ -23,7 +23,9 @@
     "packages/integration/zhihu-transport",
     "packages/integration/mywiki-source",
     "packages/host/codex-skill",
-    "packages/host/codex-hooks"
+    "packages/host/codex-hooks",
+    "apps/mcp",
+    "plugins/trace-codex"
   ],
   "trigger": {
     "mode": "ts-runtime",

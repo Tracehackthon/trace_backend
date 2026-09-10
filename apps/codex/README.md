@@ -1,6 +1,6 @@
-# Codex adapter
+# Trace × Codex：协作接续与来源 evidence
 
-Codex 是 Trace 当前的第一个真实宿主。它保留 Codex 的原生能力：判断是否需要来源、搜索文件、读取文件、调用工具、推理和交付；Trace 只负责将这些工作放进可治理、可追溯、用户可见的长期协作链路。
+Codex 是 Trace 当前的第一个真实产品宿主。用户在 Codex 中使用 `$trace` 看见项目协作状态、候选、来源边界与升级选择；Codex 保留判断是否需要来源、搜索文件、读取文件、调用工具、推理和交付。Trace 只负责将这些工作放进可治理、可追溯、用户可见的长期协作链路。
 
 > Trace 不再根据用户 prompt 用自己的 lexical provider 预选页面或把页面指针当作“Agent 已读”。
 

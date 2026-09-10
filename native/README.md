@@ -1,6 +1,6 @@
 # Native 发行与安装边界
 
-`native/` 负责把已构建的 Trace runtime 安全地交给用户运行：打包、完整性校验、staging 安装、launcher 与一次性的 Codex Plugin 连接。它不承载认知变化、候选、能力或存储领域逻辑。
+`native/` 是用户获得 Trace 产品的交付边界：负责把已构建 runtime 安全安装到本机，并一次性连接 Codex Plugin。它让产品可以安装、检查、替换和恢复；认知变化、候选、能力与存储规则仍由 TypeScript runtime 统一实现。
 
 普通用户不需要日常打开此目录。日常协作入口始终是 Codex 中的 `$trace`；CLI 只在 Plugin 不可用、需要备份/恢复或进行自动化时使用。
 

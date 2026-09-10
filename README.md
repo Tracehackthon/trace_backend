@@ -1,163 +1,187 @@
 # Trace
 
-> **不让 AI 协作只留下对话；让一次真正改变了理解的工作，能够进入下一次行动。**
+> **让 Agent 不只完成一次任务，而是在多次协作中逐步理解人、项目与团队，并把这种理解变成用户看得见、能决定、可验证的长期能力。**
 
-Trace 是 AI Agent 时代的**认知变更管理层**（cognitive change management）。
+Trace 是面向 AI Agent 协作的**认知演化产品**。它工作在 Codex 等原生 Agent 之上：不重造聊天、不抢走检索和推理，也不把所有对话塞进“记忆库”。
 
-它管理的核心不是笔记、聊天记录、向量、prompt 或“模型记忆了什么”，而是一次真实协作后，人的理解如何从 **Before** 变成 **After**：什么触发了变化、这个判断适用于哪里、谁确认采用、下次何时应被带回，以及后来它被事实支持、限制还是撤回。
+它解决的是一个更实际的问题：当你和 Agent 连续做项目、反复讨论、读取外部来源、发现协作问题时，什么值得被带到下一次？谁确认它？它适用于哪里？升级之后会不会覆盖原来的工作方式？
 
-Codex、Claude、Cursor、ChatGPT、项目工作、知乎和团队讨论是思考真正发生的现场；Trace 不重造一个聊天窗口，也不试图自动接管一切。它负责让其中值得进入未来的认知变化，拥有清晰、可审阅、可验证的生命周期。
+Trace 把这些原本散落在聊天、Wiki、prompt、Skill、项目文件和个人脑中的变化，变成一条**可见、可选择、可回放的协作链路**。
 
-## Trace 的核心循环
+## 你实际会遇到的问题
+
+| 没有 Trace 时 | 有 Trace 后 |
+|---|---|
+| 新会话重新解释自己、项目和未完成的问题 | Agent 能在项目边界内看见已确认的协作方式、来源入口与待解决事项 |
+| 不知道 Agent 用过哪些资料、到底沉淀了什么 | 能看见已授权来源、实际访问 evidence、候选和未决事项 |
+| 一次好讨论直接被塞进 prompt、Rule 或 Skill | 先成为候选；讨论、验证、采用后才影响未来工作 |
+| 每个人的知识库和工作方式不同，冷启动只能泛泛而谈 | 使用通用 starter 起步，再由用户明确形成个人 / 项目 / 团队 profile |
+| 更新 runtime、模板或 Plugin 时担心旧项目被覆盖 | runtime、Plugin、profile、模板和协议分别版本化；迁移必须显式采用 |
+| Agent 能力越积越多，却不知道从哪来、是否仍有效 | 候选能力保留来源、范围、验收与验证证据；发布和回滚都有 receipt |
+
+## Trace 给用户的产品体验
+
+### 1. 从 Codex 对话开始，而不是从配置开始
+
+Trace 的日常入口是 Codex Plugin：
 
 ```text
-真实工作与 Agent 协作
-  → 出现线索、误解、失败、外部前例或新的连接
-  → 澄清为「理解改变」的候选
-  → 用户讨论、确认采用或拒绝
-  → 成为有范围的长期判断
-  → 编译为能力 / 激活策略
-  → 在下一次相关工作中被带回
-  → 由结果验证：supported / limited / revoked
+$trace 帮我开始这个项目，并说明什么会被保存。
+$trace 我现在的协作方式和来源边界是什么？
+$trace-adapt 我希望你更适配我的工作方式。
+$trace-review 你沉淀了什么，还有什么等我决定？
+$trace 我升级后需要做什么？
 ```
 
-一条候选判断至少应能回答：
+你不需要日常填写 CLI flag、SQLite 路径、协议版本或 JSON。Trace 先理解你的意图，给出可见 proposal；只有你说“采用 / 确认”后，才执行初始化、profile 更新、旧项目迁移或 Codex hook 变更。
 
-| 要素 | Trace 关心的问题 |
+### 2. 让 Agent 真正使用原生能力，而不是再造一个检索器
+
+Codex 仍然负责：搜索、读取、推理、调用工具、写代码和交付。
+
+Trace 负责：
+
+- 提供用户已授权的认知来源入口、范围、预算与隐私边界；
+- 记录“已提供 / 已搜索 / 已读取 / 未分类访问”的安全 evidence；
+- 让用户知道一次协作使用了什么，而不把“给过来源”伪装成“Agent 已理解”；
+- 防止来源正文、绝对路径、prompt、凭证和工具参数被通用写入状态库。
+
+因此，Trace 不是另一个替代 Codex 的 Agent；它是让 Codex 协作变得**可治理**的产品层。
+
+### 3. 让沉淀变得可见，而不是让 Agent 静默记住一切
+
+一次讨论、一次失败、一个知乎前例或一个 prompt，不会自动成为长期知识。它们先进入可见的候选区：
+
+```text
+真实协作
+  → 线索 / 失败 / 外部前例 / 新判断
+  → Trace candidate
+  → 用户讨论、采用或拒绝
+  → source snapshot / precedent / collaboration profile
+  → 能力候选、发布或激活
+  → 后续结果支持、限制或撤回
+```
+
+用户会看见：候选是什么、为什么出现、建议适用范围、哪些证据不足、下一步可以怎样继续。
+
+用户默认不需要看见：数据库表、lineage、内部 hash、工具参数、凭证、隐藏推理或完整来源正文。
+
+### 4. 逐步适配每个使用者，而不伪造“我早就懂你”
+
+Trace 的冷启动 starter 只提供通用、可解释的协作原则，例如：先接住未完成思考、讨论与沉淀分开、明确执行就执行、证据优先、不要盲从。
+
+真正的适配发生在用户使用过程中：
+
+```text
+通用 starter
+  → 用户明确表达协作偏好、项目边界与来源授权
+  → versioned collaboration model + source activation map
+  → 项目本地 lock
+  → 在以后相关工作中被带回
+  → 由用户和结果继续修正
+```
+
+个人、项目与团队 profile 分开保存；公共模板不会携带任何人的历史认知源、绝对路径或私密上下文。
+
+## Trace 的产品组成
+
+| 产品面 | 用户获得什么 | 当前状态 |
+|---|---|---|
+| **Trace for Codex** | `$trace`、`$trace-adapt`、`$trace-review` 的自然语言入口 | 已实现 |
+| **Local MCP** | 状态、proposal、adopt、apply、receipt 的标准控制面 | 已实现 |
+| **项目 Trace Space** | 每个项目独立的 `.trace/`、profile lock、SQLite、备份与恢复 | 已实现 |
+| **认知来源接续** | 受控 source lease、来源路由与真实访问 evidence | 已实现，Codex 保留原生检索 |
+| **候选与案例沉淀** | transient → capture proposal → source snapshot → precedent | 已实现，完整案例必须显式选择 |
+| **能力治理** | 候选能力、验证、发布预览、明确 approval 与 rollback receipt | 已实现为底层发布能力 |
+| **知乎外部来源** | HTTP transport 与候选前例 adapter 的分层边界 | 已实现 transport / adapter；产品化调用继续迭代 |
+| **桌面端 / DeepSeek Harness** | 未来宿主接入位置 | 刻意未实现，不伪造完成状态 |
+
+## 一次真实使用会怎样发生
+
+```text
+1. 用户进入一个项目，对 Codex 说：
+   “$trace 帮我开始这个项目，并说明你会如何使用我的认知来源。”
+
+2. Trace 展示 proposal：
+   项目边界、starter、来源模式、哪些数据会创建、哪些内容不会保存。
+
+3. 用户采用后：
+   项目获得独立 .trace/、协作 profile、来源地图、SQLite 与 receipt。
+
+4. 用户继续正常与 Codex 工作：
+   Codex 自己搜索、读项目和已授权来源；Trace 只记录安全 evidence。
+
+5. 讨论中出现值得留下的发现：
+   Agent 提出 candidate，而不是静默把它写进 prompt 或 Skill。
+
+6. 用户在 $trace-review 中决定：
+   暂不处理、保留摘要、保存脱敏片段、保存私有案例、采用为 profile 或进入能力验证。
+
+7. 下次相关工作：
+   已确认且仍适用的协作方式、来源路线和能力才会被带回；后续结果可以支持、限制或撤回它们。
+```
+
+## 新用户、旧用户和更新后的项目
+
+Trace 把“安装新版”与“迁移用户项目”严格分开：
+
+| 发生的事 | 不会自动发生的事 |
 |---|---|
-| Before | 原来怎样理解、怎样行动？ |
-| Trigger | 哪个工作现场、失败、对话或来源促成了变化？ |
-| After | 现在准备如何理解或行动？ |
-| Scope | 它适用于什么，不适用于什么？ |
-| Adoption | 这只是 Agent 的候选，还是用户 / 团队已确认的判断？ |
-| Activation | 下一次什么场景应该把它带回来？ |
-| Validation | 后续什么结果会支持、限制或推翻它？ |
+| 安装 / 更新 runtime | 不会覆盖已有 `.trace/`、SQLite、来源、模板、能力或 hooks |
+| 安装 / 更新 Codex Plugin | 不会迁移 profile、不启用 hooks、不初始化项目 |
+| 使用新 starter 初始化项目 | 不会把 starter 反写到旧项目 |
+| 检查版本差异 | 不会执行升级或重建状态 |
 
-**Capture 只是入口。** Trace 的价值在于：候选被人采用后，能在未来真正改变 prompt、计划、代码、验收标准、产品表达或决策方式；并且这个影响还可以被继续验证和修正。
-
-## Trace 不是什么
-
-| 容易被误解为 | Trace 与它的区别 |
-|---|---|
-| 知识库 / 笔记系统 | 内容是证据或来源；Trace 管理的是理解变化的生命周期。 |
-| AI memory / RAG | 它们负责记忆或召回；Trace 只让已确认、仍适用的判断进入未来行动。 |
-| prompt 管理器 | prompt、Skill、Rule、MCP context 都可能是发布格式，不是核心对象。 |
-| 聊天记录器 | 对话是 provenance，不自动等于长期认知状态。 |
-| 自动自我改进 Agent | Agent 可以提出、执行、验证；人或团队保留判断采用与能力发布的权利。 |
-
-因此，Trace 的目标不是让 Agent “记得更多”，而是让**人、团队与 Agent 在多次协作中共同演化，而不把未经确认的内容、旧结论或偶然上下文当成真理。**
-
-## 谁看见什么、谁做决定
-
-Trace 是人参与的协作系统，不是静默后台。
-
-用户应持续看见：
-
-- 当前工作线与尚未解决的问题；
-- Agent 引用了哪些已授权来源；
-- 出现了哪些候选、为什么值得讨论、其建议作用域和风险；
-- 哪些内容已保存、尚未保存、已采用、已发布或已被替代；
-- 下一步可以如何继续讨论、验证、采用或拒绝。
-
-用户默认**不需要**看见或填写：SQLite 表、lineage、`correlation_id`、工具参数、凭证、完整来源正文或隐藏推理。它们由 Trace 的协议与审计层保护；需要审计时才按权限查看。
-
-Agent 可以提出候选、生成摘要、携带受控引用和执行验证；它不能静默把一个 prompt、外部页面、对话结论或个人观察写成已采用判断，更不能自动替换用户的能力或规则。
-
-## 当前 Codex-first 版本已经提供什么
-
-Trace 当前先服务于长期使用 Codex 的个人与团队。每个项目有独立的 `.trace/` 状态边界，避免不同项目、认知源和会话相互污染。
-
-已实现的基础能力包括：
-
-- 为冷启动用户提供一份**可查看、可替换、不会伪造熟悉感**的协作模型：它把“先接住未完成的思考、避免默认问卷、友好但不盲从、明确执行即执行、证据与沉淀分层”做成通用 starter，而不复制任何个人历史；个人/项目适配则由显式版本化的协作模型与认知源地图完成；
-- 为 Codex 提供 `trace-codex` Plugin：`$trace`、`$trace-adapt` 和 `$trace-review` 用自然语言引导用户，标准 MCP 负责读取状态、生成提案和执行已采用的变更；它不通过 shell 拼接 CLI，也不要求用户填写 JSON；
-- 为 Codex 提供受控的认知源 access lease：Trace 只给正式来源根、前缀、预算与隐私规则；**Codex 自己**用原生搜索/读取工具决定和执行检索。Trace 不再用词法算法预选页面；用户级 hook 按每次事件的 cwd 路由到对应项目，不会被最后一次启用的项目绑死；
-- 把 prompt 和外部材料先做成可见候选；raw prompt 不会静默写入状态库；
-- 让用户明确选择保存摘要、脱敏片段或完整私有案例；
-- 让知乎等外部来源先成为带相似性、差异和风险的候选前例，而非自动真理；
-- 将候选前例与能力候选、来源、版本和验证证据连成可追溯链；
-- 记录 activation / persistence receipt 与 host retrieval evidence，让用户知道来源是“已提供、已检索、已读取还是未分类访问”，以及哪些内容没有沉淀；状态库只保存相对 locator、revision/hash 和事件 hash，不保存绝对路径、来源正文、prompt 或工具参数；
-- 通过 `doctor`、backup、restore、revision、hash 与 lineage 保证数据可核验、可恢复；
-- 用 hook 回放验证真实的 Codex `UserPromptSubmit` / `PreToolUse` / `PostToolUse` 路径、项目 cwd 路由、读取预算和 privacy boundary；评估清单只衡量 evidence coverage，不把“测试通过”或 fixture 回放冒充为模型效果结论。
-
-> 当前版本已经打好候选、来源、接续、审计与发布治理的底座；完整的「判断采用 → 激活 → 验证 / 限制 / 撤回」用户工作流仍在持续产品化。Trace 不会把尚未完成的 UI 或宿主适配伪装成已实现能力。
+已有 lock 的项目继续使用自己的 profile。更早的项目会显示为 `legacy_unlocked`，先让用户审阅兼容配置；只有明确 adopt 后，才把当前配置固化为 lock。未知协议、缺少 upcaster 或 hash 漂移会 fail-closed，不会静默“修好”。
 
 ## 3 分钟开始
 
-### 推荐：在 Codex 中使用
+### 连接 Codex（只需一次）
 
-安装 Trace runtime 后，首次把它连接到 Codex（只需一次）：
+Trace runtime 安装后，先预览再确认：
 
 ```powershell
-node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --dry-run
-node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
+node <installed-runtime-directory>
+ative\install-codex-plugin.mjs --dry-run
+node <installed-runtime-directory>
+ative\install-codex-plugin.mjs --confirm true
 ```
 
-第二条命令只会在你确认后创建一个受管理的本地 Codex plugin marketplace，并让 Codex 安装 `trace-codex`。它**不会**初始化、升级或改写任何项目，也不会启用 hooks。之后在你想使用的项目里直接对 Codex 说：
+该动作只安装 `trace-codex` Plugin 与本地 MCP。它不会创建项目、读取认知源、修改旧项目、迁移 profile 或启用 hooks。
+
+### 在项目中开始协作
 
 ```text
-$trace 帮我开始这个项目的 Trace，并告诉我你会保存什么、不会保存什么。
+$trace 帮我开始这个项目，并告诉我什么可见、什么不会保存。
 ```
 
-Trace 会先给出可见提案；你说“采用/确认”后才创建项目本地 `.trace/`。日常可直接说：`$trace 我现在的协作方式是什么？`、`$trace-adapt 我希望你更适配我的工作方式`、`$trace-review 看看有哪些内容等我决定`。详细安装、权限与版本行为见 [Trace Codex Plugin](docs/codex-plugin.md)。
+详细安装、权限、proposal / adoption 与更新行为见 [Trace Codex Plugin](docs/codex-plugin.md)。
 
-### CLI 是恢复与自动化入口
+## 当 Plugin 暂不可用
 
-CLI 仍然存在，面向脚本、诊断、备份和没有 Plugin 的环境，而不是日常协作界面：
+CLI 是恢复、自动化和运维入口：
 
 ```powershell
 trace status
-trace upgrade      # 只读检查 runtime 与本项目的版本/迁移状态
+trace upgrade
 trace doctor
 trace backup create
 ```
 
-从源码仓库开发时使用 `corepack pnpm exec trace <command>`；发行包安装后的 Windows launcher 同时提供 `trace` 与兼容名称 `trace-runtime`。已有 CLI 项目不会因为安装 Plugin 或升级 runtime 自动被改写。
-
-## 当 Plugin 暂不可用：CLI 恢复与自动化
-
-不应把下面的命令当成普通用户的每日流程。它们服务于脚本、诊断、备份，或尚未安装 Plugin 的环境：
-
-```powershell
-trace status
-trace upgrade      # 只读检查 runtime 与项目 lock 的差异
-trace doctor
-trace backup create
-```
-
-`trace inbox`、`trace review`、`trace sources`、`trace profile` 与 `trace abilities` 仍可作为 CLI 回退入口；在 Codex 中优先让 `$trace` / `$trace-review` 将相同状态翻译成用户能审阅的提案、候选与下一步。
-
-一次 prompt 值得留下时，Trace 仍先创建不含正文的候选。完整案例必须由用户后续明确选择 `summary`、`redacted_excerpt` 或 `full_private`，随后才进入 `source_snapshot → candidate_precedent`；保存案例不等于发布能力。
-
-## 保持可恢复、可审计
-
-```powershell
-trace doctor
-trace backup create
-trace backup restore --file <备份文件绝对路径> --replace
-```
-
-`doctor` 检查项目状态链路；backup / restore 都包含完整性校验与 staging 验证。默认输出仍保持安全：不会显示 raw prompt、完整来源正文、凭证或工具参数。
+它与 MCP 使用同一套项目实例、profile lock、runtime 和存储语义；但日常协作优先 `$trace`，不要把用户推回一长串 CLI 参数。
 
 ## 文档
 
-- [第一次使用](docs/getting-started.md)
-- [日常协作、认知变化与沉淀](docs/daily-workflow.md)
-- [维护、备份与恢复](docs/operations.md)
-- [产品边界与架构](docs/architecture.md)
-- [版本、协议与发布](docs/versioning.md)
-- [Codex 原生检索与 Trace 证据架构](docs/host-native-retrieval.md)
-- [Trace Codex Plugin：日常入口、MCP 与一次性安装](docs/codex-plugin.md)
+- [从 Codex 开始使用 Trace](docs/codex-plugin.md)
+- [第一次使用与项目初始化](docs/getting-started.md)
+- [日常协作、候选与沉淀](docs/daily-workflow.md)
 - [让 Agent 逐步适配使用者](docs/personalization.md)
-- [效果评估 fixtures 与边界](tests/evals/README.md)
+- [版本、协议与旧用户迁移](docs/versioning.md)
+- [产品架构与边界](docs/architecture.md)
+- [Codex 原生检索与来源 evidence](docs/host-native-retrieval.md)
+- [维护、备份与恢复](docs/operations.md)
 - [完整文档导航](docs/README.md)
 
-## 高级接口
+## 对维护者
 
-协议、连接器和宿主自动化有稳定接口，但它们不属于默认用户入口：
-
-```powershell
-trace --help --advanced
-```
-
-`trace internal ...` 给 Codex hooks、SDK 与宿主调用；旧的低层 TypeScript 命令在迁移期间保持兼容。它们需要显式状态文件、版本和 lineage 参数，不应用于日常产品使用。
+协议、SDK、adapter、CLI 和发布工具是产品的支撑层，不是默认用户入口。查看 `trace --help --advanced`、`packages/README.md`、`apps/README.md` 与 `native/README.md` 前，请先明确你在做的是产品使用、宿主接入、运维恢复还是协议开发。

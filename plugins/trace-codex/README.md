@@ -1,16 +1,37 @@
 # Trace for Codex
 
-`trace-codex` 是 Trace 在 Codex 中的日常入口。用户使用 `$trace` 查看状态、开始项目、检查升级或启用接续；使用 `$trace-adapt` 讨论协作方式；使用 `$trace-review` 查看等待决定的候选。
+> **把 Codex 的一次次工作，变成能被用户看见、采用和带回下一次的协作积累。**
 
-它由 Skill 与本地 MCP 共同组成：Skill 理解自然语言、解释提案并等待用户决定；MCP 读取安全摘要，且仅在用户明确 adopt 后执行项目初始化、profile 迁移/更新或 hooks 变更。
+`trace-codex` 是 Trace 在 Codex 中的产品入口。它不要求用户学习一组复杂 CLI 命令，也不替换 Codex 的搜索、阅读、推理和编码能力。
 
-## Trace 不替代 Codex
+你只需在 Codex 中说：
 
-Codex 仍自行搜索、读取、推理、调用工具和交付。Trace 不注入来源全文、不预选页面，也不把“提供过来源”伪装成“Agent 已读”；它只管理受控来源 lease、真实访问 evidence、候选与可回放的采用记录。
+```text
+$trace 帮我开始这个项目。
+$trace 我现在有哪些协作积累？
+$trace-adapt 我希望你更适配我处理问题的方式。
+$trace-review 哪些内容正在等待我的决定？
+```
 
-## 安装与版本
+## 它给用户什么
 
-普通用户不手动配置此目录。使用已安装 runtime 的一次性连接器：
+- **项目状态可见**：当前 profile、来源边界、版本差异、待审阅候选与 receipt；
+- **协作方式可适配**：通用 starter 先工作，个人 / 项目 / 团队偏好通过明确 proposal 形成版本化 profile；
+- **沉淀过程可控**：prompt、讨论和外部前例先是 candidate，不会被 Agent 静默写进长期上下文；
+- **升级过程可控**：Plugin 更新不覆盖项目；旧 profile 先展示，再由用户明确迁移；
+- **原生能力不被取代**：Codex 仍决定怎样检索、阅读、推理和执行，Trace 只记录受控来源 evidence。
+
+## 它如何工作
+
+Skill 负责理解自然语言、解释选择、等待用户决定；本地 MCP 负责读取安全摘要、生成稳定 proposal，并只在用户明确 adopt 后执行初始化、profile 更新/迁移或 hooks 变更。
+
+```text
+讨论 / 检查 → proposal（不写入）→ 用户 adopt → apply → receipt
+```
+
+MCP 不会通用保存或返回 raw prompt、来源正文、认知源绝对 root、凭证、工具参数或隐藏推理。
+
+## 安装一次，日常不再配置
 
 ```powershell
 node <installed-runtime-directory>
@@ -19,4 +40,6 @@ node <installed-runtime-directory>
 ative\install-codex-plugin.mjs --confirm true
 ```
 
-该动作只安装/连接 Plugin 和 MCP，不会改动既有 `.trace/`。Plugin 更新也不迁移项目：已 lock 项目继续用自己的 profile；`legacy_unlocked` 项目必须由用户在 `$trace` 中明确采用迁移提案。详见[Trace Codex Plugin](../../docs/codex-plugin.md)。
+它只连接 Plugin 与本地 MCP，不会初始化 `.trace/`、读取认知源、迁移 profile 或启用 hooks。日常只需回到 Codex 使用 `$trace`。
+
+完整安装、可见性与旧用户版本行为见[Trace Codex Plugin 文档](../../docs/codex-plugin.md)。

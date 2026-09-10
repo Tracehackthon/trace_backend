@@ -1,0 +1,11 @@
+{
+  "case_id": "retrieval-adoption-gate-001",
+  "prompt": "unadopted candidate must not publish",
+  "expected_pages": [
+    "wiki/published-state.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 1
+}

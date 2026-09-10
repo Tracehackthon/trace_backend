@@ -1,0 +1,11 @@
+{
+  "case_id": "retrieval-zhihu-precedent-001",
+  "prompt": "zhihu external precedent candidate",
+  "expected_pages": [
+    "wiki/zhihu-precedent.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 1
+}

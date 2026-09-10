@@ -130,7 +130,10 @@ function findAuthorizedPages(sourceProfile: MyWikiSourceProfile | undefined, pro
   if (sourceProfile === undefined) return {pages: [], status: 'unconfigured'};
   if (sourceProfile.read_enabled === false) return {pages: [], status: 'disabled'};
   if (prompt.trim().length === 0) return {pages: [], status: 'available'};
-  try { return {pages: new MyWikiSourceProvider(sourceProfile).search(prompt, 8), status: 'available'}; }
+  // Automatic activation is deliberately narrower than an interactive source
+  // search: the host can always ask for more, while each extra pointer makes
+  // context routing less precise and increases accidental-source exposure.
+  try { return {pages: new MyWikiSourceProvider(sourceProfile).search(prompt, 2), status: 'available'}; }
   // A transient external-source failure must not make a normal Codex prompt
   // fail. The user can inspect source status/doctor and retry after repairing it.
   catch { return {pages: [], status: 'unavailable'}; }

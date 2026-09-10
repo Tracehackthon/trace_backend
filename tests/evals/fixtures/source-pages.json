@@ -1,0 +1,42 @@
+[
+  {
+    "path": "wiki/context-boundary.md",
+    "title": "上下文边界",
+    "body": "Prevent context pollution and context contamination. Pointer safety protects controlled reads. 处理上下文污染、读取指针与安全边界。"
+  },
+  {
+    "path": "wiki/capability-versioning.md",
+    "title": "能力版本治理",
+    "body": "Capability version drift and 能力版本漂移 require explicit version governance and validation."
+  },
+  {
+    "path": "wiki/published-state.md",
+    "title": "候选与发布状态",
+    "body": "An unadopted candidate must not publish. Adopted and published state must remain distinct."
+  },
+  {
+    "path": "wiki/agent-collaboration.md",
+    "title": "多智能体协作",
+    "body": "Multi agent collaboration task handoff, responsibility boundary and evidence handoff."
+  },
+  {
+    "path": "wiki/zhihu-precedent.md",
+    "title": "知乎候选前例",
+    "body": "Zhihu external precedent is a candidate evidence source, not automatically adopted truth."
+  },
+  {
+    "path": "wiki/source-revision.md",
+    "title": "来源版本校验",
+    "body": "Source revision CAS content hash and stale write prevention."
+  },
+  {
+    "path": "wiki/project-isolation.md",
+    "title": "项目隔离",
+    "body": "Two project isolation prevents cross project context and source profile contamination."
+  },
+  {
+    "path": "wiki/private-finance.md",
+    "title": "私人财务",
+    "body": "Private finance budget forecast must never be automatically activated."
+  }
+]

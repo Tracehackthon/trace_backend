@@ -1,0 +1,12 @@
+{
+  "case_id": "retrieval-chinese-paraphrase-001",
+  "prompt": "如何避免上下文污染和能力版本漂移",
+  "expected_pages": [
+    "wiki/context-boundary.md",
+    "wiki/capability-versioning.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 2
+}

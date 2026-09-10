@@ -18,6 +18,7 @@ export interface ProjectSourceProfileInput {
   user_id: string;
   scope_type?: ProjectScopeType;
   source_mode?: ProjectSourceMode;
+  activation_excluded_paths?: string[];
 }
 export interface ProjectInitInput {
   project_dir: string;
@@ -94,7 +95,7 @@ function profileFor(input: ProjectInitInput, traceDir: string): {profile: Projec
   if (mode === 'local' || mode === 'empty') {
     if (input.source_root !== undefined || input.source_id !== undefined || input.source_profile !== undefined) throw new ProtocolError('INVALID_INPUT', `source options are not accepted for ${mode} mode`);
     const sourceRoot = path.join(traceDir, 'source');
-    return {scope, sourceRoot, profile: {source_id: mode === 'empty' ? 'isolated-empty-source' : 'project-cognitive-source', root: sourceRoot, formal_prefix: 'wiki', read_enabled: mode !== 'empty', write_enabled: false, user_id: input.user_id, scope_type: scope, source_mode: mode}};
+    return {scope, sourceRoot, profile: {source_id: mode === 'empty' ? 'isolated-empty-source' : 'project-cognitive-source', root: sourceRoot, formal_prefix: 'wiki', read_enabled: mode !== 'empty', write_enabled: false, activation_excluded_paths: [], user_id: input.user_id, scope_type: scope, source_mode: mode}};
   }
   if (input.source_profile === undefined && input.source_root === undefined) throw new ProtocolError('SOURCE_SELECTION_REQUIRED', `${mode} mode requires --source-profile or --source-root`);
   const supplied = input.source_profile;
@@ -105,8 +106,10 @@ function profileFor(input: ProjectInitInput, traceDir: string): {profile: Projec
   const profileUserId = text(supplied?.user_id ?? input.user_id, 'source_profile.user_id', 240);
   const readEnabled = supplied?.read_enabled ?? true;
   const writeEnabled = supplied?.write_enabled ?? false;
+  const activationExcludedPaths = supplied?.activation_excluded_paths ?? [];
   if (typeof readEnabled !== 'boolean' || typeof writeEnabled !== 'boolean') throw new ProtocolError('INVALID_INPUT', 'source profile read_enabled/write_enabled must be boolean');
-  const profile: ProjectSourceProfileInput = {source_id: sourceId, root: sourceRoot, formal_prefix: formalPrefix, read_enabled: readEnabled, write_enabled: writeEnabled, user_id: profileUserId, scope_type: scope, source_mode: mode};
+  if (!Array.isArray(activationExcludedPaths) || activationExcludedPaths.length > 128 || activationExcludedPaths.some(item => typeof item !== 'string')) throw new ProtocolError('INVALID_INPUT', 'source profile activation_excluded_paths must be a list of at most 128 strings');
+  const profile: ProjectSourceProfileInput = {source_id: sourceId, root: sourceRoot, formal_prefix: formalPrefix, read_enabled: readEnabled, write_enabled: writeEnabled, activation_excluded_paths: activationExcludedPaths, user_id: profileUserId, scope_type: scope, source_mode: mode};
   return {profile, sourceRoot, scope};
 }
 

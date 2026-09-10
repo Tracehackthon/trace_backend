@@ -1,0 +1,9 @@
+{
+  "case_id": "retrieval-irrelevant-001",
+  "prompt": "restaurant lunch booking",
+  "expected_pages": [],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 0
+}

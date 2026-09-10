@@ -27,7 +27,8 @@
 | 候选前例协议 | `packages/core/precedent` + `packages/core/capability-candidate` | 已迁移并验证 | 宿主无关 payload、证据 refs、Change Set lineage；前例不能绕过语义候选直接发布 |
 | 知乎候选前例 adapter | `packages/integration/zhihu-precedent` | 独立拆包并验证 | 有界知乎 API-like/fixture 输入 → source_snapshot/candidate_precedent；不负责 HTTP transport 或 adoption |
 | 知乎实时 API transport | `packages/integration/zhihu-transport` | 已迁移并验证 | Node 22 fetch；官方 Access Secret + `X-Request-Timestamp`；平台搜索/全局搜索/热榜/用户接口及黑客松内容接口；无默认重试；响应码/密钥泄漏门禁 |
-| MyWiKi 正式认知源 | `packages/integration/mywiki-source` | 已迁移并验证 | 用户选择 root/profile；formal `wiki/` 读；检索按完整短语或 token relevance；revision 由 content hash 派生，避免 coarse mtime 漏变更；source_snapshot provenance；proposal → explicit approval → hash/revision CAS → backup → atomic write |
+| MyWiKi 正式认知源 | `packages/integration/mywiki-source` | 已迁移并验证 | 用户选择 root/profile；formal `wiki/` 读；`activation_excluded_paths` 可阻止敏感正式页进入自动 activation；检索按完整短语或精度优先 token relevance；revision 由 content hash 派生，避免 coarse mtime 漏变更；source_snapshot provenance；proposal → explicit approval → hash/revision CAS → backup → atomic write |
+| 确定性效果评估 | `tests/evals` + `scripts/run-evals*.mjs` | 已实现并验证（Layer 1） | 12 条 synthetic golden case；MyWiKi precision/recall、无关/禁止激活率、真实 Codex `hook-stdio --route-from-event-cwd` replay、项目隔离与 durable pointer-only 边界；`eval:pair` 生成不含 raw prompt/source body/path 的 baseline/Trace manifests；不等同于模型效果验收 |
 | 用户级 Skill 替换 | `packages/host/codex-skill` + `apps/cli` | 已迁移并验证 | preview、显式 approval、staging 原子替换、备份、rollback；不把旧 Skill 放进 discovery 目录 |
 | Codex hooks 切换 | `packages/host/codex-hooks` + `apps/cli` | 已迁移并验证 | 读写真实 `hooks.json` 形状，移除旧 Python / 固定项目 Trace command、保留无关 hooks、备份、CAS preview、rollback；新命令按 event cwd 路由，避免多项目串线；默认不静默修改用户配置 |
 | 可选择认知源模板 | `packages/template/catalog` + `templates/*` | 已迁移并验证 | `trace.codex-starter`/`empty`/`team`；模板只提供结构/权限/source-pack，语义源由用户选择并写入 instance lock |
@@ -63,3 +64,5 @@ corepack pnpm export:source -- --out <SOURCE_EXPORT_DIR>
 `AUDIT_20260909.md` 是当前底层后端、模板、预设上下文和能力的审查结论；它明确区分已验证的 Codex 基线、prompt capture、SQLite driver fallback，与 DeepSeek Harness/Desktop 仍未验收的真实宿主接入。
 
 Changeset 位于 `.changeset/`；其发布基线为 `main`。`governance/version-policy.json` 与 `docs/versioning.md` 明确区分产品发行版、独立 workspace 包和协议版本；在用户明确授权前不要执行 `corepack pnpm version-packages`。发布前运行 `corepack pnpm audit:versions` 和 `corepack pnpm changeset status`。宿主切换必须通过 installer 的显式 approval 和可回滚回执，不由构建过程静默改写当前 Codex/Skill。
+
+当前还应运行 `corepack pnpm audit:release-plan`：它会验证根 private 产品 runtime、Codex profile、Codex bundle、协议数组和 cwd 路由命令是一致的，并明确提示 workspace Changesets 不能替产品发行身份作决定。完成 effects 基线可用 `corepack pnpm eval:pair`，但它仍只是 Layer 1 retrieval/hook 证据；真实 Agent read/tool trace 与用户效果属于下一层验收。

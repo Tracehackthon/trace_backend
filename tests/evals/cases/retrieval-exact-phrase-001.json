@@ -1,0 +1,11 @@
+{
+  "case_id": "retrieval-exact-phrase-001",
+  "prompt": "prevent context pollution",
+  "expected_pages": [
+    "wiki/context-boundary.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 1
+}

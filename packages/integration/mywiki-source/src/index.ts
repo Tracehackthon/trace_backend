@@ -16,6 +16,8 @@ export interface MyWikiSourceProfile {
   user_id: string;
   scope_type?: 'personal' | 'project' | 'team' | 'domain';
   source_mode?: 'local' | 'external' | 'team' | 'empty';
+  /** Formal pages that may exist in a source but must never enter automatic activation. */
+  activation_excluded_paths?: string[];
 }
 
 export interface MyWikiPage {
@@ -112,11 +114,14 @@ function relevance(query: string, text: string): number {
 }
 
 export class MyWikiSourceProvider {
-  readonly profile: Required<Pick<MyWikiSourceProfile, 'source_id' | 'root' | 'user_id' | 'read_enabled' | 'write_enabled'>> & {formal_prefix: string};
+  readonly profile: Required<Pick<MyWikiSourceProfile, 'source_id' | 'root' | 'user_id' | 'read_enabled' | 'write_enabled' | 'activation_excluded_paths'>> & {formal_prefix: string};
   constructor(profile: MyWikiSourceProfile) {
     const root = path.resolve(text(profile.root, 'root', 2000));
     if (!path.isAbsolute(root)) throw new Error('root must be absolute');
-    this.profile = {source_id: text(profile.source_id, 'source_id', 240), root, user_id: text(profile.user_id, 'user_id', 240), formal_prefix: profile.formal_prefix ?? 'wiki', read_enabled: profile.read_enabled ?? true, write_enabled: profile.write_enabled ?? false};
+    const excluded = profile.activation_excluded_paths ?? [];
+    if (!Array.isArray(excluded) || excluded.length > 128) throw new Error('activation_excluded_paths must contain at most 128 formal page paths');
+    const activationExcludedPaths = [...new Set(excluded.map(item => safeRelative(text(item, 'activation_excluded_paths item', 2000))))];
+    this.profile = {source_id: text(profile.source_id, 'source_id', 240), root, user_id: text(profile.user_id, 'user_id', 240), formal_prefix: profile.formal_prefix ?? 'wiki', read_enabled: profile.read_enabled ?? true, write_enabled: profile.write_enabled ?? false, activation_excluded_paths: activationExcludedPaths};
   }
   private target(relative: string): {relative: string; absolute: string} {
     const safe = safeRelative(relative); const absolute = path.resolve(this.profile.root, safe);
@@ -133,8 +138,17 @@ export class MyWikiSourceProvider {
   search(query: string, limit = 20): MyWikiPage[] {
     const needle = text(query, 'query', 500); const max = Math.max(1, Math.min(100, Math.floor(limit))); const results: Array<{page: MyWikiPage; score: number}> = [];
     const prefix = this.profile.formal_prefix.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''); const base = path.join(this.profile.root, prefix); if (!fs.existsSync(base)) return [];
-    const walk = (dir: string): void => { for (const entry of fs.readdirSync(dir, {withFileTypes: true})) { const absolute = path.join(dir, entry.name); if (entry.isDirectory()) walk(absolute); else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) { const relative = path.relative(this.profile.root, absolute).replaceAll(path.sep, '/'); const page = this.readPage(relative); const score = relevance(needle, `${page.title}\n${page.body}`); if (score > 0) results.push({page, score}); } } };
-    walk(base); return results.sort((left, right) => right.score - left.score || left.page.relative_path.localeCompare(right.page.relative_path)).slice(0, max).map(result => result.page);
+    const walk = (dir: string): void => { for (const entry of fs.readdirSync(dir, {withFileTypes: true})) { const absolute = path.join(dir, entry.name); if (entry.isDirectory()) walk(absolute); else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) { const relative = path.relative(this.profile.root, absolute).replaceAll(path.sep, '/'); if (this.profile.activation_excluded_paths.includes(relative)) continue; const page = this.readPage(relative); const score = relevance(needle, `${page.title}\n${page.body}`); if (score > 0) results.push({page, score}); } } };
+    walk(base);
+    results.sort((left, right) => right.score - left.score || left.page.relative_path.localeCompare(right.page.relative_path));
+    // A weak one-term overlap is not enough to silently activate a page. Keep
+    // only results reasonably close to the strongest page; an exact query
+    // match is an even stronger boundary. Interactive callers can refine a
+    // query, while automatic activation must prefer precision over breadth.
+    const strongest = results[0]?.score;
+    if (strongest === undefined) return [];
+    const threshold = strongest >= 100_000 ? 100_000 : Math.max(1, Math.ceil(strongest * 0.8));
+    return results.filter(result => result.score >= threshold).slice(0, max).map(result => result.page);
   }
   buildSourceSnapshot(page: MyWikiPage, options: {run_id: string; classification?: CreateDataRecord['classification']; scope?: CreateDataRecord['scope']}): CreateDataRecord {
     const runId = text(options.run_id, 'run_id', 200); return {kind: 'source_snapshot', status: 'captured', schema_id: 'trace.source.snapshot', schema_version: '0.1.0', subject: {type: 'formal_page', id: `${this.profile.source_id}:${page.relative_path}`}, scope: options.scope ?? {type: 'personal', id: this.profile.user_id}, origin: {provider: 'mywiki', source_id: `${this.profile.source_id}:${page.relative_path}`, captured_at: new Date().toISOString(), content_hash: page.content_hash, locator: page.relative_path}, producer: {component: MYWIKI_SOURCE_ID, version: MYWIKI_SOURCE_VERSION, run_id: runId}, lineage: {parent_refs: [], source_refs: [], causation_id: `read:${page.relative_path}`, correlation_id: runId}, classification: options.classification ?? 'private', payload: {source_id: `${this.profile.source_id}:${page.relative_path}`, provider: 'mywiki', external_id: page.relative_path, title: page.title, content: page.body.slice(0, 100_000), captured_at: new Date().toISOString(), content_hash: page.content_hash, locator: page.relative_path, page_revision: page.revision, source_user_id: this.profile.user_id} };

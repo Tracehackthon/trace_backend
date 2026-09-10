@@ -4,6 +4,7 @@
   "formal_prefix": "wiki",
   "read_enabled": true,
   "write_enabled": false,
+  "activation_excluded_paths": [],
   "user_id": "<caller-provided-user-id>",
   "scope_type": "personal",
   "source_mode": "external",

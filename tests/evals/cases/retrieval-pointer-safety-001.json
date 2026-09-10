@@ -1,0 +1,11 @@
+{
+  "case_id": "retrieval-pointer-safety-001",
+  "prompt": "context contamination pointer safety",
+  "expected_pages": [
+    "wiki/context-boundary.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 1
+}

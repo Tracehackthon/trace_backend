@@ -37,6 +37,18 @@ Codex event cwd
 
 Trace 不会把完整认知源正文、原始 prompt、工具参数或凭证塞进 Activation Pack，也不会因为找到了页面就创建 `source_snapshot`。它只在项目 SQLite 的 activation receipt 中保存安全身份：`source_id`、相对 `locator`、`revision`、`content_hash`、用途与停止条件。绝对路径和正文不持久化。
 
+如果某个正式页虽然可由用户手动查阅、但绝不能随 prompt 自动激活（例如个人财务、病历或尚未讨论的草稿），在项目 source profile 中配置相对正式页路径：
+
+```json
+{
+  "activation_excluded_paths": [
+    "wiki/private-finance.md"
+  ]
+}
+```
+
+该列表只影响自动 activation；它不删除来源、不改变正式页的权限，也不等于把页面发布给 Agent。路径必须是 profile root 下的 `.md` 相对路径。Trace 自动 activation 最多返回两个高相关读取指针，并以精度优先的阈值过滤弱 token 重叠；当需要更多材料时，由用户或 Codex 显式查询来源，而不是静默扩展上下文。
+
 用户可以用 `trace status` 看到最近一次 activation 的持久化引用、读取指针和未自动保存内容；用 `trace inbox` / `trace review <ID>` 决定是否让真实协作结果进入候选沉淀。
 
 ## 宿主和集成维护者

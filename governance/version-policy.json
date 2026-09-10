@@ -15,5 +15,11 @@
     "versions": "independent",
     "release_source": "changesets",
     "rule": "A public package or protocol change needs an explicit changeset before a package release. Runtime, protocol and template versions are reported separately; they are not assumed equal."
+  },
+  "codex_distribution": {
+    "profile": "profiles/codex.json",
+    "bundle": "packages/bundle/codex/bundle.json",
+    "expected_hook_command": "trace internal codex hook-stdio --route-from-event-cwd",
+    "release_rule": "Changesets manage workspace packages only. A pending package plan requires an explicit product runtime/bundle/profile release decision before packaging."
   }
 }

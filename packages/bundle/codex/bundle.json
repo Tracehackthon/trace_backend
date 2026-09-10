@@ -3,11 +3,61 @@
   "bundle_version": "0.2.0",
   "runtime": "trace-runtime@0.6.0",
   "host": "codex",
-  "packages": ["core/protocol", "core/data", "core/storage", "core/change-set", "core/continuity", "core/context", "core/migration", "core/runtime", "core/precedent", "core/capability", "core/operations", "plugin/contract", "template/contract", "template/catalog", "integration/zhihu-precedent", "integration/zhihu-transport", "integration/mywiki-source", "host/codex-skill", "host/codex-hooks"],
-  "protocols": ["trace.change-set@0.2.0", "trace.data-envelope@0.2.0", "trace.context-record@0.2.0", "trace.continuity@0.2.0", "trace.template-bundle@0.2.0", "trace.candidate-precedent@0.2.0", "trace.capability-content@0.2.0", "trace.capability-publish@0.2.0"],
-  "adapters": ["apps/codex", "integration/zhihu-precedent", "integration/zhihu-transport", "integration/mywiki-source", "host/codex-skill", "host/codex-hooks"],
-  "trigger": {"mode": "ts-runtime", "event_type": "codex.turn.started"},
-  "templates": ["templates/codex-starter/manifest.json"],
-  "state": {"product": "sqlite", "development": "separate-jsonl"},
+  "packages": [
+    "core/protocol",
+    "core/data",
+    "core/storage",
+    "core/change-set",
+    "core/continuity",
+    "core/context",
+    "core/migration",
+    "core/runtime",
+    "core/precedent",
+    "core/capability",
+    "core/operations",
+    "plugin/contract",
+    "template/contract",
+    "template/catalog",
+    "integration/zhihu-precedent",
+    "integration/zhihu-transport",
+    "integration/mywiki-source",
+    "host/codex-skill",
+    "host/codex-hooks"
+  ],
+  "protocols": [
+    "trace.change-set@0.2.0",
+    "trace.data-envelope@0.2.0",
+    "trace.context-record@0.2.0",
+    "trace.continuity@0.2.0",
+    "trace.template-bundle@0.2.0",
+    "trace.candidate-precedent@0.2.0",
+    "trace.capability-content@0.2.0",
+    "trace.capability-publish@0.2.0"
+  ],
+  "adapters": [
+    "apps/codex",
+    "integration/zhihu-precedent",
+    "integration/zhihu-transport",
+    "integration/mywiki-source",
+    "host/codex-skill",
+    "host/codex-hooks"
+  ],
+  "trigger": {
+    "mode": "ts-runtime",
+    "event_type": "codex.turn.started",
+    "hook_event_types": [
+      "SessionStart",
+      "UserPromptSubmit"
+    ],
+    "routing": "event-cwd-to-nearest-trace-project",
+    "command": "trace internal codex hook-stdio --route-from-event-cwd"
+  },
+  "templates": [
+    "templates/codex-starter/manifest.json"
+  ],
+  "state": {
+    "product": "sqlite",
+    "development": "separate-jsonl"
+  },
   "patches": []
 }

@@ -1,0 +1,11 @@
+{
+  "case_id": "retrieval-agent-collaboration-001",
+  "prompt": "multi agent collaboration task handoff",
+  "expected_pages": [
+    "wiki/agent-collaboration.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 1
+}

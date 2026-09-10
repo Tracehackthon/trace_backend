@@ -18,15 +18,20 @@
   "scripts": {
     "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && pnpm exec tsc -p tsconfig.build.json",
-    "test": "pnpm build && node --test tests/*.test.mjs",
+    "test": "pnpm build && node --test tests/*.test.mjs tests/evals/*.test.mjs",
     "package": "pnpm build && node scripts/package.mjs",
     "audit:templates": "node scripts/audit-templates.mjs",
     "export:source": "node scripts/export-source.mjs",
     "test:python": "python scripts/test-python.py",
-    "check:all": "pnpm typecheck && pnpm audit:templates && pnpm audit:versions && pnpm test && pnpm test:python",
+    "test:evals": "pnpm build && node --test tests/evals/*.test.mjs",
+    "check:all": "pnpm typecheck && pnpm audit:templates && pnpm audit:versions && pnpm audit:release-plan && pnpm test && pnpm test:python",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "audit:versions": "node scripts/audit-versions.mjs"
+    "audit:versions": "node scripts/audit-versions.mjs",
+    "audit:release-plan": "node scripts/audit-release-plan.mjs",
+    "eval:baseline": "pnpm build && node scripts/run-evals.mjs --variant baseline",
+    "eval:trace": "pnpm build && node scripts/run-evals.mjs --variant trace",
+    "eval:pair": "pnpm build && node scripts/run-evals-pair.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:devTools",

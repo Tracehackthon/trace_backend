@@ -76,6 +76,7 @@ Trace 当前先服务于长期使用 Codex 的个人与团队。每个项目有�
 - 将候选前例与能力候选、来源、版本和验证证据连成可追溯链；
 - 记录 activation / persistence receipt，让用户知道本轮激活了哪些持久化引用和读取指针、没有沉淀什么；读取指针的绝对路径只发给当前 Codex 进程，状态库只保存相对 locator、revision、hash 与用途；
 - 通过 `doctor`、backup、restore、revision、hash 与 lineage 保证数据可核验、可恢复。
+- 用 12 条可审阅的合成 golden case 回放 MyWiKi 读取指针、禁止自动激活页面和 Codex cwd 路由；每次可生成 privacy-safe baseline / Trace 评估清单，而不是把“测试通过”当成效果结论。
 
 > 当前版本已经打好候选、来源、接续、审计与发布治理的底座；完整的「判断采用 → 激活 → 验证 / 限制 / 撤回」用户工作流仍在持续产品化。Trace 不会把尚未完成的 UI 或宿主适配伪装成已实现能力。
 
@@ -133,6 +134,7 @@ trace backup restore --file <备份文件绝对路径> --replace
 - [维护、备份与恢复](docs/operations.md)
 - [产品边界与架构](docs/architecture.md)
 - [版本、协议与发布](docs/versioning.md)
+- [效果评估 fixtures 与边界](tests/evals/README.md)
 - [完整文档导航](docs/README.md)
 
 ## 高级接口

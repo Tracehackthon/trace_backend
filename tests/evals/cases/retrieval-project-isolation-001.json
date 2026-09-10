@@ -1,0 +1,11 @@
+{
+  "case_id": "retrieval-project-isolation-001",
+  "prompt": "two project isolation",
+  "expected_pages": [
+    "wiki/project-isolation.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 1
+}

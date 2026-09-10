@@ -1,0 +1,9 @@
+{
+  "case_id": "retrieval-privacy-boundary-001",
+  "prompt": "private finance budget",
+  "expected_pages": [],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 0
+}

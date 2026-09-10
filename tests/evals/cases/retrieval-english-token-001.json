@@ -1,0 +1,11 @@
+{
+  "case_id": "retrieval-english-token-001",
+  "prompt": "capability version drift",
+  "expected_pages": [
+    "wiki/capability-versioning.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 1
+}

@@ -1,0 +1,12 @@
+{
+  "case_id": "retrieval-conflicting-version-001",
+  "prompt": "what is the adopted published capability version",
+  "expected_pages": [
+    "wiki/capability-versioning.md",
+    "wiki/published-state.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 2
+}

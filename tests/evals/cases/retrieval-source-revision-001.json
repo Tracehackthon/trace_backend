@@ -1,0 +1,11 @@
+{
+  "case_id": "retrieval-source-revision-001",
+  "prompt": "source revision cas",
+  "expected_pages": [
+    "wiki/source-revision.md"
+  ],
+  "forbidden_pages": [
+    "wiki/private-finance.md"
+  ],
+  "max_pointers": 1
+}

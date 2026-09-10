@@ -1,6 +1,6 @@
 {
   "context_template_id": "trace-default-governance",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "rules": {
     "proposal_requires_adoption": true,
     "publish_requires_confirmation": true,
@@ -16,5 +16,12 @@
     "default_view": "summary",
     "review_view": "evidence",
     "audit_view": "full"
+  },
+  "collaboration_context": {
+    "mode": "versioned-user-visible",
+    "model_protocol": "trace.collaboration-model@0.1.0",
+    "source_activation_protocol": "trace.source-activation@0.1.0",
+    "personalization": "explicit-profile-not-inferred",
+    "raw_source_bodies": "host-native-only"
   }
 }

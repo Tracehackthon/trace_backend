@@ -8,10 +8,11 @@ Trace 不替你决定什么值得留下，更不会把所有聊天自动变成�
 
 ```powershell
 trace status
+trace profile
 trace inbox
 ```
 
-`status` 是概览：项目、已授权来源、开放主题、候选前例、候选能力，以及最近一次 activation 的安全回执。它还区分宿主来源状态：Trace 已提供入口、Codex 已搜索、Codex 已读取、或检测到但无法可靠分类的访问。`trace sources` 用相对 locator、revision/hash 显示这份证据。
+`status` 是概览：项目、已授权来源、当前协作模型、开放主题、候选前例、候选能力，以及最近一次 activation 的安全回执。`trace profile` 显示 Agent 当前被要求如何协作、哪些入口只是导航、配置是否由 hash lock 锁定；它不把协作条款或来源地图伪装成“用户人格”或“已读内容”。它还区分宿主来源状态：Trace 已提供入口、Codex 已搜索、Codex 已读取、或检测到但无法可靠分类的访问。`trace sources` 用相对 locator、revision/hash 显示这份证据。
 
 `inbox` 只显示仍等待你决定的内容，例如：
 
@@ -49,6 +50,9 @@ trace review <ID> --save <绝对内容文件路径>
 - 新出现了哪些候选，以及它们的理由、作用域和风险；
 - 这些候选是否保存、验证、采纳、发布、限制或撤回；
 - 哪些内容仍未保存；
+- 当前协作模型与来源地图的版本，以及配置更新是否经过显式确认；
 - 下一步可以如何继续与 Codex 讨论。
 
 formal source root 的绝对路径只在当前 Codex hook 返回给宿主，用于 Codex 自己的 native search/read；Trace 持久化的 evidence 只有来源 ID、相对 locator、revision/hash、事件 hash 与时间。用户不需要日常填写 `producer`、`lineage`、`correlation_id`、`causation_id` 或 SQLite 文件路径。这些属于 Trace 的宿主与协议层。
+
+需要调整“Agent 如何和我一起思考”或“哪些页优先被导航”时，不直接修改 ignored profile 造成配置漂移。把下一版写成局部 JSON 后显式执行 `trace profile update --file <绝对路径> --confirm true`，再用 `trace profile` 核验。Trace 会备份旧版本；未走更新流程的 lock 不一致会被拒绝，而不是静默生效。

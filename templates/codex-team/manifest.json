@@ -2,12 +2,58 @@
   "protocol_id": "trace.template-bundle",
   "protocol_version": "0.2.0",
   "bundle_id": "trace.codex-team",
-  "bundle_version": "0.3.0",
+  "bundle_version": "0.4.0",
   "display_name": "Trace Codex Team",
-  "runtime": {"min_version": "0.6.0"},
-  "protocols": {"trace.data-envelope": ">=0.1.0 <0.4.0", "trace.context-record": ">=0.1.0 <0.3.0"},
-  "capabilities": [{"id": "agent-collaboration-governance", "version": "1.0.0"}], "source_packs": [{"id": "trace-team-governance", "version": "1.0.0"}], "context_templates": [{"id": "trace-team-context", "version": "1.0.0"}], "hosts": ["codex"],
-  "activation": {"default": "preview", "require_user_confirmation": true},
-  "permissions": {"read_scopes": ["team", "project"], "write_scopes": [], "network_providers": []},
-  "cognitive_source": {"mode": "team-shared", "connector": "mywiki", "selection_required": true, "allowed_scope_types": ["team", "project"], "semantic_defaults": "source-pack"}
+  "runtime": {
+    "min_version": "0.7.0"
+  },
+  "protocols": {
+    "trace.data-envelope": ">=0.1.0 <0.4.0",
+    "trace.context-record": ">=0.1.0 <0.3.0",
+    "trace.collaboration-model": ">=0.1.0 <0.2.0",
+    "trace.source-activation": ">=0.1.0 <0.2.0"
+  },
+  "capabilities": [
+    {
+      "id": "agent-collaboration-governance",
+      "version": "1.0.0"
+    }
+  ],
+  "source_packs": [
+    {
+      "id": "trace-team-governance",
+      "version": "1.0.0"
+    }
+  ],
+  "context_templates": [
+    {
+      "id": "trace-team-context",
+      "version": "1.1.0"
+    }
+  ],
+  "hosts": [
+    "codex"
+  ],
+  "activation": {
+    "default": "preview",
+    "require_user_confirmation": true
+  },
+  "permissions": {
+    "read_scopes": [
+      "team",
+      "project"
+    ],
+    "write_scopes": [],
+    "network_providers": []
+  },
+  "cognitive_source": {
+    "mode": "team-shared",
+    "connector": "mywiki",
+    "selection_required": true,
+    "allowed_scope_types": [
+      "team",
+      "project"
+    ],
+    "semantic_defaults": "source-pack"
+  }
 }

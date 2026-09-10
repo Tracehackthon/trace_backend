@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {ProtocolError, ProtocolVersionRegistry, requireObject, requireText as text, type ProtocolVersioned} from '../../protocol/src/index.js';
 import {buildTemplateLock, validateTemplateManifest, type TemplateBundleManifest, type TemplateInstanceLock} from '../../../template/contract/src/index.js';
 import {normalizeHostRetrievalPolicy, type HostRetrievalPolicy} from '../../retrieval-evidence/src/index.js';
+import {buildActivationLock, collaborationModelHash, defaultCollaborationModel, defaultSourceActivationManifest, sourceActivationManifestHash, validateActivationLock, validateCollaborationModel, validateSourceActivationManifest, type ActivationLock, type CollaborationModel, type SourceActivationManifest} from '../../collaboration-context/src/index.js';
 
 export const PROJECT_INSTANCE_PROTOCOL_ID = 'trace.project-instance' as const;
 export const PROJECT_INSTANCE_PROTOCOL_VERSION = '0.2.0' as const;
@@ -21,6 +22,8 @@ export interface ProjectSourceProfileInput {
   source_mode?: ProjectSourceMode;
   activation_excluded_paths?: string[];
   host_retrieval?: Partial<HostRetrievalPolicy>;
+  activation_manifest?: SourceActivationManifest;
+  collaboration_model?: CollaborationModel;
 }
 export interface ProjectInitInput {
   project_dir: string;
@@ -53,7 +56,14 @@ export interface ProjectInitResult {
   descriptor: ProjectInstanceDescriptor;
   lock: TemplateInstanceLock;
   source_profile: ProjectSourceProfileInput;
+  collaboration_model: CollaborationModel;
+  source_activation: SourceActivationManifest;
+  activation_lock: ActivationLock;
   created_paths: string[];
+}
+export interface ProjectActivationConfigurationInput {
+  collaboration_model: CollaborationModel;
+  source_activation: SourceActivationManifest;
 }
 
 type AnyProjectInstanceProtocol = ProtocolVersioned & Record<string, unknown>;
@@ -90,6 +100,97 @@ function ensureDirectory(dir: string): void { fs.mkdirSync(dir, {recursive: true
 function writeNew(file: string, content: string): void { ensureDirectory(path.dirname(file)); fs.writeFileSync(file, content, {encoding: 'utf8', flag: 'wx'}); }
 function slug(value: string): string { const candidate = value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80); return candidate || 'project'; }
 function scopeFor(mode: ProjectSourceMode): ProjectScopeType { if (mode === 'external') return 'personal'; if (mode === 'team') return 'team'; return 'project'; }
+function readJson(file: string): unknown { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+function writeAtomic(file: string, content: string): void {
+  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(temporary, content, {encoding: 'utf8', flag: 'wx'});
+  try { fs.renameSync(temporary, file); } catch (error) { fs.rmSync(temporary, {force: true}); throw error; }
+}
+
+/** A source-map locator must be navigable through the selected host lease. */
+function assertActivationMapWithinSourcePolicy(source: SourceActivationManifest, profile: ProjectSourceProfileInput): void {
+  const prefixes = profile.host_retrieval?.mode === 'disabled'
+    ? []
+    : (profile.host_retrieval?.allowed_prefixes ?? [profile.formal_prefix ?? 'wiki']);
+  for (const entry of source.entry_points) {
+    if (entry.locator === undefined) continue;
+    const locator = entry.locator;
+    if (!prefixes.some(prefix => locator === prefix || locator.startsWith(`${prefix}/`))) {
+      throw new ProtocolError('SOURCE_MAP_OUT_OF_SCOPE', `source activation entry ${entry.id} is outside the selected host retrieval prefixes`);
+    }
+  }
+}
+
+function assertActivationLockMatches(lock: ActivationLock, input: {template_id: string; model: CollaborationModel; source: SourceActivationManifest}): void {
+  if (lock.template_id !== input.template_id) throw new ProtocolError('ACTIVATION_LOCK_MISMATCH', 'activation lock template_id does not match this project');
+  if (lock.collaboration_model.model_id !== input.model.model_id || lock.collaboration_model.version !== input.model.version || lock.collaboration_model.sha256 !== collaborationModelHash(input.model)) {
+    throw new ProtocolError('ACTIVATION_LOCK_MISMATCH', 'collaboration model changed outside the explicit Trace profile update flow');
+  }
+  if (lock.source_activation.manifest_id !== input.source.manifest_id || lock.source_activation.version !== input.source.version || lock.source_activation.source_id !== input.source.source_id || lock.source_activation.sha256 !== sourceActivationManifestHash(input.source)) {
+    throw new ProtocolError('ACTIVATION_LOCK_MISMATCH', 'source activation map changed outside the explicit Trace profile update flow');
+  }
+}
+
+/**
+ * The detailed model and source map live in the ignored profiles directory;
+ * the committable activation lock retains only identities and hashes. Existing
+ * projects fall back to the versioned built-in starter until re-initialized.
+ */
+export function loadProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_profile: ProjectSourceProfileInput}): {collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock?: ActivationLock} {
+  const traceDir = absolute(input.trace_dir, 'trace_dir');
+  const modelFile = path.join(traceDir, 'profiles', 'collaboration-model.json');
+  const sourceFile = path.join(traceDir, 'profiles', 'source-activation.json');
+  const lockFile = path.join(traceDir, 'instance', 'activation.lock.json');
+  const collaboration_model = fs.existsSync(modelFile)
+    ? validateCollaborationModel(readJson(modelFile))
+    : defaultCollaborationModel(input.template_id);
+  const source_activation = fs.existsSync(sourceFile)
+    ? validateSourceActivationManifest(readJson(sourceFile))
+    : defaultSourceActivationManifest({source_id: input.source_profile.source_id, source_mode: input.source_profile.source_mode ?? 'local', template_id: input.template_id});
+  if (source_activation.source_id !== input.source_profile.source_id) throw new ProtocolError('INVALID_INPUT', 'source activation manifest source_id does not match the selected source profile');
+  assertActivationMapWithinSourcePolicy(source_activation, input.source_profile);
+  let activation_lock: ActivationLock | undefined;
+  if (fs.existsSync(lockFile)) {
+    activation_lock = validateActivationLock(readJson(lockFile));
+    assertActivationLockMatches(activation_lock, {template_id: input.template_id, model: collaboration_model, source: source_activation});
+  }
+  return {collaboration_model, source_activation, ...(activation_lock === undefined ? {} : {activation_lock})};
+}
+
+/**
+ * Explicitly replace a project-local collaboration model/source map.
+ * Private configuration stays under ignored profiles/; the hash-only lock is
+ * refreshed atomically enough to either retain the prior files or leave a
+ * recoverable backup under .trace/backups/.
+ */
+export function updateProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_profile: ProjectSourceProfileInput; configuration: ProjectActivationConfigurationInput; updated_at?: string}): {collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock: ActivationLock; backup_dir: string} {
+  const traceDir = absolute(input.trace_dir, 'trace_dir');
+  const collaboration_model = validateCollaborationModel(input.configuration.collaboration_model);
+  const source_activation = validateSourceActivationManifest(input.configuration.source_activation);
+  if (source_activation.source_id !== input.source_profile.source_id) throw new ProtocolError('INVALID_INPUT', 'source activation manifest source_id does not match the selected source profile');
+  assertActivationMapWithinSourcePolicy(source_activation, input.source_profile);
+  const activation_lock = buildActivationLock({template_id: input.template_id, model: collaboration_model, source: source_activation, ...(input.updated_at === undefined ? {} : {created_at: input.updated_at})});
+  const profilesDir = path.join(traceDir, 'profiles');
+  const instanceDir = path.join(traceDir, 'instance');
+  const backupDir = path.join(traceDir, 'backups', `activation-profile-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  const targets = [
+    {name: 'collaboration-model.json', target: path.join(profilesDir, 'collaboration-model.json'), content: json(collaboration_model)},
+    {name: 'source-activation.json', target: path.join(profilesDir, 'source-activation.json'), content: json(source_activation)},
+    {name: 'activation.lock.json', target: path.join(instanceDir, 'activation.lock.json'), content: json(activation_lock)},
+  ];
+  ensureDirectory(backupDir);
+  for (const item of targets) if (fs.existsSync(item.target)) fs.copyFileSync(item.target, path.join(backupDir, item.name));
+  try {
+    for (const item of targets) writeAtomic(item.target, item.content);
+  } catch (error) {
+    for (const item of targets) {
+      const backup = path.join(backupDir, item.name);
+      if (fs.existsSync(backup)) fs.copyFileSync(backup, item.target);
+    }
+    throw error;
+  }
+  return {collaboration_model, source_activation, activation_lock, backup_dir: backupDir};
+}
 
 function profileFor(input: ProjectInitInput, traceDir: string): {profile: ProjectSourceProfileInput; sourceRoot: string; scope: ProjectScopeType} {
   const mode = input.source_mode;
@@ -138,21 +239,29 @@ export function initializeProject(input: ProjectInitInput): ProjectInitResult {
     const profileText = json(selected.profile);
     const profileHash = sha256(profileText);
     const lock = buildTemplateLock(manifest, runtimeVersion, instanceId, createdAt, {source_id: selected.profile.source_id, profile_hash: profileHash, scope_type: selected.scope});
+    const collaborationModel = input.source_profile?.collaboration_model === undefined
+      ? defaultCollaborationModel(manifest.bundle_id)
+      : validateCollaborationModel(input.source_profile.collaboration_model);
+    const sourceActivation = input.source_profile?.activation_manifest === undefined
+      ? defaultSourceActivationManifest({source_id: selected.profile.source_id, source_mode: input.source_mode, template_id: manifest.bundle_id})
+      : validateSourceActivationManifest(input.source_profile.activation_manifest);
+    if (sourceActivation.source_id !== selected.profile.source_id) throw new ProtocolError('INVALID_INPUT', 'activation_manifest.source_id must match the selected source profile');
+    assertActivationMapWithinSourcePolicy(sourceActivation, selected.profile);
+    const activationLock = buildActivationLock({template_id: manifest.bundle_id, model: collaborationModel, source: sourceActivation, created_at: createdAt});
     const descriptor = validateProjectInstanceDescriptor({protocol_id: PROJECT_INSTANCE_PROTOCOL_ID, protocol_version: PROJECT_INSTANCE_PROTOCOL_VERSION, project_id: slug(path.basename(projectDir)), instance_id: instanceId, template_id: manifest.bundle_id, template_version: manifest.bundle_version, source_mode: input.source_mode, source_scope: selected.scope, state_file: '.trace/state/trace.sqlite', source_root: input.source_mode === 'local' || input.source_mode === 'empty' ? '.trace/source' : '.trace/profiles/source.profile.json', created_at: createdAt});
     writeNew(path.join(stagedTrace, 'project.json'), json(descriptor));
     writeNew(path.join(stagedTrace, 'instance', 'trace.lock.json'), json(lock));
     writeNew(path.join(stagedTrace, 'instance', 'template.manifest.json'), json(manifest));
+    writeNew(path.join(stagedTrace, 'instance', 'activation.lock.json'), json(activationLock));
     writeNew(path.join(stagedTrace, 'profiles', 'source.profile.json'), profileText);
+    writeNew(path.join(stagedTrace, 'profiles', 'collaboration-model.json'), json(collaborationModel));
+    writeNew(path.join(stagedTrace, 'profiles', 'source-activation.json'), json(sourceActivation));
     writeNew(path.join(stagedTrace, '.gitignore'), ['# Trace project-local state (generated by `trace-runtime project init`)', 'state/', 'receipts/', 'backups/', 'candidates/', 'profiles/', '*.lock.tmp', ''].join('\n'));
     for (const directory of ['state', 'receipts', 'backups', 'candidates', 'source/wiki']) ensureDirectory(path.join(stagedTrace, directory));
     fs.renameSync(stagedTrace, traceDir);
     fs.rmSync(staging, {recursive: true, force: true});
     const finalProfile = {...selected.profile, root: selected.sourceRoot};
-    const createdPaths = [path.join(traceDir, 'project.json'), path.join(traceDir, 'instance', 'trace.lock.json'), path.join(traceDir, 'instance', 'template.manifest.json'), path.join(traceDir, 'profiles', 'source.profile.json'), path.join(traceDir, '.gitignore'), path.join(traceDir, 'state'), path.join(traceDir, 'receipts'), path.join(traceDir, 'backups'), path.join(traceDir, 'candidates'), path.join(traceDir, 'source', 'wiki')];
-    return {project_dir: projectDir, trace_dir: traceDir, descriptor, lock, source_profile: finalProfile, created_paths: createdPaths};
+    const createdPaths = [path.join(traceDir, 'project.json'), path.join(traceDir, 'instance', 'trace.lock.json'), path.join(traceDir, 'instance', 'template.manifest.json'), path.join(traceDir, 'instance', 'activation.lock.json'), path.join(traceDir, 'profiles', 'source.profile.json'), path.join(traceDir, 'profiles', 'collaboration-model.json'), path.join(traceDir, 'profiles', 'source-activation.json'), path.join(traceDir, '.gitignore'), path.join(traceDir, 'state'), path.join(traceDir, 'receipts'), path.join(traceDir, 'backups'), path.join(traceDir, 'candidates'), path.join(traceDir, 'source', 'wiki')];
+    return {project_dir: projectDir, trace_dir: traceDir, descriptor, lock, source_profile: finalProfile, collaboration_model: collaborationModel, source_activation: sourceActivation, activation_lock: activationLock, created_paths: createdPaths};
   } catch (error) { fs.rmSync(staging, {recursive: true, force: true}); throw error; }
 }
-
-
-
-

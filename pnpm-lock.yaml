@@ -129,6 +129,8 @@ importers:
         specifier: workspace:*
         version: link:../storage
 
+  packages/core/collaboration-context: {}
+
   packages/core/context:
     dependencies:
       '@trace/protocol':
@@ -205,6 +207,8 @@ importers:
         version: link:../protocol
 
   packages/core/protocol: {}
+
+  packages/core/retrieval-evidence: {}
 
   packages/core/runtime:
     dependencies:

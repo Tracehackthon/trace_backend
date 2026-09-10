@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {MyWikiSourceProvider, type MyWikiSourceProfile} from '../../../packages/integration/mywiki-source/src/index.js';
 import {classifyNativeSourceAccess, type HostPageVersion, type HostRetrievalPolicy} from '../../../packages/core/retrieval-evidence/src/index.js';
+import {compileCollaborationContext, defaultCollaborationModel, defaultSourceActivationManifest, type CollaborationModel, type SourceActivationManifest} from '../../../packages/core/collaboration-context/src/index.js';
 import type {TraceEvent} from '../../../packages/core/observability/src/index.js';
 import {randomUUID} from 'node:crypto';
 
@@ -127,6 +128,17 @@ export interface CodexHookInput {
   [key: string]: unknown;
 }
 
+/**
+ * Project-local activation configuration. It is supplied only to the live
+ * hook response; Trace state stores lock hashes and access evidence, not this
+ * private collaboration/source-map body.
+ */
+export interface CodexHookConfiguration {
+  source_profile?: MyWikiSourceProfile;
+  collaboration_model?: CollaborationModel;
+  source_activation?: SourceActivationManifest;
+}
+
 type SourceAvailability = 'unconfigured' | 'disabled' | 'available' | 'unavailable';
 
 interface HostNativeSourceAccess {
@@ -233,9 +245,10 @@ function buildSourceOffer(runtime: TraceRuntime, source: ResolvedSourceAccess, s
   });
 }
 
-function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRuntime, sourceProfile: MyWikiSourceProfile | undefined): Record<string, unknown> {
+function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRuntime, configuration: CodexHookConfiguration): Record<string, unknown> {
   const eventName = input.hook_event_name;
   if (eventName !== 'SessionStart' && eventName !== 'UserPromptSubmit') return {};
+  const sourceProfile = configuration.source_profile;
   const sessionId = hookThreadId(input);
   const turnId = hookTurnId(input);
   const source = sourceAvailability(sourceProfile);
@@ -253,12 +266,23 @@ function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRu
     max_tokens: 6000,
   });
   if (source.resolved !== undefined) buildSourceOffer(runtime, source.resolved, sessionId, turnId, activation.correlation_id, `codex-source-offer:${turnId ?? randomUUID()}`);
+  const sourceMode = sourceProfile?.source_mode ?? 'local';
+  const collaboration = compileCollaborationContext({
+    model: configuration.collaboration_model ?? defaultCollaborationModel(sourceMode === 'team' ? 'trace.codex-team' : sourceMode === 'empty' ? 'trace.codex-empty' : 'trace.codex-starter'),
+    source: configuration.source_activation ?? defaultSourceActivationManifest({source_id: sourceProfile?.source_id ?? 'unconfigured-source', source_mode: sourceMode, template_id: sourceMode === 'team' ? 'trace.codex-team' : sourceMode === 'empty' ? 'trace.codex-empty' : 'trace.codex-starter'}),
+    source_available: source.resolved !== undefined,
+  });
   const visible = {
     trace: 'activation',
     activation_mode: 'host_native_evidence',
     source_profile: typeof sourceProfile?.source_id === 'string' ? sourceProfile.source_id : null,
     source_status: source.status,
     ...(source.resolved === undefined ? {} : {source_access: source.resolved.source_access}),
+    collaboration_context: {
+      model: collaboration.collaboration_model,
+      source_activation: collaboration.source_activation,
+      context_sha256: collaboration.context_sha256,
+    },
     activation_receipt: {
       receipt_id: activation.receipt.record_id,
       activated_refs: activation.receipt.payload.activated_refs ?? [],
@@ -272,7 +296,7 @@ function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRu
       ? activation.user_notice
       : 'Trace 已提供受控的宿主原生认知源访问；Codex 自己检索和读取，Trace 只记录实际访问证据。',
   };
-  return {hookSpecificOutput: {hookEventName: eventName, additionalContext: JSON.stringify(visible) + (source.resolved === undefined ? '' : `\n${hostAccessDeveloperContext(source.resolved.source_access)}`)}};
+  return {hookSpecificOutput: {hookEventName: eventName, additionalContext: JSON.stringify(visible) + `\n${collaboration.developer_context}` + (source.resolved === undefined ? '' : `\n${hostAccessDeveloperContext(source.resolved.source_access)}`)}};
 }
 
 function readVersions(provider: MyWikiSourceProvider, locators: string[]): HostPageVersion[] | undefined {
@@ -367,9 +391,15 @@ function buildPostToolHookOutput(input: CodexHookInput, runtime: TraceRuntime, s
  * It offers a bounded source lease to Codex, then observes the host's actual
  * native search/read calls without persisting prompt/source/tool bodies.
  */
-export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntime, sourceProfile?: MyWikiSourceProfile): Record<string, unknown> {
-  if (input.hook_event_name === 'SessionStart' || input.hook_event_name === 'UserPromptSubmit') return buildSourceActivationHookOutput(input, runtime, sourceProfile);
-  if (input.hook_event_name === 'PreToolUse') return buildPreToolHookOutput(input, runtime, sourceProfile);
-  if (input.hook_event_name === 'PostToolUse') return buildPostToolHookOutput(input, runtime, sourceProfile);
+function hookConfiguration(value?: MyWikiSourceProfile | CodexHookConfiguration): CodexHookConfiguration {
+  if (value === undefined) return {};
+  return 'source_id' in value ? {source_profile: value} : value;
+}
+
+export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntime, configuration?: MyWikiSourceProfile | CodexHookConfiguration): Record<string, unknown> {
+  const normalized = hookConfiguration(configuration);
+  if (input.hook_event_name === 'SessionStart' || input.hook_event_name === 'UserPromptSubmit') return buildSourceActivationHookOutput(input, runtime, normalized);
+  if (input.hook_event_name === 'PreToolUse') return buildPreToolHookOutput(input, runtime, normalized.source_profile);
+  if (input.hook_event_name === 'PostToolUse') return buildPostToolHookOutput(input, runtime, normalized.source_profile);
   return {};
 }

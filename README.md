@@ -69,6 +69,7 @@ Trace 当前先服务于长期使用 Codex 的个人与团队。每个项目有�
 
 已实现的基础能力包括：
 
+- 为冷启动用户提供一份**可查看、可替换、不会伪造熟悉感**的协作模型：它把“先接住未完成的思考、避免默认问卷、友好但不盲从、明确执行即执行、证据与沉淀分层”做成通用 starter，而不复制任何个人历史；个人/项目适配则由显式版本化的协作模型与认知源地图完成；
 - 为 Codex 提供受控的认知源 access lease：Trace 只给正式来源根、前缀、预算与隐私规则；**Codex 自己**用原生搜索/读取工具决定和执行检索。Trace 不再用词法算法预选页面；用户级 hook 按每次事件的 cwd 路由到对应项目，不会被最后一次启用的项目绑死；
 - 把 prompt 和外部材料先做成可见候选；raw prompt 不会静默写入状态库；
 - 让用户明确选择保存摘要、脱敏片段或完整私有案例；
@@ -88,12 +89,15 @@ Trace 当前先服务于长期使用 Codex 的个人与团队。每个项目有�
 trace init
 trace codex enable --dry-run
 trace codex enable
+trace profile
 trace status
 ```
 
 `trace init` 创建项目本地 `.trace/`：项目状态、候选、回执、备份和本地认知源都在这里。它不会复制其他人的 Wiki，也不会自动连接外部个人来源；使用 `--source external --source-profile <配置绝对路径>` 后，来源只在该项目的 hook 事件中按 cwd 加载。
 
 `trace codex enable --dry-run` 先展示将要管理的 Codex hooks；确认执行 `trace codex enable` 后才会写入配置，同时保留原配置备份与回执。
+
+`trace profile` 让用户查看本项目实际交给 Codex 的协作方式、认知源地图和版本 lock；它不显示或写入来源正文。冷启动使用通用 starter，不会假装认识你。需要个人/团队适配时，用本地 profile 显式提供协作契约与安全相对 locator；完整方式见[让 Agent 逐步适配使用者](docs/personalization.md)。
 
 > 从源码仓库开发时，使用 `corepack pnpm exec trace <command>`；发行包安装后的 Windows launcher 同时提供 `trace` 与兼容名称 `trace-runtime`。
 
@@ -104,6 +108,7 @@ trace status       # 当前工作线、来源、候选与能力概览
 trace inbox        # 仍等待你讨论或决定的候选
 trace review <ID>  # 查看候选的理由、范围、保存状态和下一步
 trace sources      # 查看当前项目已授权认知源，以及 Codex 实际检索/读取的安全证据
+trace profile      # 查看 Agent 当前的协作契约、认知源地图及版本 lock
 trace abilities    # 查看候选能力，而非把它们误当作已发布能力
 ```
 
@@ -135,6 +140,7 @@ trace backup restore --file <备份文件绝对路径> --replace
 - [产品边界与架构](docs/architecture.md)
 - [版本、协议与发布](docs/versioning.md)
 - [Codex 原生检索与 Trace 证据架构](docs/host-native-retrieval.md)
+- [让 Agent 逐步适配使用者](docs/personalization.md)
 - [效果评估 fixtures 与边界](tests/evals/README.md)
 - [完整文档导航](docs/README.md)
 

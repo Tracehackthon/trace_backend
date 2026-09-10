@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.source-activation.0.1",
+  "title": "Trace source activation manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_id", "protocol_version", "manifest_id", "version", "source_id", "display_name", "summary", "entry_points", "activation_profiles"],
+  "properties": {
+    "protocol_id": {"const": "trace.source-activation"},
+    "protocol_version": {"const": "0.1.0"},
+    "manifest_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"},
+    "source_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "display_name": {"type": "string", "minLength": 1, "maxLength": 300},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 2400},
+    "entry_points": {"type": "array", "maxItems": 24, "items": {"$ref": "#/$defs/entry"}},
+    "activation_profiles": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 240}}
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "kind", "purpose", "triggers"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 160},
+        "label": {"type": "string", "minLength": 1, "maxLength": 300},
+        "kind": {"enum": ["knowledge", "capability", "governance", "question"]},
+        "purpose": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "triggers": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 240}},
+        "locator": {"type": "string", "maxLength": 2000, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?:[^/]+/)*[^/]+\\.md$"}
+      }
+    }
+  }
+}

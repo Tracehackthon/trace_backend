@@ -46,7 +46,9 @@ function invokeGlobalHook(cwd, event) {
 
 function visibleHookOutput(output, eventName = 'UserPromptSubmit') {
   assert.equal(output.hookSpecificOutput.hookEventName, eventName);
-  return JSON.parse(output.hookSpecificOutput.additionalContext.split('\nTrace cognitive source access is available for this turn.')[0]);
+  // The first line is intentionally machine-readable host state. Later lines
+  // are bounded developer context and must never be parsed as durable data.
+  return JSON.parse(output.hookSpecificOutput.additionalContext.split('\n')[0]);
 }
 
 function records(database) {
@@ -78,9 +80,10 @@ test('a single user-level Codex hook routes by event cwd, delegates retrieval to
   assert.doesNotMatch(hooksRaw, new RegExp(b.project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal(runJson(['codex', 'status', '--project-dir', a.project, '--hooks-file', hooks, '--json']).status, 'enabled');
 
-  const alpha = visibleHookOutput(invokeGlobalHook(path.join(a.project, 'nested'), {
+  const alphaOutput = invokeGlobalHook(path.join(a.project, 'nested'), {
     hook_event_name: 'UserPromptSubmit', cwd: path.join(a.project, 'nested'), session_id: 'alpha-session', turn_id: 'alpha-turn', prompt: `Investigate ALPHA_ONLY_ROUTING_KEY. ${rawPrompt}`,
-  }));
+  });
+  const alpha = visibleHookOutput(alphaOutput);
   assert.equal(alpha.activation_mode, 'host_native_evidence');
   assert.equal(alpha.source_profile, 'source-alpha');
   assert.equal(alpha.source_status, 'available');
@@ -89,8 +92,15 @@ test('a single user-level Codex hook routes by event cwd, delegates retrieval to
   assert.equal(alpha.source_access.max_reads_per_turn, 1);
   assert.equal('pages_considered' in alpha, false, 'Trace must not preselect pages with its lexical provider');
   assert.equal('read_pointers' in alpha, false, 'Trace must not send an old pointer list to the host');
+  assert.equal(alpha.collaboration_context.model.model_id, 'trace.cognitive-collaboration-starter');
+  assert.equal(alpha.collaboration_context.source_activation.manifest_id, 'trace.user-selected-source-map');
+  assert.equal(alpha.collaboration_context.source_activation.entry_point_count, 0);
+  assert.match(alphaOutput.hookSpecificOutput.additionalContext, /Trace collaboration context \(versioned, user-visible\):/);
+  assert.match(alphaOutput.hookSpecificOutput.additionalContext, /Treat an incomplete user expression as thinking in progress/);
   assert.equal(JSON.stringify(alpha).includes(rawPrompt), false);
   assert.equal(JSON.stringify(alpha).includes(rawToolOutput), false);
+  assert.equal(alphaOutput.hookSpecificOutput.additionalContext.includes(rawPrompt), false);
+  assert.equal(alphaOutput.hookSpecificOutput.additionalContext.includes(rawToolOutput), false);
 
   // A page budget counts concrete Markdown locators, not just tool events:
   // a batched native command cannot read two pages under this one-page lease.

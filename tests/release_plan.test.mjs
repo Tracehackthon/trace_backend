@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 
@@ -12,7 +13,8 @@ test('release-plan audit separates a pending workspace plan from the private pro
   assert.equal(report.status, 'ready_for_review');
   assert.equal(report.product.runtime.changeset_managed, false);
   assert.equal(report.product.codex_profile.hook_command, 'trace internal codex hook-stdio --route-from-event-cwd');
-  assert.equal(report.product.codex_bundle.runtime, 'trace-runtime@0.6.0');
+  const runtime = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.equal(report.product.codex_bundle.runtime, `${runtime.name}@${runtime.version}`);
   assert.equal(report.requires_explicit_product_release_decision, true);
   if (report.workspace_plan_resolution.available) {
     assert.equal(report.pending_workspace_plan.patch.length, 9, 'resolved plan includes internal dependent patch releases');

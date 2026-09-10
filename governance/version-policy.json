@@ -10,7 +10,10 @@
     "trace.data-envelope": "0.3.0",
     "trace.continuity": "0.2.0",
     "trace.context-record": "0.2.0",
-    "trace.project-instance": "0.2.0"
+    "trace.project-instance": "0.2.0",
+    "trace.source-profile": "0.3.0",
+    "trace.collaboration-model": "0.1.0",
+    "trace.source-activation": "0.1.0"
   },
   "workspace_policy": {
     "versions": "independent",

@@ -7,18 +7,18 @@ Trace 的架构不是从“数据库、RAG 或 hook”倒推出来的，而是�
     ↓
 宿主层：Codex hooks、SDK JSONL RPC、未来 desktop adapter
     ↓
-核心层：context、continuity、data、precedent、capability、change set、storage
+核心层：协作模型、来源地图、context、continuity、data、precedent、capability、change set、storage
 ```
 
 ## 用户层
 
-用户看到的是项目、认知源、候选、能力、健康与恢复；更重要的是能知道：本轮发生了什么变化、什么只是候选、什么尚未保存、下一步怎样继续。默认 CLI 从最近的 `.trace/` 自动发现项目，避免重复填写 SQLite 路径、lineage 或 producer。
+用户看到的是项目、认知源、当前协作模型、来源地图、候选、能力、健康与恢复；更重要的是能知道：本轮发生了什么变化、什么只是候选、什么尚未保存、下一步怎样继续。默认 CLI 从最近的 `.trace/` 自动发现项目，避免重复填写 SQLite 路径、lineage 或 producer。`trace profile` 显示协作契约和地图；`trace sources` 显示宿主实际使用来源的 evidence。两者分别回答“应如何协作”和“实际做了什么”。
 
 ## 宿主层
 
 Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。Codex 的用户级 hook 不携带某个固定项目路径，而是按每个事件的 `cwd` 找到最近 `.trace/`，再加载该项目 profile 与状态库；非 Trace 项目成功 no-op。它们可以传递 event、引用、correlation 与 causation，但不能绕过 runtime 直接写 SQLite / JSONL。
 
-对于认知源检索，职责不是“Trace 检索、Codex 读取预选页”，而是：`UserPromptSubmit` 只给当前宿主 source lease（正式根、prefix、预算）；Codex 使用自己的 native search/read/tool 能力决定实际访问；`PreToolUse` 对可识别 read 检查预算；`PostToolUse` 把实际访问写成无正文的 `host_retrieval_evidence`。因此用户可区分来源已提供、已搜索、已读取与未分类访问，不会把一个 pointer 当成 Agent 已读。完整协议见 [Codex 原生检索与 Trace 证据架构](host-native-retrieval.md)。
+对于认知源检索，职责不是“Trace 检索、Codex 读取预选页”，而是：`UserPromptSubmit` 先编译版本化的协作模型与来源地图（不含来源正文），再给当前宿主 source lease（正式根、prefix、预算）；Codex 使用自己的 native search/read/tool 能力决定实际访问；`PreToolUse` 对可识别 read 检查预算；`PostToolUse` 把实际访问写成无正文的 `host_retrieval_evidence`。个人/项目地图存于 ignored `profiles/`，`instance/activation.lock.json` 只保存身份/hash；配置变更通过显式更新与备份，避免隐式 drift。因此用户可区分来源已提供、已搜索、已读取与未分类访问，不会把一个 pointer 当成 Agent 已读。完整协议见 [Codex 原生检索与 Trace 证据架构](host-native-retrieval.md) 与[适配使用者](personalization.md)。
 
 Desktop 与 DeepSeek Harness 仍是明确未实现的宿主边界：目录存在不等于产品已接入。真实 lifecycle、权限、事件顺序、replay、deactivate 与 rollback 必须先有可验证契约。
 

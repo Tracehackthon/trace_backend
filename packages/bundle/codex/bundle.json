@@ -1,7 +1,7 @@
 {
   "bundle_id": "trace.codex",
-  "bundle_version": "0.3.0",
-  "runtime": "trace-runtime@0.6.0",
+  "bundle_version": "0.4.0",
+  "runtime": "trace-runtime@0.7.0",
   "host": "codex",
   "packages": [
     "core/protocol",
@@ -23,7 +23,9 @@
     "integration/zhihu-transport",
     "integration/mywiki-source",
     "host/codex-skill",
-    "host/codex-hooks"
+    "host/codex-hooks",
+    "core/collaboration-context",
+    "core/instance"
   ],
   "protocols": [
     "trace.change-set@0.2.0",
@@ -33,7 +35,10 @@
     "trace.template-bundle@0.2.0",
     "trace.candidate-precedent@0.2.0",
     "trace.capability-content@0.2.0",
-    "trace.capability-publish@0.2.0"
+    "trace.capability-publish@0.2.0",
+    "trace.collaboration-model@0.1.0",
+    "trace.source-activation@0.1.0",
+    "trace.source-profile@0.3.0"
   ],
   "adapters": [
     "apps/codex",

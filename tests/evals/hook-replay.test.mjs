@@ -24,7 +24,7 @@ function replayHook(cwd, event) {
 }
 function activationContext(output) {
   assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
-  return JSON.parse(output.hookSpecificOutput.additionalContext.split('\nTrace cognitive source access is available for this turn.')[0]);
+  return JSON.parse(output.hookSpecificOutput.additionalContext.split('\n')[0]);
 }
 function evidenceRows(project) {
   const opened = openSqlite(path.join(project, '.trace', 'state', 'trace.sqlite'), {readOnly: true});

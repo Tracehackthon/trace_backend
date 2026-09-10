@@ -38,6 +38,36 @@ test('product CLI initializes, reviews an explicit prompt case, enables Codex, a
   const status = run(['status', '--project-dir', project, '--json']);
   assert.equal(status.result.status, 0, status.result.stderr);
   assert.equal(status.json.pending_reviews, 0);
+  assert.equal(status.json.collaboration.model_id, 'trace.cognitive-collaboration-starter');
+  const profileBefore = run(['profile', '--project-dir', project, '--json']);
+  assert.equal(profileBefore.result.status, 0, profileBefore.result.stderr);
+  assert.equal(profileBefore.json.collaboration_model.scope, 'starter');
+  assert.equal(profileBefore.json.source_activation.entry_points.length, 0);
+
+  const activationConfig = path.join(project, 'activation-config.json');
+  fs.writeFileSync(activationConfig, JSON.stringify({
+    collaboration_model: {
+      protocol_id: 'trace.collaboration-model', protocol_version: '0.1.0', model_id: 'trace.test-project-collaboration', version: '1.1.0', display_name: 'Project Collaboration Contract', scope: 'project',
+      principles: ['Connect the user request to the current project evidence.'],
+      open_discussion: ['Do not replace an unfinished thought with a generic checklist.'],
+      explicit_execution: ['Perform explicit implementation requests with verifiable evidence.'],
+      epistemic_practice: ['Separate runtime fact, source claim, and inference.'],
+      boundaries: ['Do not persist raw prompts or private source bodies.'],
+    },
+    source_activation: {
+      protocol_id: 'trace.source-activation', protocol_version: '0.1.0', manifest_id: 'trace.test-project-source-map', version: '1.1.0', source_id: 'project-cognitive-source', display_name: 'Project Source Map', summary: 'A visible local map for this project.', activation_profiles: ['open-discussion'],
+      entry_points: [{id: 'collaboration', label: 'Collaboration notes', kind: 'capability', purpose: 'Use for collaboration design.', triggers: ['collaboration', 'context'], locator: 'wiki/collaboration.md'}],
+    },
+  }), 'utf8');
+  const updatedProfile = run(['profile', 'update', '--project-dir', project, '--file', activationConfig, '--confirm', 'true', '--json']);
+  assert.equal(updatedProfile.result.status, 0, updatedProfile.result.stderr);
+  assert.equal(updatedProfile.json.status, 'updated');
+  assert.equal(fs.existsSync(updatedProfile.json.backup_dir), true);
+  const profileAfter = run(['profile', '--project-dir', project, '--json']);
+  assert.equal(profileAfter.json.collaboration_model.model_id, 'trace.test-project-collaboration');
+  assert.equal(profileAfter.json.source_activation.entry_points[0].locator, 'wiki/collaboration.md');
+  const sourcesAfter = run(['sources', '--project-dir', project, '--json']);
+  assert.equal(sourcesAfter.json.sources[0].activation_map.entry_points[0].label, 'Collaboration notes');
 
   const prompt = path.join(project, 'raw.txt');
   const selected = path.join(project, 'summary.txt');

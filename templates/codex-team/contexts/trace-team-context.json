@@ -1,6 +1,6 @@
 {
   "context_template_id": "trace-team-context",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "rules": {
     "proposal_requires_adoption": true,
     "publish_requires_confirmation": true,
@@ -12,7 +12,10 @@
   "activation": {
     "mode": "progressive_disclosure",
     "max_context_tokens": 6000,
-    "required_refs": ["team_source_profile", "project_scope"]
+    "required_refs": [
+      "team_source_profile",
+      "project_scope"
+    ]
   },
   "visibility": {
     "default_view": "summary",
@@ -21,7 +24,17 @@
   },
   "cognitive_source": {
     "mode": "team-shared",
-    "read_scopes": ["team", "project"],
+    "read_scopes": [
+      "team",
+      "project"
+    ],
     "write_scopes": []
+  },
+  "collaboration_context": {
+    "mode": "versioned-user-visible",
+    "model_protocol": "trace.collaboration-model@0.1.0",
+    "source_activation_protocol": "trace.source-activation@0.1.0",
+    "personalization": "explicit-profile-not-inferred",
+    "raw_source_bodies": "host-native-only"
   }
 }

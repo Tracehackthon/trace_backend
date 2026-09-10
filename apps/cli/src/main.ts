@@ -16,7 +16,7 @@ import {MyWikiSourceProvider, type MyWikiSourceProfile} from '../../../packages/
 import {CodexSkillInstaller} from '../../../packages/host/codex-skill/src/index.js';
 import {CodexHookInstaller} from '../../../packages/host/codex-hooks/src/index.js';
 import {SELECTABLE_TEMPLATES} from '../../../packages/template/catalog/src/index.js';
-import {initializeProject, validateProjectInstanceDescriptor, type ProjectSourceMode, type ProjectSourceProfileInput, type ProjectInstanceDescriptor} from '../../../packages/core/instance/src/index.js';
+import {initializeProject, loadProjectActivationConfiguration, updateProjectActivationConfiguration, validateProjectInstanceDescriptor, type ProjectSourceMode, type ProjectSourceProfileInput, type ProjectInstanceDescriptor, type ProjectActivationConfigurationInput} from '../../../packages/core/instance/src/index.js';
 import {hashTransientPrompt} from '../../../packages/core/case-capture/src/index.js';
 
 const PRODUCT_USAGE = [
@@ -31,6 +31,7 @@ const PRODUCT_USAGE = [
     '  trace inbox [--project-dir ABS] [--json]',
     '  trace review ID [--project-dir ABS] [--save ABS_CONTENT_FILE] [--json]',
     '  trace sources [--project-dir ABS] [--json]',
+    '  trace profile [--project-dir ABS] [--json]',
     '  trace abilities [--project-dir ABS] [--json]',
     '',
     '维护：',
@@ -68,6 +69,7 @@ const ADVANCED_USAGE = [
     '  trace-runtime template install --manifest ABS --runtime-version VERSION --instance-id ID --instance-dir ABS --confirm true [--source-profile ABS]',
     '  trace-runtime template list',
     '  trace-runtime project init --project-dir ABS --user-id ID [--template ID] [--template-manifest ABS] [--source-mode local|external|team|empty] [--source-root ABS --source-id ID | --source-profile ABS] [--instance-id ID] [--runtime-version VERSION] --confirm true',
+    '  trace profile update --file ABS --confirm true [--project-dir ABS]  # explicit local collaboration-model/source-activation update',
     '  trace-runtime migrate sqlite --change-state-file ABS --data-state-file ABS --sqlite-state-file ABS [--report ABS]',
     '  trace-runtime capability preview|stage|validate|publish|rollback ... [--sqlite-state-file <absolute-path>]',
     '  trace-runtime codex activate --sqlite-state-file ABS --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--thread-id ID] [--correlation-id ID --causation-id ID] [--forbidden-scope TEXT]',
@@ -246,6 +248,14 @@ function sourceProfileForContext(context: ProductProjectContext): MyWikiSourcePr
   return readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile') as unknown as MyWikiSourceProfile;
 }
 
+function activationConfigurationForContext(context: ProductProjectContext) {
+  const profile = sourceProfileForContext(context) as unknown as ProjectSourceProfileInput;
+  return {
+    source_profile: profile as unknown as MyWikiSourceProfile,
+    ...loadProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_profile: profile}),
+  };
+}
+
 function productRuntime(context: ProductProjectContext): TraceRuntime | undefined {
   return fs.existsSync(context.state_file) ? new TraceRuntime({sqliteStateFile: context.state_file}) : undefined;
 }
@@ -391,7 +401,7 @@ export async function run(argv: string[]): Promise<void> {
   const [group, action, ...rest] = argv;
   // Product commands discover the nearest project boundary rather than asking
   // users to repeatedly pass state-file, lineage and producer internals.
-  if (['init', 'status', 'inbox', 'sources', 'abilities'].includes(group ?? '')) {
+  if (['init', 'status', 'inbox', 'sources', 'profile', 'abilities'].includes(group ?? '')) {
     const parsed = args(action?.startsWith('--') ? [action, ...rest] : rest);
     if (group === 'init') {
       const projectDir = path.resolve(one(parsed, '--project-dir', false) ?? process.cwd());
@@ -419,14 +429,65 @@ export async function run(argv: string[]): Promise<void> {
         `项目：${initialized.project_dir}`,
         `认知源：${initialized.descriptor.source_mode}`,
         `模板：${templateId}`,
+        `协作方式：${initialized.collaboration_model.display_name}`,
+        `认知源地图：${initialized.source_activation.display_name}（${initialized.source_activation.entry_points.length} 个预设入口）`,
         'Codex：尚未启用', '',
         '下一步：',
         '  trace codex enable',
+        '  trace profile',
         '  trace status',
-      ].join('\n'), {status: 'initialized', template_id: templateId, project: initialized.project_dir, trace_dir: initialized.trace_dir, source_mode: initialized.descriptor.source_mode, next_actions: ['trace codex enable', 'trace status']});
+      ].join('\n'), {status: 'initialized', template_id: templateId, project: initialized.project_dir, trace_dir: initialized.trace_dir, source_mode: initialized.descriptor.source_mode, collaboration_model: {model_id: initialized.collaboration_model.model_id, version: initialized.collaboration_model.version}, source_activation: {manifest_id: initialized.source_activation.manifest_id, version: initialized.source_activation.version, entry_points: initialized.source_activation.entry_points.length}, next_actions: ['trace codex enable', 'trace profile', 'trace status']});
       return;
     }
     const context = projectContext(parsed);
+    if (group === 'profile' && action === 'update') {
+      if (one(parsed, '--confirm') !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'profile update requires --confirm true');
+      const file = one(parsed, '--file')!;
+      if (!path.isAbsolute(file)) throw new ProtocolError('INVALID_INPUT', '--file must be an absolute activation configuration file');
+      const selected = readJsonFile(file, '--file') as unknown as ProjectActivationConfigurationInput;
+      const sourceProfile = sourceProfileForContext(context) as unknown as ProjectSourceProfileInput;
+      const updated = updateProjectActivationConfiguration({
+        trace_dir: context.trace_dir,
+        template_id: context.descriptor.template_id,
+        source_profile: sourceProfile,
+        configuration: selected,
+      });
+      productResult(parsed, [
+        '协作模型与认知源地图已显式更新。',
+        `协作模型：${updated.collaboration_model.display_name}（${updated.collaboration_model.model_id}@${updated.collaboration_model.version}）`,
+        `认知源地图：${updated.source_activation.display_name}（${updated.source_activation.entry_points.length} 个入口）`,
+        `原配置备份：${updated.backup_dir}`,
+        '查看当前生效内容：trace profile',
+      ].join('\n'), {status: 'updated', project: context.project_dir, collaboration_model: {model_id: updated.collaboration_model.model_id, version: updated.collaboration_model.version}, source_activation: {manifest_id: updated.source_activation.manifest_id, version: updated.source_activation.version, entry_points: updated.source_activation.entry_points.length}, activation_lock: updated.activation_lock, backup_dir: updated.backup_dir});
+      return;
+    }
+    if (group === 'profile' && action !== undefined && !action.startsWith('--')) throw new ProtocolError('INVALID_INPUT', 'trace profile supports inspection or: trace profile update --file ABS --confirm true');
+    if (group === 'profile') {
+      const activation = activationConfigurationForContext(context);
+      const model = activation.collaboration_model;
+      const sourceMap = activation.source_activation;
+      const lock = activation.activation_lock;
+      const profileView = {
+        status: 'active',
+        project: context.project_dir,
+        collaboration_model: {model_id: model.model_id, version: model.version, display_name: model.display_name, scope: model.scope, principles: model.principles, open_discussion: model.open_discussion, explicit_execution: model.explicit_execution, epistemic_practice: model.epistemic_practice, boundaries: model.boundaries, ...(model.current_focus === undefined ? {} : {current_focus: model.current_focus})},
+        source_activation: {manifest_id: sourceMap.manifest_id, version: sourceMap.version, source_id: sourceMap.source_id, display_name: sourceMap.display_name, summary: sourceMap.summary, entry_points: sourceMap.entry_points, activation_profiles: sourceMap.activation_profiles},
+        activation_lock: lock ?? null,
+      };
+      productResult(parsed, [
+        `协作模型：${model.display_name}（${model.model_id}@${model.version}）`,
+        `作用域：${model.scope}`,
+        `开放讨论：${model.open_discussion.join('；')}`,
+        `明确执行：${model.explicit_execution.join('；')}`,
+        `认识论：${model.epistemic_practice.join('；')}`,
+        `边界：${model.boundaries.join('；')}`,
+        `认知源地图：${sourceMap.display_name}（${sourceMap.manifest_id}@${sourceMap.version}）`,
+        `来源说明：${sourceMap.summary}`,
+        `入口：${sourceMap.entry_points.length === 0 ? '尚未由用户配置；Codex 仅在相关时原生搜索已授权来源。' : sourceMap.entry_points.map(entry => `${entry.label}${entry.locator === undefined ? '' : ` (${entry.locator})`}`).join('；')}`,
+        `锁定：${lock === undefined ? '旧项目兼容回退；下次重新初始化会写入 activation lock。' : `${lock.lock_id}；模型/来源地图以 hash 锁定。`}`,
+      ].join('\n'), profileView);
+      return;
+    }
     if (group === 'status') {
       const state = productState(context);
       const inbox = productInbox(context);
@@ -447,6 +508,7 @@ export async function run(argv: string[]): Promise<void> {
         created_at: latestActivationRecord.created_at,
       };
       const sourceUsage = hostSourceUsage(state.data);
+      const activation = activationConfigurationForContext(context);
       const snapshot = {
         status: 'ready', project: context.project_dir, template: context.descriptor.template_id, source_mode: context.descriptor.source_mode,
         source_id: typeof sources.source_id === 'string' ? sources.source_id : '未配置', codex: '运行 trace codex status 查看',
@@ -456,12 +518,14 @@ export async function run(argv: string[]): Promise<void> {
         candidate_capabilities: state.data.filter(item => item.kind === 'capability_candidate').length,
         latest_activation: latestActivation,
         host_source_usage: sourceUsage,
+        collaboration: {model_id: activation.collaboration_model.model_id, model_version: activation.collaboration_model.version, source_manifest_id: activation.source_activation.manifest_id, source_manifest_version: activation.source_activation.version, source_entry_points: activation.source_activation.entry_points.length, locked: activation.activation_lock !== undefined},
         next_action: inbox.length > 0 ? 'trace inbox' : '继续在 Codex 中协作；值得沉淀的内容会进入 inbox。',
       };
       productResult(parsed, [
         `当前项目：${snapshot.project}`,
         `模板：${snapshot.template}`,
         `认知源：${snapshot.source_mode} / ${snapshot.source_id}`,
+        `协作模型：${activation.collaboration_model.display_name} @ ${activation.collaboration_model.version}；认知源地图入口：${activation.source_activation.entry_points.length}`,
         `开放协作主题：${snapshot.open_threads}`,
         `待确认沉淀：${snapshot.pending_reviews}`,
         `候选前例：${snapshot.candidate_precedents}`,
@@ -480,6 +544,7 @@ export async function run(argv: string[]): Promise<void> {
     }
     if (group === 'sources') {
       const profile = readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile');
+      const activation = activationConfigurationForContext(context);
       const state = productState(context);
       const usage = hostSourceUsage(state.data);
       const policy = profile.host_retrieval && typeof profile.host_retrieval === 'object' && !Array.isArray(profile.host_retrieval)
@@ -494,12 +559,20 @@ export async function run(argv: string[]): Promise<void> {
           max_reads_per_turn: typeof policy.max_reads_per_turn === 'number' ? policy.max_reads_per_turn : 8,
           boundary: 'observed-and-budgeted-not-filesystem-sandbox',
         },
+        activation_map: {
+          manifest_id: activation.source_activation.manifest_id,
+          version: activation.source_activation.version,
+          display_name: activation.source_activation.display_name,
+          summary: activation.source_activation.summary,
+          entry_points: activation.source_activation.entry_points.map(entry => ({id: entry.id, label: entry.label, kind: entry.kind, purpose: entry.purpose, triggers: entry.triggers, ...(entry.locator === undefined ? {} : {locator: entry.locator})})),
+        },
       };
       productResult(parsed, [
         `认知源：${source.source_id}`,
         `模式：${source.mode}；作用域：${source.scope}`,
         `读取：${source.read_enabled ? '已授权' : '未授权'}；写入：${source.write_enabled ? '已授权' : '未授权'}`,
         `宿主检索：${source.host_retrieval.mode}；单轮读取预算：${source.host_retrieval.max_reads_per_turn}；正式前缀：${source.host_retrieval.allowed_prefixes.join(', ')}`,
+        `认知源地图：${source.activation_map.display_name} @ ${source.activation_map.version}；预设入口：${source.activation_map.entry_points.length === 0 ? '无（按当前问题原生检索）' : source.activation_map.entry_points.map(entry => entry.label).join('、')}`,
         `实际证据：提供 ${usage.offered} 次；检索 ${usage.searched} 次；读取 ${usage.read} 页；未分类 ${usage.unclassified} 次`,
         usage.recent.length === 0 ? '尚无宿主访问证据。Codex 开始一次相关协作后，Trace 会显示它实际检索/读取的安全定位符。' : '最近活动（仅 locator/revision/hash，不含 prompt、正文、工具参数或绝对路径）：',
         ...usage.recent.slice(0, 5).map(item => `  ${item.observed_at}｜${item.event_kind}｜${item.locators.length === 0 ? '无页面定位符' : item.locators.join(', ')}`),
@@ -555,7 +628,7 @@ export async function run(argv: string[]): Promise<void> {
       const hasNativeEvidenceEvents = /"PreToolUse"\s*:/i.test(raw) && /"PostToolUse"\s*:/i.test(raw);
       const status = routedByEventCwd && hasNativeEvidenceEvents ? 'enabled' : hasTraceHook ? 'needs_reenable' : 'disabled';
       const message = status === 'enabled'
-        ? 'Trace 会按每次 Codex 事件的 cwd 找到当前项目；Codex 自己检索/读取来源，Trace 只记录实际访问证据。完整 prompt 不会自动入库。'
+        ? 'Trace 会按每次 Codex 事件的 cwd 找到当前项目；将版本化协作方式与认知源地图交给 Codex，Codex 自己检索/读取来源，Trace 只记录实际访问证据。完整 prompt 不会自动入库。'
         : status === 'needs_reenable'
           ? '发现旧版或不完整 hook。运行 trace codex enable，启用按事件 cwd 路由和宿主检索证据。'
           : '下一步：trace codex enable';
@@ -737,13 +810,13 @@ export async function run(argv: string[]): Promise<void> {
     // A user-level Codex hook also sees non-Trace projects. In that case it
     // must be a successful no-op: no state file, profile, or data can leak in.
     if (routeFromEventCwd && context === undefined) { process.stdout.write('{}\n'); return; }
-    const sourceProfile = profilePath === undefined
-      ? context === undefined ? undefined : sourceProfileForContext(context)
-      : readJsonFile(profilePath, '--source-profile') as unknown as MyWikiSourceProfile;
+    const configuration = profilePath === undefined
+      ? context === undefined ? {} : activationConfigurationForContext(context)
+      : {source_profile: readJsonFile(profilePath, '--source-profile') as unknown as MyWikiSourceProfile};
     const sqliteStateFile = explicitSqlite ?? context!.state_file;
     const runtime = new TraceRuntime({sqliteStateFile});
     try {
-      process.stdout.write(JSON.stringify(buildCodexHookOutput(hookEvent as Parameters<typeof buildCodexHookOutput>[0], runtime, sourceProfile)) + '\n');
+      process.stdout.write(JSON.stringify(buildCodexHookOutput(hookEvent as Parameters<typeof buildCodexHookOutput>[0], runtime, configuration)) + '\n');
     } finally { runtime.close(); }
     return;
   }

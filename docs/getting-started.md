@@ -7,6 +7,8 @@
 ```text
 .trace/
 ├─ project.json       # 项目与模板身份，不保存外部来源绝对路径
+├─ instance/activation.lock.json # 可提交的协作模型/来源地图 hash lock
+├─ profiles/           # 本地协作模型、来源地图与来源 profile（默认不提交）
 ├─ source/wiki/       # local 模式下的项目认知源
 ├─ state/trace.sqlite # 本项目的运行状态
 ├─ receipts/          # 用户可查看的启用、沉淀与发布回执
@@ -30,6 +32,8 @@ trace init
 - `local` 项目认知源；
 - 项目级 SQLite 状态库；
 - 尚未启用的 Codex 接续。
+
+默认还会写入一份通用的冷启动协作模型和空的来源地图。它让 Agent 在讨论时不默认把未成形的问题变成问卷、在明确执行时切换到执行、并保持候选/采用/发布边界；它不包含任何个人历史，也不声称已经理解你。
 
 需要明确选择来源时：
 
@@ -62,7 +66,10 @@ Trace 不会先替 Codex 挑两个页面。它只把当前项目已授权的 for
 接着执行：
 
 ```powershell
+trace profile
 trace status
 ```
 
-如果看到“Codex：尚未启用”或“待确认沉淀：0”，这不是错误：前者表示尚未执行 enable，后者表示尚未出现需要你判断的候选。开始一次 Codex 协作后，`trace status` 显示最近一次 activation 的安全回执和宿主来源实际使用计数；`trace sources` 显示相对 locator、revision/hash 层面的搜索/读取证据。二者都不会显示 raw prompt、来源正文、绝对路径或工具参数。
+`trace profile` 显示这次协作所依据的协作模型、来源地图和 hash lock；`trace sources` 显示来源授权和 Codex **实际**搜索/读取的 evidence。前者不是“已读取清单”，后者也不等于“长期沉淀”。如果看到“Codex：尚未启用”或“待确认沉淀：0”，这不是错误：前者表示尚未执行 enable，后者表示尚未出现需要你判断的候选。二者都不会显示 raw prompt、来源正文、绝对路径或工具参数。
+
+个人或团队适配不靠隐藏画像：将版本化的 `collaboration_model` 与 `activation_manifest` 放入本地 source profile 再初始化，或在已有项目执行 `trace profile update --file <绝对路径> --confirm true`。见[让 Agent 逐步适配使用者](personalization.md)。

@@ -2,8 +2,8 @@
   "profile": "codex",
   "host": "codex",
   "runtime_package": "trace-runtime",
-  "runtime_version": "0.6.0",
-  "bundle": "trace.codex@0.3.0",
+  "runtime_version": "0.7.0",
+  "bundle": "trace.codex@0.4.0",
   "protocols": [
     "trace.change-set@0.2.0",
     "trace.data-envelope@0.3.0",
@@ -12,7 +12,10 @@
     "trace.template-bundle@0.2.0",
     "trace.candidate-precedent@0.2.0",
     "trace.capability-content@0.2.0",
-    "trace.capability-publish@0.2.0"
+    "trace.capability-publish@0.2.0",
+    "trace.collaboration-model@0.1.0",
+    "trace.source-activation@0.1.0",
+    "trace.source-profile@0.3.0"
   ],
   "adapters": [
     "apps/codex",
@@ -38,7 +41,10 @@
   "state_files": {
     "project_sqlite": ".trace/state/trace.sqlite",
     "source_profile": ".trace/profiles/source.profile.json",
-    "development_continuity": "<caller-provided-absolute-path>"
+    "development_continuity": "<caller-provided-absolute-path>",
+    "collaboration_model": ".trace/profiles/collaboration-model.json",
+    "source_activation": ".trace/profiles/source-activation.json",
+    "activation_lock": ".trace/instance/activation.lock.json"
   },
   "template": "templates/codex-starter/manifest.json"
 }

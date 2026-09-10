@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.collaboration-model.0.1",
+  "title": "Trace collaboration model",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_id", "protocol_version", "model_id", "version", "display_name", "scope", "principles", "open_discussion", "explicit_execution", "epistemic_practice", "boundaries"],
+  "properties": {
+    "protocol_id": {"const": "trace.collaboration-model"},
+    "protocol_version": {"const": "0.1.0"},
+    "model_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"},
+    "display_name": {"type": "string", "minLength": 1, "maxLength": 300},
+    "scope": {"enum": ["starter", "personal", "project", "team"]},
+    "principles": {"$ref": "#/$defs/rules"},
+    "open_discussion": {"$ref": "#/$defs/rules"},
+    "explicit_execution": {"$ref": "#/$defs/rules"},
+    "epistemic_practice": {"$ref": "#/$defs/rules"},
+    "boundaries": {"$ref": "#/$defs/rules"},
+    "current_focus": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 1600}}
+  },
+  "$defs": {
+    "rules": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 1600}}
+  }
+}

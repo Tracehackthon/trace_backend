@@ -12,8 +12,8 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 
 - 发布分支是 `main`；Changesets 也以 `main` 计算发布差异。
 - 包发布的唯一计划来源是 `.changeset/`。在没有明确发布决策前，不能执行 `pnpm version-packages`。
-- `trace.data-envelope` 当前为 `0.3.0`，通过 `0.1.0 → 0.2.0 → 0.3.0` in-memory upcaster 引入闭合的 `host_retrieval_evidence` kind；`trace.continuity`、`trace.context-record` 与 `trace.project-instance` 当前各自处于 `0.2.0`。未知版本继续 fail-closed。
-- 产品 `trace-runtime` 当前是 `0.6.0`。它不表示每个 workspace 包或每个协议都等于 `0.6.0`。
+- `trace.data-envelope` 当前为 `0.3.0`，通过 `0.1.0 → 0.2.0 → 0.3.0` in-memory upcaster 引入闭合的 `host_retrieval_evidence` kind；`trace.continuity`、`trace.context-record` 与 `trace.project-instance` 当前各自处于 `0.2.0`。`trace.collaboration-model@0.1.0` 与 `trace.source-activation@0.1.0` 是独立的本地配置协议；`trace.source-profile@0.3.0` 仅用于 import。未知版本继续 fail-closed。
+- 产品 `trace-runtime` 当前是 `0.7.0`，Codex bundle 为 `trace.codex@0.4.0`，Codex starter/team/empty template 为 `0.4.0`。它们不表示每个 workspace 包或每个协议都等于相同版本。
 - 发布前必须运行 `corepack pnpm audit:versions`、`corepack pnpm audit:release-plan`、`corepack pnpm changeset status`、`corepack pnpm check:all`。
 
 `governance/version-policy.json` 是机器可检查的版本事实。`audit:versions` 会检查发布分支、根发行版、workspace package 版本、受管协议版本，以及 Changeset 中引用的包是否真实存在。它不自动改版本，也不替代真实行为验证。
@@ -21,6 +21,12 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 `audit:release-plan` 则专门检查**产品发行身份是否一致**：根 `trace-runtime`、`profiles/codex.json`、`packages/bundle/codex/bundle.json` 的 runtime/bundle/协议和 cwd 路由 hook 命令必须相互匹配。它也会列出仍待处理的 workspace Changeset，但不会把它们误当成根产品已经升级。
 
 根 `trace-runtime` 是 private 产品发行版，不在 pnpm workspace 内，因此 Changesets 不能自动替它、Codex profile 或 Codex bundle 做发布决定。当 workspace plan 非空时，审阅者必须显式决定：本次是否同时升级产品 runtime、bundle 与 profile；**在这个决定被批准前不要运行** `pnpm version-packages`。
+
+## 协作模型与来源地图的本地版本
+
+`collaboration-model.json` 和 `source-activation.json` 是用户/项目本地配置，版本字段表达协作语义或地图内容的变化；它们不进入项目 Git。`activation.lock.json` 可提交但只保留两份配置的 id、version 和 SHA-256。这样团队可以审核“本项目锁定哪一版”，同时不会接收其他人的私有条款、来源 root 或正文。
+
+更新必须走显式的 `trace profile update --file <ABS> --confirm true`：runtime 先校验 schema、来源 ID、relative locator 和 host policy，再备份旧配置、更新 lock。手改 profile 后，hash 与 lock 不符会 fail-closed；这比静默把 Agent 换到新上下文更可回放。详见[适配使用者](personalization.md)。
 
 ## 发布决策顺序
 

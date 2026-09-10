@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace.source-profile.0.3",
+  "title": "Trace source-profile import with optional collaboration customization",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_id", "root", "user_id"],
+  "properties": {
+    "source_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "root": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "formal_prefix": {"type": "string", "minLength": 1, "maxLength": 200},
+    "read_enabled": {"type": "boolean"},
+    "write_enabled": {"type": "boolean"},
+    "user_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "scope_type": {"enum": ["personal", "project", "team", "domain"]},
+    "source_mode": {"enum": ["local", "external", "team", "empty"]},
+    "activation_excluded_paths": {"type": "array", "maxItems": 128, "items": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/).+\\.md$"}},
+    "host_retrieval": {"type": "object", "additionalProperties": false, "properties": {"mode": {"enum": ["native_observed", "disabled"]}, "allowed_prefixes": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1}}, "max_reads_per_turn": {"type": "integer", "minimum": 1, "maximum": 64}}},
+    "collaboration_model": {"$ref": "trace.collaboration-model.0.1.schema.json"},
+    "activation_manifest": {"$ref": "trace.source-activation.0.1.schema.json"}
+  }
+}

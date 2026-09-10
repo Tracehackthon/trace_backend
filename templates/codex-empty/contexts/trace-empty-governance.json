@@ -1,6 +1,6 @@
 {
   "context_template_id": "trace-empty-governance",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "rules": {
     "proposal_requires_adoption": true,
     "publish_requires_confirmation": true,
@@ -19,7 +19,16 @@
   },
   "cognitive_source": {
     "mode": "isolated-empty",
-    "read_scopes": ["project"],
+    "read_scopes": [
+      "project"
+    ],
     "write_scopes": []
+  },
+  "collaboration_context": {
+    "mode": "versioned-user-visible",
+    "model_protocol": "trace.collaboration-model@0.1.0",
+    "source_activation_protocol": "trace.source-activation@0.1.0",
+    "personalization": "explicit-profile-not-inferred",
+    "raw_source_bodies": "host-native-only"
   }
 }

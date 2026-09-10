@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {openSqlite} from '../dist/packages/core/storage/src/index.js';
+import {TraceRuntime} from '../dist/packages/core/runtime/src/index.js';
 
 const root = path.resolve(process.cwd());
 const cli = path.join(root, 'dist', 'apps', 'cli', 'src', 'main.js');
@@ -77,4 +78,20 @@ test('Codex hook uses a raw prompt only transiently and never persists it', () =
   } finally {
     db.close();
   }
+});
+
+
+test('activation receipts reject an absolute pointer locator before it can enter durable state', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-pointer-contract-'));
+  const database = path.join(dir, 'trace.sqlite');
+  const runtime = new TraceRuntime({sqliteStateFile: database});
+  try {
+    const thread = runtime.createThread({title: 'Pointer contract', current_summary: 'Validate durable pointer identity'});
+    assert.throws(() => runtime.createReceipt({
+      thread_id: thread.record_id,
+      receipt_kind: 'activation',
+      summary: 'must fail',
+      activated_pointers: [{source_id: 'external', locator: 'D:/private/wiki.md', revision: 1, content_hash: 'a'.repeat(64), purpose: 'must not persist host path', priority: 'should', stop_condition: 'never'}],
+    }), /safe relative locator/);
+  } finally { runtime.close(); }
 });

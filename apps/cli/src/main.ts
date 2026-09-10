@@ -72,6 +72,7 @@ const ADVANCED_USAGE = [
     '  trace-runtime capability preview|stage|validate|publish|rollback ... [--sqlite-state-file <absolute-path>]',
     '  trace-runtime codex activate --sqlite-state-file ABS --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--thread-id ID] [--correlation-id ID --causation-id ID] [--forbidden-scope TEXT]',
     '  trace-runtime codex trigger --sqlite-state-file ABS --event-file ABS',
+    '  trace-runtime codex hook-stdio --route-from-event-cwd',
     '  trace-runtime codex hook-stdio --sqlite-state-file ABS [--source-profile ABS]',
     '  trace-runtime zhihu search|global-search|hot --profile ABS --query TEXT|--limit N [--capture-run-id ID --sqlite-state-file ABS]',
     '  trace-runtime mywiki read|search|propose|apply --profile ABS ...',
@@ -90,7 +91,7 @@ function printUsage(advanced = false): void {
   process.stdout.write((advanced ? ADVANCED_USAGE : PRODUCT_USAGE) + '\n');
 }
 
-const VALUELESS_FLAGS = new Set(['--json', '--dry-run', '--replace']);
+const VALUELESS_FLAGS = new Set(['--json', '--dry-run', '--replace', '--route-from-event-cwd']);
 
 function args(argv: string[]): Map<string, string[]> {
   const result = new Map<string, string[]>();
@@ -208,10 +209,9 @@ function userIdForProduct(parsed: Map<string, string[]>): string {
   return `local-${normalized || 'user'}`;
 }
 
-function projectContext(parsed: Map<string, string[]>): ProductProjectContext {
-  const explicitProject = one(parsed, '--project-dir', false) ?? one(parsed, '--project', false);
-  let cursor = path.resolve(explicitProject ?? process.cwd());
-  if (!fs.existsSync(cursor) || !fs.statSync(cursor).isDirectory()) throw new ProtocolError('INVALID_INPUT', `project directory does not exist: ${cursor}`);
+function findProjectContext(directory: string): ProductProjectContext | undefined {
+  let cursor = path.resolve(directory);
+  if (!fs.existsSync(cursor) || !fs.statSync(cursor).isDirectory()) return undefined;
   while (true) {
     const traceDir = path.join(cursor, '.trace');
     const descriptorFile = path.join(traceDir, 'project.json');
@@ -222,10 +222,28 @@ function projectContext(parsed: Map<string, string[]>): ProductProjectContext {
       return {project_dir: cursor, trace_dir: traceDir, state_file: path.join(cursor, descriptor.state_file), descriptor};
     }
     const parent = path.dirname(cursor);
-    if (parent === cursor) break;
+    if (parent === cursor) return undefined;
     cursor = parent;
   }
-  throw new ProtocolError('PROJECT_NOT_INITIALIZED', 'No .trace/project.json was found. Run "trace init" in the project directory first.');
+}
+
+function projectContext(parsed: Map<string, string[]>): ProductProjectContext {
+  const explicitProject = one(parsed, '--project-dir', false) ?? one(parsed, '--project', false);
+  const requested = path.resolve(explicitProject ?? process.cwd());
+  if (!fs.existsSync(requested) || !fs.statSync(requested).isDirectory()) throw new ProtocolError('INVALID_INPUT', `project directory does not exist: ${requested}`);
+  const context = findProjectContext(requested);
+  if (context === undefined) throw new ProtocolError('PROJECT_NOT_INITIALIZED', 'No .trace/project.json was found. Run "trace init" in the project directory first.');
+  return context;
+}
+
+function eventProjectContext(event: Record<string, unknown>): ProductProjectContext | undefined {
+  const cwd = event.cwd;
+  if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return undefined;
+  return findProjectContext(cwd);
+}
+
+function sourceProfileForContext(context: ProductProjectContext): MyWikiSourceProfile {
+  return readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile') as unknown as MyWikiSourceProfile;
 }
 
 function productRuntime(context: ProductProjectContext): TraceRuntime | undefined {
@@ -310,10 +328,12 @@ function renderInbox(items: Array<Record<string, unknown>>): string {
 
 function commandPart(value: string): string { return `"${value.replaceAll('"', '\\"')}"`; }
 
-function productHookCommand(context: ProductProjectContext): string {
+function productHookCommand(): string {
   const entry = path.resolve(process.argv[1] ?? '');
   if (!entry || !fs.existsSync(entry)) throw new ProtocolError('IO_ERROR', 'Cannot resolve the installed Trace CLI entrypoint for the Codex hook.');
-  return `${commandPart(process.execPath)} ${commandPart(entry)} internal codex hook-stdio --project-dir ${commandPart(context.project_dir)}`;
+  // hooks.json is user-level. Route each event by its own cwd so enabling
+  // Trace for project B cannot bind every future turn to project B.
+  return `${commandPart(process.execPath)} ${commandPart(entry)} internal codex hook-stdio --route-from-event-cwd`;
 }
 
 function runtimePaths(parsed: Map<string, string[]>): {changeStateFile?: string; dataStateFile?: string; continuityStateFile?: string; sqliteStateFile?: string} {
@@ -389,6 +409,17 @@ export async function run(argv: string[]): Promise<void> {
         try { return readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile'); }
         catch { return {}; }
       })();
+      const latestActivationRecord = state.continuity
+        .filter(item => item.kind === 'activation_receipt')
+        .sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+      const latestActivation = latestActivationRecord === undefined ? null : {
+        receipt_id: latestActivationRecord.record_id,
+        summary: textField(latestActivationRecord.payload, 'summary'),
+        activated_refs: Array.isArray(latestActivationRecord.payload.activated_refs) ? latestActivationRecord.payload.activated_refs : [],
+        activated_pointers: Array.isArray(latestActivationRecord.payload.activated_pointers) ? latestActivationRecord.payload.activated_pointers : [],
+        not_persisted: Array.isArray(latestActivationRecord.payload.not_persisted) ? latestActivationRecord.payload.not_persisted : [],
+        created_at: latestActivationRecord.created_at,
+      };
       const snapshot = {
         status: 'ready', project: context.project_dir, template: context.descriptor.template_id, source_mode: context.descriptor.source_mode,
         source_id: typeof sources.source_id === 'string' ? sources.source_id : '未配置', codex: '运行 trace codex status 查看',
@@ -396,6 +427,7 @@ export async function run(argv: string[]): Promise<void> {
         pending_reviews: inbox.length,
         candidate_precedents: state.data.filter(item => item.kind === 'candidate_precedent').length,
         candidate_capabilities: state.data.filter(item => item.kind === 'capability_candidate').length,
+        latest_activation: latestActivation,
         next_action: inbox.length > 0 ? 'trace inbox' : '继续在 Codex 中协作；值得沉淀的内容会进入 inbox。',
       };
       productResult(parsed, [
@@ -406,6 +438,8 @@ export async function run(argv: string[]): Promise<void> {
         `待确认沉淀：${snapshot.pending_reviews}`,
         `候选前例：${snapshot.candidate_precedents}`,
         `候选能力：${snapshot.candidate_capabilities}`,
+        `最近一次接续：${latestActivation === null ? '尚无（在 Codex 中开始协作后出现）' : latestActivation.summary}`,
+        ...(latestActivation === null ? [] : [`受控读取指针：${latestActivation.activated_pointers.length}；持久化来源/能力引用：${latestActivation.activated_refs.length}`, `未自动保存：${latestActivation.not_persisted.join('、') || '无'}`]),
         '', `下一步：${snapshot.next_action}`,
       ].join('\n'), snapshot);
       return;
@@ -472,11 +506,18 @@ export async function run(argv: string[]): Promise<void> {
     const installer = new CodexHookInstaller(one(parsed, '--hooks-file', false));
     if (action === 'status') {
       const raw = fs.existsSync(installer.hooksFile) ? fs.readFileSync(installer.hooksFile, 'utf8') : '{}';
-      const enabled = /codex\s+hook-stdio|trace\.codex-managed\.v1/i.test(raw);
-      productResult(parsed, [`Codex：${enabled ? '已启用' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, enabled ? 'Trace 会为当前项目提供受控接续；完整 prompt 不会自动入库。' : '下一步：trace codex enable'].join('\n'), {status: enabled ? 'enabled' : 'disabled', hooks_file: installer.hooksFile, project: context.project_dir});
+      const hasTraceHook = /codex\s+hook-stdio|trace\.codex-managed\.v1/i.test(raw);
+      const routedByEventCwd = /--route-from-event-cwd(?:\s|"|$)/i.test(raw);
+      const status = routedByEventCwd ? 'enabled' : hasTraceHook ? 'needs_reenable' : 'disabled';
+      const message = status === 'enabled'
+        ? 'Trace 会按每次 Codex 事件的 cwd 找到当前项目；不会被上一次启用的项目或认知源绑死。完整 prompt 不会自动入库。'
+        : status === 'needs_reenable'
+          ? '发现旧版固定项目 hook。运行 trace codex enable，将它升级为按事件 cwd 路由。'
+          : '下一步：trace codex enable';
+      productResult(parsed, [`Codex：${status === 'enabled' ? '已启用' : status === 'needs_reenable' ? '需要升级' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, `路由：${routedByEventCwd ? '事件 cwd → 当前项目 .trace/' : hasTraceHook ? '旧版固定项目（不安全）' : '未配置'}`, message].join('\n'), {status, hooks_file: installer.hooksFile, project: context.project_dir, routing: routedByEventCwd ? 'event_cwd' : hasTraceHook ? 'legacy_project_binding' : 'none'});
       return;
     }
-    const command = productHookCommand(context);
+    const command = productHookCommand();
     const preview = installer.preview({command});
     if (has(parsed, '--dry-run')) {
       productResult(parsed, [`Codex 启用预览`, `配置文件：${preview.hooks_file}`, `将管理事件：${preview.managed_events.join(', ')}`, `其他 hooks：${preview.unrelated_hooks_preserved ? '保留' : '需要检查'}`, '', '确认启用：trace codex enable'].join('\n'), {status: 'previewed', project: context.project_dir, preview});
@@ -485,7 +526,7 @@ export async function run(argv: string[]): Promise<void> {
     const receipt = installer.install({command, backup_root: path.join(context.trace_dir, 'backups', 'codex-hooks'), approval: 'approve:codex-hooks'});
     const receiptFile = path.join(context.trace_dir, 'receipts', `codex-hooks-${Date.now()}.json`);
     fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2) + '\n', {flag: 'wx'});
-    productResult(parsed, [`Codex 已为当前项目启用。`, `管理事件：${receipt.managed_events.join(', ')}`, `原配置备份：${receipt.backup_file ?? '无'}`, `可见回执：${receiptFile}`, '', '下一步：trace status'].join('\n'), {status: 'enabled', project: context.project_dir, receipt, receipt_file: receiptFile});
+    productResult(parsed, [`Codex 已启用 Trace 路由。`, `管理事件：${receipt.managed_events.join(', ')}`, '路由方式：每次事件按 cwd 找到对应项目的 .trace/，不会把项目 A 的认知源带到项目 B。', `原配置备份：${receipt.backup_file ?? '无'}`, `可见回执：${receiptFile}`, '', '下一步：trace status'].join('\n'), {status: 'enabled', project: context.project_dir, routing: 'event_cwd', receipt, receipt_file: receiptFile});
     return;
   }
   if (group === 'doctor' && (action === undefined || action.startsWith('--'))) {
@@ -641,12 +682,24 @@ export async function run(argv: string[]): Promise<void> {
   if (group === 'codex' && action === 'hook-stdio') {
     let event: unknown;
     try { event = JSON.parse(fs.readFileSync(0, 'utf8')); } catch { throw new ProtocolError('INVALID_INPUT', 'stdin must contain a valid Codex hook JSON event'); }
-    if (!event || typeof event !== 'object') throw new ProtocolError('INVALID_INPUT', 'Codex hook event must be an object');
+    if (!event || typeof event !== 'object' || Array.isArray(event)) throw new ProtocolError('INVALID_INPUT', 'Codex hook event must be an object');
+    const hookEvent = event as Record<string, unknown>;
+    const routeFromEventCwd = has(parsed, '--route-from-event-cwd');
     const profilePath = one(parsed, '--source-profile', false);
-    const sourceProfile = profilePath === undefined ? undefined : JSON.parse(fs.readFileSync(profilePath, 'utf8')) as MyWikiSourceProfile;
-    const sqliteStateFile = one(parsed, '--sqlite-state-file', false) ?? projectContext(parsed).state_file;
+    const explicitSqlite = one(parsed, '--sqlite-state-file', false);
+    if (routeFromEventCwd && (profilePath !== undefined || explicitSqlite !== undefined)) throw new ProtocolError('INVALID_INPUT', '--route-from-event-cwd cannot be combined with static source or state paths');
+    const context = routeFromEventCwd ? eventProjectContext(hookEvent) : explicitSqlite === undefined ? projectContext(parsed) : undefined;
+    // A user-level Codex hook also sees non-Trace projects. In that case it
+    // must be a successful no-op: no state file, profile, or data can leak in.
+    if (routeFromEventCwd && context === undefined) { process.stdout.write('{}\n'); return; }
+    const sourceProfile = profilePath === undefined
+      ? context === undefined ? undefined : sourceProfileForContext(context)
+      : readJsonFile(profilePath, '--source-profile') as unknown as MyWikiSourceProfile;
+    const sqliteStateFile = explicitSqlite ?? context!.state_file;
     const runtime = new TraceRuntime({sqliteStateFile});
-    process.stdout.write(JSON.stringify(buildCodexHookOutput(event as Parameters<typeof buildCodexHookOutput>[0], runtime, sourceProfile)) + '\n');
+    try {
+      process.stdout.write(JSON.stringify(buildCodexHookOutput(hookEvent as Parameters<typeof buildCodexHookOutput>[0], runtime, sourceProfile)) + '\n');
+    } finally { runtime.close(); }
     return;
   }
   if (group === 'zhihu') {

@@ -37,7 +37,19 @@ test('MyWiKi formal source reads, snapshots, proposes and CAS-applies a page wit
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mywiki-')); const pageFile = path.join(dir, 'wiki', 'knowledge', '协作.md'); fs.mkdirSync(path.dirname(pageFile), {recursive: true});
   fs.writeFileSync(pageFile, '---\ntitle: 协作\nstatus: evergreen\n---\n\n首版判断\n', 'utf8');
   const provider = new MyWikiSourceProvider({source_id: 'user-wiki', root: dir, user_id: 'u1', write_enabled: true});
-  const page = provider.readPage('wiki/knowledge/协作.md'); assert.equal(page.title, '协作'); assert.equal(page.frontmatter.status, 'evergreen');
+  let page = provider.readPage('wiki/knowledge/协作.md'); assert.equal(page.title, '协作'); assert.equal(page.frontmatter.status, 'evergreen');
+  // Revision is content-derived rather than timestamp-derived: coarse mtime filesystems
+  // cannot make a changed page look unchanged to a pointer/CAS consumer.
+  const fixedTime = new Date('2026-09-10T00:00:00.000Z');
+  fs.utimesSync(pageFile, fixedTime, fixedTime);
+  const firstRevision = provider.readPage('wiki/knowledge/协作.md').revision;
+  fs.writeFileSync(pageFile, '---\ntitle: 协作\nstatus: evergreen\n---\n\n同一时间粒度内的更新\n', 'utf8');
+  fs.utimesSync(pageFile, fixedTime, fixedTime);
+  const sameMtimeChanged = provider.readPage('wiki/knowledge/协作.md');
+  assert.notEqual(sameMtimeChanged.revision, firstRevision);
+  fs.writeFileSync(pageFile, page.markdown, 'utf8');
+  fs.utimesSync(pageFile, fixedTime, fixedTime);
+  page = provider.readPage('wiki/knowledge/协作.md');
   const snapshot = provider.buildSourceSnapshot(page, {run_id: 'read-1'}); assert.equal(snapshot.payload.content_hash, page.content_hash); assert.equal(snapshot.origin.locator, 'wiki/knowledge/协作.md');
   const proposal = provider.proposeWrite({relative_path: page.relative_path, expected_revision: page.revision, expected_hash: page.content_hash, next_markdown: page.markdown.replace('首版判断', '第二版判断'), reason: '用户确认后的正式页修订', requested_by: 'u1'});
   const backupRoot = path.join(dir, '.trace-backups'); const receipt = provider.applyWrite(proposal, `approve:${proposal.proposal_id}`, backupRoot); assert.equal(receipt.status, 'applied'); assert.equal(fs.readFileSync(pageFile, 'utf8').includes('第二版判断'), true); assert.equal(fs.existsSync(receipt.backup_path), true);

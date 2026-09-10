@@ -6,6 +6,7 @@
     ".changeset",
     ".gitignore",
     "apps",
+    "governance",
     "AUDIT_20260909.md",
     "docs",
     "GIT_REMOTE_SETUP.md",
@@ -33,9 +34,14 @@
   },
   "files": [
     {
+      "path": ".changeset/codex-event-cwd-routing.md",
+      "sha256": "463bdf2759264c78cc7009d1e2f8253e64a7cd3635783df60d5098957536969b",
+      "bytes": 410
+    },
+    {
       "path": ".changeset/config.json",
-      "sha256": "c37c390d4f1df891c1bd0a12b6d36f96e2116a6779fbc143daade69e4243679a",
-      "bytes": 343
+      "sha256": "cfd703c39d10f0bf80f80fa9a78f4cdcc073101bffe45f8666167a2f2425b779",
+      "bytes": 356
     },
     {
       "path": ".changeset/modernize-trace-runtime.md",
@@ -54,8 +60,8 @@
     },
     {
       "path": "apps/cli/src/main.ts",
-      "sha256": "1470f84f929a0334a323a3a4de3f34847e46edbfb369afd3cc27cfb871f247eb",
-      "bytes": 62553
+      "sha256": "98a07643ef565a8c502326cd1fa5411641253ac7d0d40d87d37a2bafa28fbc5e",
+      "bytes": 66631
     },
     {
       "path": "apps/codex/package.json",
@@ -64,13 +70,13 @@
     },
     {
       "path": "apps/codex/README.md",
-      "sha256": "f1907f1b2fddb2c99783bb34ed4fe5292c96bc5c387c087aa387f7663dff384d",
-      "bytes": 1970
+      "sha256": "1e69eb72462c4b868ea32938dfb5ec987141315172aac44f0d1ed3e665f8da4c",
+      "bytes": 3324
     },
     {
       "path": "apps/codex/src/index.ts",
-      "sha256": "2ce8fd7d27fe3393dd1a6dbcf03eed3d8353def2075adb5c2e9e387ea76f3c3c",
-      "bytes": 8459
+      "sha256": "5042684a5ad5d66c2990a92b1a75f2081950fbe9a349ddb114f51db25ea637ff",
+      "bytes": 11066
     },
     {
       "path": "apps/desktop/package.json",
@@ -89,23 +95,23 @@
     },
     {
       "path": "AUDIT_20260909.md",
-      "sha256": "4b6e1178dd624154e8d895dbc67f6bd403507a14a39b0b5538d29799e1c0d2b6",
-      "bytes": 6898
+      "sha256": "6ecb04f06944a1fba5270f70d310b5876089ea9736bd80a0097dbf510af1b54a",
+      "bytes": 7255
     },
     {
       "path": "docs/architecture.md",
-      "sha256": "9c88459580206a17f9d284ac4f22a7ebb04c930b70fe58cc1a0fedd3180c5ff3",
-      "bytes": 2043
+      "sha256": "712d345ee0a7990d16166e564896a2ecb183c22f9629374638f9b39e53379557",
+      "bytes": 2345
     },
     {
       "path": "docs/daily-workflow.md",
-      "sha256": "5acb16d0e6493244fdc6aefb5776375234e72ad41c8e046ac0fc2124488dcc01",
-      "bytes": 2165
+      "sha256": "ca1794c4801fb872dd3a8da331634be64357e70e85885df94b3c7114f372eb8f",
+      "bytes": 2628
     },
     {
       "path": "docs/getting-started.md",
-      "sha256": "07ed3b7220cb3034a3cd7707e730ff393be919b575902fb6c564533134994489",
-      "bytes": 1752
+      "sha256": "0c393126f34f965a68b15c8e688b58cffb78810c1b69616564ce6e682da53be5",
+      "bytes": 2250
     },
     {
       "path": "docs/operations.md",
@@ -114,8 +120,13 @@
     },
     {
       "path": "docs/README.md",
-      "sha256": "7fde5c02dc6d14a744a05507b55f2206f4fbbbd800095f505cf92d6a15b8a6f9",
-      "bytes": 1264
+      "sha256": "dc1ec229026286b42832512f695fdcbc3906c0e5506acb03954060c6977655fa",
+      "bytes": 1387
+    },
+    {
+      "path": "docs/versioning.md",
+      "sha256": "a38f8e9a9805857fc2bec6c54ec4685c2c274a8d9395cf60785b24f887ebebf4",
+      "bytes": 1970
     },
     {
       "path": "GIT_REMOTE_SETUP.md",
@@ -123,9 +134,14 @@
       "bytes": 732
     },
     {
+      "path": "governance/version-policy.json",
+      "sha256": "7f07b5dd87b25e667d4063a6997b99014b84929f425e1f4fd1b8f2744413d14e",
+      "bytes": 653
+    },
+    {
       "path": "MIGRATION_STATUS.md",
-      "sha256": "9da92eed3b9717faabc02b2d0f572c8a1fdd38430affe557dce31148a5335857",
-      "bytes": 8877
+      "sha256": "fd51bec3306b3f6765e63c2746ba45ff857f90117f1a1b532f07708ddadfaf1f",
+      "bytes": 9356
     },
     {
       "path": "mise.toml",
@@ -164,8 +180,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "bfc0270cde4eaa1b7a9d9ce4ff4679dbdf76aa77ba26c60fa4b7a5c8c859a0b3",
-      "bytes": 1404
+      "sha256": "f3c19a795e261d3b0b1a7fc14cce96e8d390be5902b1b76ce939dcc320d8a097",
+      "bytes": 1489
     },
     {
       "path": "packages/bundle/codex/bundle.json",
@@ -284,8 +300,8 @@
     },
     {
       "path": "packages/core/continuity/src/index.ts",
-      "sha256": "bdcb2696bd0958c8631fb253263024a4bdf0e16d5603891b79ff19c51a365888",
-      "bytes": 13934
+      "sha256": "cf0bf798d5d55730e8e5c996b72e9c03b13707f0b1106f56ebc053e0a5b2c31f",
+      "bytes": 16718
     },
     {
       "path": "packages/core/data/package.json",
@@ -514,8 +530,8 @@
     },
     {
       "path": "packages/integration/mywiki-source/src/index.ts",
-      "sha256": "05600f70cd4dcc360c00c06e5713d8ac021725218d123b0fe3043a9be313a3b0",
-      "bytes": 11306
+      "sha256": "53a7447733a8158ce54514f4beea4ece037923fa0fa2f21d46d987d4db8aa606",
+      "bytes": 12528
     },
     {
       "path": "packages/integration/zhihu-precedent/package.json",
@@ -693,9 +709,19 @@
       "bytes": 322
     },
     {
+      "path": "python/sdk/trace_runtime_sdk/__pycache__/client.cpython-311.pyc",
+      "sha256": "81c67ebbb1b7036ccbe7c042b4a49f84ae026508cdf255f466298e925680f8b8",
+      "bytes": 9595
+    },
+    {
       "path": "python/sdk/trace_runtime_sdk/__pycache__/client.cpython-313.pyc",
       "sha256": "6f44e17092ffff9a20502b5c86fe36cf6629cf09ca3766d2ca46d765e91f9ec0",
       "bytes": 8753
+    },
+    {
+      "path": "python/sdk/trace_runtime_sdk/__pycache__/__init__.cpython-311.pyc",
+      "sha256": "5356bb406434920b80944ad2ac87d51f7455bf451f827aa1e9959bd25a152833",
+      "bytes": 558
     },
     {
       "path": "python/sdk/trace_runtime_sdk/__pycache__/__init__.cpython-313.pyc",
@@ -709,8 +735,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "64b89eba30e1804b747df70310bce539a15ff685f732bb5066bd9a5a99d33eb8",
-      "bytes": 7676
+      "sha256": "1443aed3fdca94e13f3f03596d2969b6947ecc14cb2e491d10ba97613fa3c731",
+      "bytes": 8101
     },
     {
       "path": "schemas/README.md",
@@ -828,9 +854,14 @@
       "bytes": 1763
     },
     {
+      "path": "scripts/audit-versions.mjs",
+      "sha256": "c66689b4cf68e4a4fbf9476e8de0c3954d736faef656bfcb9fc03a4d3fd34e55",
+      "bytes": 3231
+    },
+    {
       "path": "scripts/export-source.mjs",
-      "sha256": "56e5b6c64ea3b00e45d492a1b18b299cf1b5c98654fbe1f236aceaad32301a0d",
-      "bytes": 8975
+      "sha256": "5b0de5feb5cd8ffbe02cd088caa8ee88194db69a2b5ed3115d357270c3967610",
+      "bytes": 9199
     },
     {
       "path": "scripts/package.mjs",
@@ -928,6 +959,11 @@
       "bytes": 6822
     },
     {
+      "path": "tests/codex_hook_routing.test.mjs",
+      "sha256": "a57ea0cfc74d8c475befcd4778b7d9f795fd34b64b6761249546b49cdc45acd7",
+      "bytes": 6787
+    },
+    {
       "path": "tests/codex_trigger.test.mjs",
       "sha256": "9097847366b7b72005f31899c21ce45d278a61eca2a34181660fd597507f086a",
       "bytes": 4596
@@ -974,8 +1010,8 @@
     },
     {
       "path": "tests/product_connectors.test.mjs",
-      "sha256": "37c5b40309c5c52e1fb72541ed259c8756211b675805f38d47baab7af7aaa81d",
-      "bytes": 6458
+      "sha256": "007d8cff9a72eae698875e003bd169fad02ac9108ec0c56e4d6c0f798502a717",
+      "bytes": 7268
     },
     {
       "path": "tests/project_init.test.mjs",
@@ -1006,6 +1042,11 @@
       "path": "tests/python/test_sdk.py",
       "sha256": "5f4d66780e6b2c966ad9cd96c2cc2fa99b567abdf64a200d363e18bd015224e2",
       "bytes": 1418
+    },
+    {
+      "path": "tests/python/__pycache__/test_sdk.cpython-311-pytest-9.0.3.pyc",
+      "sha256": "d0dfcf3e6b0f37aeac502def0094d431d23d6e1c5bb7c16797296d311414bbf5",
+      "bytes": 5435
     },
     {
       "path": "tests/python/__pycache__/test_sdk.cpython-313-pytest-9.0.3.pyc",
@@ -1058,6 +1099,11 @@
       "bytes": 3548
     },
     {
+      "path": "tests/version_governance.test.mjs",
+      "sha256": "0f10e56c9f3ef303e193758b9bb7866784093ccc656a8a09146a66315bf0d2fb",
+      "bytes": 893
+    },
+    {
       "path": "tests/zhihu_adapter.test.mjs",
       "sha256": "0bfc2849a8e8d473fc3834d694f21ffa21ee014d045743888dcba5e626523dd2",
       "bytes": 2452
@@ -1073,5 +1119,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-09T15:10:30.451Z"
+  "created_at": "2026-09-10T06:16:35.531Z"
 }

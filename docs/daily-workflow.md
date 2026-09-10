@@ -11,7 +11,7 @@ trace status
 trace inbox
 ```
 
-`status` 是概览：项目、已授权来源、开放主题、候选前例、候选能力。
+`status` 是概览：项目、已授权来源、开放主题、候选前例、候选能力，以及最近一次 activation 的安全回执。回执会区分“持久化来源/能力引用”和“本轮可读取的指针”；前者是版本化记录，后者只授权当前 Codex 在需要时读某个正式页面。
 
 `inbox` 只显示仍等待你决定的内容，例如：
 
@@ -45,10 +45,10 @@ trace review <ID> --save <绝对内容文件路径>
 
 ## 用户应该持续看见什么
 
-- Agent 此次引用了哪些已授权来源；
+- Agent 此次激活了哪些已授权来源引用，或拿到了哪些受控读取指针；
 - 新出现了哪些候选，以及它们的理由、作用域和风险；
 - 这些候选是否保存、验证、采纳、发布、限制或撤回；
 - 哪些内容仍未保存；
 - 下一步可以如何继续与 Codex 讨论。
 
-用户不需要日常填写 `producer`、`lineage`、`correlation_id`、`causation_id` 或 SQLite 文件路径。这些属于 Trace 的宿主与协议层。
+指针的绝对路径只在当前 Codex hook 返回给宿主，用于读取已授权页面；Trace 持久化的回执只有来源 ID、相对 locator、revision、hash、用途与停止条件。用户不需要日常填写 `producer`、`lineage`、`correlation_id`、`causation_id` 或 SQLite 文件路径。这些属于 Trace 的宿主与协议层。

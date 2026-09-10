@@ -10,6 +10,18 @@ export type ThreadStatus = 'open' | 'watching' | 'resolved' | 'published' | 'sup
 export type DeltaType = 'none' | 'new_candidate' | 'revision' | 'adoption' | 'rejection' | 'publication';
 export type VisibilityMode = 'summary' | 'evidence' | 'audit';
 
+/** Safe, durable audit identity for a pointer-only source activation.
+ * Absolute host paths and source bodies deliberately do not belong here. */
+export interface ActivatedPointer {
+  source_id: string;
+  locator: string;
+  revision: number;
+  content_hash: string;
+  purpose: string;
+  priority: 'must' | 'should' | 'optional';
+  stop_condition: string;
+}
+
 export interface ContinuityEnvelope {
   protocol_id: typeof CONTINUITY_PROTOCOL_ID;
   protocol_version: typeof CONTINUITY_PROTOCOL_VERSION;
@@ -68,6 +80,7 @@ export interface CreateReceipt {
   persisted_refs?: string[];
   not_persisted?: string[];
   activated_refs?: string[];
+  activated_pointers?: ActivatedPointer[];
   required_user_action?: string;
   next_prompts?: string[];
   correlation_id?: string;
@@ -108,6 +121,38 @@ function lineageFor(kind: ContinuityKind, threadId: string, payload: Record<stri
   return {correlation_id: correlationId, causation_id: causationId};
 }
 
+function isRelativeLocator(value: string): boolean {
+  return value.length > 0
+    && !value.startsWith('/')
+    && !value.startsWith('\\')
+    && !/^[A-Za-z]:[\\/]/.test(value)
+    && !value.replaceAll('\\', '/').split('/').some(part => part === '' || part === '.' || part === '..');
+}
+
+function activationPointers(value: unknown): ActivatedPointer[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 128) throw new ProtocolError('INVALID_FIELD', 'activated_pointers must contain at most 128 pointers');
+  return value.map((raw, index) => {
+    const item = object(raw, `activated_pointers[${index}]`);
+    rejectUnknown(item, ['source_id', 'locator', 'revision', 'content_hash', 'purpose', 'priority', 'stop_condition'], `activated_pointers[${index}]`);
+    const locator = text(item.locator, `activated_pointers[${index}].locator`, 2000);
+    if (!isRelativeLocator(locator)) throw new ProtocolError('INVALID_FIELD', `activated_pointers[${index}].locator must be a safe relative locator`);
+    if (!Number.isInteger(item.revision) || Number(item.revision) < 1) throw new ProtocolError('INVALID_FIELD', `activated_pointers[${index}].revision must be positive`);
+    const contentHash = text(item.content_hash, `activated_pointers[${index}].content_hash`, 64);
+    if (!/^[a-f0-9]{64}$/i.test(contentHash)) throw new ProtocolError('INVALID_FIELD', `activated_pointers[${index}].content_hash must be a SHA-256 hex digest`);
+    if (item.priority !== 'must' && item.priority !== 'should' && item.priority !== 'optional') throw new ProtocolError('INVALID_FIELD', `activated_pointers[${index}].priority is invalid`);
+    return {
+      source_id: text(item.source_id, `activated_pointers[${index}].source_id`, 240),
+      locator,
+      revision: Number(item.revision),
+      content_hash: contentHash.toLowerCase(),
+      purpose: text(item.purpose, `activated_pointers[${index}].purpose`, 1000),
+      priority: item.priority as ActivatedPointer['priority'],
+      stop_condition: text(item.stop_condition, `activated_pointers[${index}].stop_condition`, 1000),
+    };
+  });
+}
+
 function buildEnvelope(kind: ContinuityKind, threadId: string, payload: Record<string, unknown>, recordId: string | undefined, lineage: {correlation_id?: string; causation_id?: string}): ContinuityEnvelope {
   const now = timestamp();
   const identity = recordId ?? `continuity-${kind}-${digest({threadId, payload})}`;
@@ -145,7 +190,7 @@ export function validateContinuityEnvelope(value: unknown): ContinuityEnvelope {
     thread: ['title', 'status', 'current_summary', 'candidate_refs', 'adopted_refs', 'open_questions', 'next_action'],
     discussion_turn: ['user_input_summary', 'output_summary', 'delta_type', 'context_refs', 'persisted_refs', 'open_questions'],
     persistence_receipt: ['summary', 'persisted_refs', 'not_persisted', 'required_user_action', 'next_prompts'],
-    activation_receipt: ['summary', 'activated_refs', 'not_persisted', 'required_user_action', 'next_prompts'],
+    activation_receipt: ['summary', 'activated_refs', 'activated_pointers', 'not_persisted', 'required_user_action', 'next_prompts'],
   };
   rejectUnknown(payload, allowed[kind], `${kind}.payload`);
   if (kind === 'thread') {
@@ -158,7 +203,7 @@ export function validateContinuityEnvelope(value: unknown): ContinuityEnvelope {
     if (!DELTA_TYPES.includes(payload.delta_type as DeltaType)) throw new ProtocolError('INVALID_FIELD', 'discussion_turn.delta_type is not supported');
     stringList(payload.context_refs, 'discussion_turn.context_refs'); stringList(payload.persisted_refs, 'discussion_turn.persisted_refs'); stringList(payload.open_questions, 'discussion_turn.open_questions');
   } else {
-    text(payload.summary, `${kind}.summary`); stringList(payload.persisted_refs, `${kind}.persisted_refs`); stringList(payload.activated_refs, `${kind}.activated_refs`); stringList(payload.not_persisted, `${kind}.not_persisted`); stringList(payload.next_prompts, `${kind}.next_prompts`);
+    text(payload.summary, `${kind}.summary`); stringList(payload.persisted_refs, `${kind}.persisted_refs`); stringList(payload.activated_refs, `${kind}.activated_refs`); if (kind === 'activation_receipt') activationPointers(payload.activated_pointers); stringList(payload.not_persisted, `${kind}.not_persisted`); stringList(payload.next_prompts, `${kind}.next_prompts`);
     if (payload.required_user_action !== undefined) text(payload.required_user_action, `${kind}.required_user_action`, 1000);
   }
   return {
@@ -249,6 +294,7 @@ export class ContinuityLedger {
       summary: text(input.summary, 'summary'),
       ...(input.persisted_refs === undefined ? {} : {persisted_refs: stringList(input.persisted_refs, 'persisted_refs')}),
       ...(input.activated_refs === undefined ? {} : {activated_refs: stringList(input.activated_refs, 'activated_refs')}),
+      ...(input.receipt_kind !== 'activation' || input.activated_pointers === undefined ? {} : {activated_pointers: activationPointers(input.activated_pointers)}),
       ...(input.not_persisted === undefined ? {} : {not_persisted: stringList(input.not_persisted, 'not_persisted')}),
       ...(input.required_user_action === undefined ? {} : {required_user_action: text(input.required_user_action, 'required_user_action', 1000)}),
       ...(input.next_prompts === undefined ? {} : {next_prompts: stringList(input.next_prompts, 'next_prompts')}),

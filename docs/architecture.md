@@ -16,13 +16,13 @@ Trace 的架构不是从“数据库、RAG 或 hook”倒推出来的，而是�
 
 ## 宿主层
 
-Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。它们可以传递 event、引用、correlation 与 causation，但不能绕过 runtime 直接写 SQLite / JSONL。
+Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。Codex 的用户级 hook 不携带某个固定项目路径，而是按每个事件的 `cwd` 找到最近 `.trace/`，再加载该项目 profile 与状态库；非 Trace 项目成功 no-op。它们可以传递 event、引用、correlation 与 causation，但不能绕过 runtime 直接写 SQLite / JSONL。
 
 Desktop 与 DeepSeek Harness 仍是明确未实现的宿主边界：目录存在不等于产品已接入。真实 lifecycle、权限、事件顺序、replay、deactivate 与 rollback 必须先有可验证契约。
 
 ## 核心层
 
-- Context 只提供受控引用和读取指针，不注入整库正文；
+- Context 只提供受控引用和读取指针，不注入整库正文；绝对读取路径仅存在于当前宿主响应，持久化 receipt 只保存安全的相对 pointer identity；
 - Continuity 记录跨会话工作线、重要变化、激活 / 沉淀回执，而不把完整聊天伪装为认知源；
 - Data Ledger 维护 hash、revision、lineage 和 fail-closed 验证；
 - Change Set 管理候选、验证、采纳、发布与回滚；

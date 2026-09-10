@@ -1,6 +1,6 @@
 # Trace Runtime 迁移完整性状态
 
-更新时间：2026-09-09
+更新时间：2026-09-10
 
 这份清单用来区分“已迁移并验证”“已实现但未接宿主”“有意保留的兼容边界”和“尚未迁移”。不能因为目录已经是 TypeScript 就把未验证的宿主或连接器说成完成。
 
@@ -18,7 +18,7 @@
 | Activation Pack / 上下文边界 | `packages/core/context` | 已迁移并验证 | 来源引用、读取指针、预算、禁止范围；不拼宿主 prompt |
 | JSONL → SQLite migration | `packages/core/migration` | 已迁移并验证 | staging、源文件不改写、报告可回放 |
 | Capability Publisher | `packages/core/capability` + `packages/core/capability-candidate` | 已迁移并验证 | `candidate_precedent → capability_candidate → adopted → preview → stage → validate → publish(approval) → rollback`；逐文件哈希、目标形状、Skill 内容契约、候选 revision 和认知源 provenance 门禁 |
-| Codex adapter | `apps/codex` | 已迁移并验证（runtime 边界） | `codex.turn.started` → Activation Pack + activation receipt + correlation event；未接 Codex UI hook |
+| Codex adapter | `apps/codex` | 已迁移并验证（真实 hook 路由） | 用户级 `hooks.json` 调用 `hook-stdio --route-from-event-cwd`；按事件 cwd 发现当前 `.trace/` 并自动加载该项目 source profile；宿主收到按需绝对读取指针，SQLite receipt 只保存相对 pointer identity；无 Trace 项目成功 no-op |
 | doctor / backup / restore | `packages/core/operations`、`apps/cli` | 已迁移并验证 | integrity/schema/revision；VACUUM backup 清单；restore staging + previous target |
 | TypeScript SDK / JSONL RPC | `packages/sdk` | 已迁移并验证 | 与 runtime 相同方法和结果语义 |
 | Python SDK | `python/sdk` | 仅保留薄适配并验证 | 只启动/调用 TS runtime RPC；`uv.lock` 已固定；不包含旧 Python runtime |
@@ -27,12 +27,12 @@
 | 候选前例协议 | `packages/core/precedent` + `packages/core/capability-candidate` | 已迁移并验证 | 宿主无关 payload、证据 refs、Change Set lineage；前例不能绕过语义候选直接发布 |
 | 知乎候选前例 adapter | `packages/integration/zhihu-precedent` | 独立拆包并验证 | 有界知乎 API-like/fixture 输入 → source_snapshot/candidate_precedent；不负责 HTTP transport 或 adoption |
 | 知乎实时 API transport | `packages/integration/zhihu-transport` | 已迁移并验证 | Node 22 fetch；官方 Access Secret + `X-Request-Timestamp`；平台搜索/全局搜索/热榜/用户接口及黑客松内容接口；无默认重试；响应码/密钥泄漏门禁 |
-| MyWiKi 正式认知源 | `packages/integration/mywiki-source` | 已迁移并验证 | 用户选择 root/profile；formal `wiki/` 读；source_snapshot provenance；proposal → explicit approval → hash/revision CAS → backup → atomic write |
+| MyWiKi 正式认知源 | `packages/integration/mywiki-source` | 已迁移并验证 | 用户选择 root/profile；formal `wiki/` 读；检索按完整短语或 token relevance；revision 由 content hash 派生，避免 coarse mtime 漏变更；source_snapshot provenance；proposal → explicit approval → hash/revision CAS → backup → atomic write |
 | 用户级 Skill 替换 | `packages/host/codex-skill` + `apps/cli` | 已迁移并验证 | preview、显式 approval、staging 原子替换、备份、rollback；不把旧 Skill 放进 discovery 目录 |
-| Codex hooks 切换 | `packages/host/codex-hooks` + `apps/cli` | 已迁移并验证 | 读写真实 `hooks.json` 形状，移除旧 Python Trace command、保留无关 hooks、备份、CAS preview、rollback；默认不静默修改用户配置 |
+| Codex hooks 切换 | `packages/host/codex-hooks` + `apps/cli` | 已迁移并验证 | 读写真实 `hooks.json` 形状，移除旧 Python / 固定项目 Trace command、保留无关 hooks、备份、CAS preview、rollback；新命令按 event cwd 路由，避免多项目串线；默认不静默修改用户配置 |
 | 可选择认知源模板 | `packages/template/catalog` + `templates/*` | 已迁移并验证 | `trace.codex-starter`/`empty`/`team`；模板只提供结构/权限/source-pack，语义源由用户选择并写入 instance lock |
 | 项目实例初始化与本地认知源边界 | `packages/core/instance` + `apps/cli` | 已迁移并验证 | 默认产品命令 `trace init` create-only `.trace/`；local/empty 使用项目源，external/team 使用 profile；高级兼容入口仍为 `trace internal project init`；lock 只记录 source id、hash 和 scope，不把外部绝对路径写入 project descriptor |
-| 产品 CLI 与文档导航 | pps/cli + README.md + docs/ | 已迁移并验证 | 默认帮助只暴露 init/status/inbox/review/sources/abilities/codex/doctor/backup；协议参数收进 	race internal / --help --advanced；用户文档不依赖个人路径，所有项目状态从当前项目 .trace/ 发现 |
+| 产品 CLI 与文档导航 | `apps/cli` + README.md + docs/ | 已迁移并验证 | 默认帮助只暴露 init/status/inbox/review/sources/abilities/codex/doctor/backup；协议参数收进 `trace internal` / --help --advanced；用户文档不依赖个人路径，所有项目状态从当前项目 .trace/ 发现 |
 | Desktop shell | `apps/desktop` | 明确保留，未实现 | 无真实 desktop event/permission/replay contract；目录只记录准入条件，不能标记完成 |
 | DeepSeek Harness adapter | `packages/integration/deepseek-harness` | 明确保留，未实现 | 无真实 host lifecycle/event contract；目录只记录插件边界和验收条件，不能伪造集成 |
 | 旧 Python `tools/trace_core` | `tmp/trace-python-runtime-legacy-20260909/` | 已移出 active tree | 不参与 build、package、CLI、RPC 或测试；归档仅用于显式恢复，不作为产品 runtime |
@@ -62,4 +62,4 @@ corepack pnpm export:source -- --out <SOURCE_EXPORT_DIR>
 
 `AUDIT_20260909.md` 是当前底层后端、模板、预设上下文和能力的审查结论；它明确区分已验证的 Codex 基线、prompt capture、SQLite driver fallback，与 DeepSeek Harness/Desktop 仍未验收的真实宿主接入。
 
-Changeset 位于 `.changeset/modernize-trace-runtime.md`，包含 transport/source/host/template 新包的版本图；在用户明确授权前不要执行 `corepack pnpm version-packages`。宿主切换必须通过 installer 的显式 approval 和可回滚回执，不由构建过程静默改写当前 Codex/Skill。
+Changeset 位于 `.changeset/`；其发布基线为 `main`。`governance/version-policy.json` 与 `docs/versioning.md` 明确区分产品发行版、独立 workspace 包和协议版本；在用户明确授权前不要执行 `corepack pnpm version-packages`。发布前运行 `corepack pnpm audit:versions` 和 `corepack pnpm changeset status`。宿主切换必须通过 installer 的显式 approval 和可回滚回执，不由构建过程静默改写当前 Codex/Skill。

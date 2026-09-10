@@ -57,6 +57,11 @@ export interface MyWikiWriteReceipt {
 }
 
 function sha(value: string): string { return createHash('sha256').update(value, 'utf8').digest('hex'); }
+/** A content-derived CAS revision: independent of filesystem timestamp granularity. */
+function contentRevision(contentHash: string): number {
+  const value = Number.parseInt(contentHash.slice(0, 12), 16);
+  return value === 0 ? 1 : value;
+}
 function inside(root: string, target: string): boolean { return target === root || target.startsWith(`${root}${path.sep}`); }
 function safeRelative(value: string): string {
   const normalized = value.replaceAll('\\', '/');
@@ -88,6 +93,23 @@ function parseFrontmatter(markdown: string): {frontmatter: Record<string, string
   return {frontmatter, body: markdown.slice(end + closing[0].length).replace(/^\r?\n/, '')};
 }
 function titleOf(frontmatter: Record<string, string | string[]>, relative: string): string { const value = frontmatter.title; return typeof value === 'string' && value.length > 0 ? value : path.basename(relative, '.md'); }
+function searchTerms(query: string): string[] {
+  const terms = new Set<string>();
+  for (const token of query.toLowerCase().match(/[a-z0-9][a-z0-9_-]{1,}/g) ?? []) {
+    for (const part of token.split(/[_-]+/)) if (part.length >= 2) terms.add(part);
+  }
+  for (const run of query.match(/[\u3400-\u9fff]{2,}/g) ?? []) {
+    const chars = [...run];
+    for (let index = 0; index < chars.length - 1; index += 1) terms.add(chars.slice(index, index + 2).join(''));
+  }
+  return [...terms].slice(0, 32);
+}
+function relevance(query: string, text: string): number {
+  const haystack = text.toLowerCase();
+  const needle = query.toLowerCase();
+  if (haystack.includes(needle)) return 100_000 + needle.length;
+  return searchTerms(query).reduce((score, term) => score + (haystack.includes(term) ? term.length : 0), 0);
+}
 
 export class MyWikiSourceProvider {
   readonly profile: Required<Pick<MyWikiSourceProfile, 'source_id' | 'root' | 'user_id' | 'read_enabled' | 'write_enabled'>> & {formal_prefix: string};
@@ -106,13 +128,13 @@ export class MyWikiSourceProvider {
     if (!this.profile.read_enabled) throw new Error('MyWiKi source read is disabled');
     const target = this.target(relative); if (!fs.existsSync(target.absolute)) throw new Error(`MyWiKi page not found: ${target.relative}`); if (!fs.statSync(target.absolute).isFile()) throw new Error('MyWiKi target is not a file');
     const markdown = fs.readFileSync(target.absolute, 'utf8'); const parsed = parseFrontmatter(markdown); const stat = fs.statSync(target.absolute); const contentHash = sha(markdown);
-    return {source_id: this.profile.source_id, relative_path: target.relative, absolute_path: target.absolute, title: titleOf(parsed.frontmatter, target.relative), frontmatter: parsed.frontmatter, body: parsed.body, markdown, revision: Math.floor(stat.mtimeMs), content_hash: contentHash, updated_at: new Date(stat.mtimeMs).toISOString()};
+    return {source_id: this.profile.source_id, relative_path: target.relative, absolute_path: target.absolute, title: titleOf(parsed.frontmatter, target.relative), frontmatter: parsed.frontmatter, body: parsed.body, markdown, revision: contentRevision(contentHash), content_hash: contentHash, updated_at: new Date(stat.mtimeMs).toISOString()};
   }
   search(query: string, limit = 20): MyWikiPage[] {
-    const needle = text(query, 'query', 500).toLowerCase(); const max = Math.max(1, Math.min(100, Math.floor(limit))); const results: MyWikiPage[] = [];
-    const prefix = this.profile.formal_prefix.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''); const base = path.join(this.profile.root, prefix); if (!fs.existsSync(base)) return results;
-    const walk = (dir: string): void => { for (const entry of fs.readdirSync(dir, {withFileTypes: true})) { const absolute = path.join(dir, entry.name); if (entry.isDirectory()) walk(absolute); else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md') && results.length < max) { const relative = path.relative(this.profile.root, absolute).replaceAll(path.sep, '/'); const page = this.readPage(relative); if (`${page.title}\n${page.body}`.toLowerCase().includes(needle)) results.push(page); } } };
-    walk(base); return results;
+    const needle = text(query, 'query', 500); const max = Math.max(1, Math.min(100, Math.floor(limit))); const results: Array<{page: MyWikiPage; score: number}> = [];
+    const prefix = this.profile.formal_prefix.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''); const base = path.join(this.profile.root, prefix); if (!fs.existsSync(base)) return [];
+    const walk = (dir: string): void => { for (const entry of fs.readdirSync(dir, {withFileTypes: true})) { const absolute = path.join(dir, entry.name); if (entry.isDirectory()) walk(absolute); else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) { const relative = path.relative(this.profile.root, absolute).replaceAll(path.sep, '/'); const page = this.readPage(relative); const score = relevance(needle, `${page.title}\n${page.body}`); if (score > 0) results.push({page, score}); } } };
+    walk(base); return results.sort((left, right) => right.score - left.score || left.page.relative_path.localeCompare(right.page.relative_path)).slice(0, max).map(result => result.page);
   }
   buildSourceSnapshot(page: MyWikiPage, options: {run_id: string; classification?: CreateDataRecord['classification']; scope?: CreateDataRecord['scope']}): CreateDataRecord {
     const runId = text(options.run_id, 'run_id', 200); return {kind: 'source_snapshot', status: 'captured', schema_id: 'trace.source.snapshot', schema_version: '0.1.0', subject: {type: 'formal_page', id: `${this.profile.source_id}:${page.relative_path}`}, scope: options.scope ?? {type: 'personal', id: this.profile.user_id}, origin: {provider: 'mywiki', source_id: `${this.profile.source_id}:${page.relative_path}`, captured_at: new Date().toISOString(), content_hash: page.content_hash, locator: page.relative_path}, producer: {component: MYWIKI_SOURCE_ID, version: MYWIKI_SOURCE_VERSION, run_id: runId}, lineage: {parent_refs: [], source_refs: [], causation_id: `read:${page.relative_path}`, correlation_id: runId}, classification: options.classification ?? 'private', payload: {source_id: `${this.profile.source_id}:${page.relative_path}`, provider: 'mywiki', external_id: page.relative_path, title: page.title, content: page.body.slice(0, 100_000), captured_at: new Date().toISOString(), content_hash: page.content_hash, locator: page.relative_path, page_revision: page.revision, source_user_id: this.profile.user_id} };

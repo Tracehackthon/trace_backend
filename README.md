@@ -69,12 +69,12 @@ Trace 当前先服务于长期使用 Codex 的个人与团队。每个项目有�
 
 已实现的基础能力包括：
 
-- 为 Codex 提供受控的 Activation Pack：只传来源引用、读取指针、预算、禁止范围，不灌入完整 Wiki 或全部聊天；
+- 为 Codex 提供受控的 Activation Pack：只传来源引用、读取指针、预算、禁止范围，不灌入完整 Wiki 或全部聊天；用户级 hook 按每次事件的 cwd 路由到对应项目，不会被最后一次启用的项目绑死；
 - 把 prompt 和外部材料先做成可见候选；raw prompt 不会静默写入状态库；
 - 让用户明确选择保存摘要、脱敏片段或完整私有案例；
 - 让知乎等外部来源先成为带相似性、差异和风险的候选前例，而非自动真理；
 - 将候选前例与能力候选、来源、版本和验证证据连成可追溯链；
-- 记录 activation / persistence receipt，让用户知道本轮激活或沉淀了什么、没有沉淀什么；
+- 记录 activation / persistence receipt，让用户知道本轮激活了哪些持久化引用和读取指针、没有沉淀什么；读取指针的绝对路径只发给当前 Codex 进程，状态库只保存相对 locator、revision、hash 与用途；
 - 通过 `doctor`、backup、restore、revision、hash 与 lineage 保证数据可核验、可恢复。
 
 > 当前版本已经打好候选、来源、接续、审计与发布治理的底座；完整的「判断采用 → 激活 → 验证 / 限制 / 撤回」用户工作流仍在持续产品化。Trace 不会把尚未完成的 UI 或宿主适配伪装成已实现能力。
@@ -90,7 +90,7 @@ trace codex enable
 trace status
 ```
 
-`trace init` 创建项目本地 `.trace/`：项目状态、候选、回执、备份和本地认知源都在这里。它不会复制其他人的 Wiki，也不会自动连接外部个人来源。
+`trace init` 创建项目本地 `.trace/`：项目状态、候选、回执、备份和本地认知源都在这里。它不会复制其他人的 Wiki，也不会自动连接外部个人来源；使用 `--source external --source-profile <配置绝对路径>` 后，来源只在该项目的 hook 事件中按 cwd 加载。
 
 `trace codex enable --dry-run` 先展示将要管理的 Codex hooks；确认执行 `trace codex enable` 后才会写入配置，同时保留原配置备份与回执。
 
@@ -132,6 +132,7 @@ trace backup restore --file <备份文件绝对路径> --replace
 - [日常协作、认知变化与沉淀](docs/daily-workflow.md)
 - [维护、备份与恢复](docs/operations.md)
 - [产品边界与架构](docs/architecture.md)
+- [版本、协议与发布](docs/versioning.md)
 - [完整文档导航](docs/README.md)
 
 ## 高级接口

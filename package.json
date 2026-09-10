@@ -23,9 +23,10 @@
     "audit:templates": "node scripts/audit-templates.mjs",
     "export:source": "node scripts/export-source.mjs",
     "test:python": "python scripts/test-python.py",
-    "check:all": "pnpm typecheck && pnpm audit:templates && pnpm test && pnpm test:python",
+    "check:all": "pnpm typecheck && pnpm audit:templates && pnpm audit:versions && pnpm test && pnpm test:python",
     "changeset": "changeset",
-    "version-packages": "changeset version"
+    "version-packages": "changeset version",
+    "audit:versions": "node scripts/audit-versions.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:devTools",

@@ -1,0 +1,19 @@
+{
+  "policy_id": "trace.release-versioning",
+  "policy_version": "0.1.0",
+  "release_branch": "main",
+  "runtime_distribution": {
+    "package": "trace-runtime",
+    "version_source": "package.json"
+  },
+  "protocol_tracks": {
+    "trace.continuity": "0.2.0",
+    "trace.context-record": "0.2.0",
+    "trace.project-instance": "0.2.0"
+  },
+  "workspace_policy": {
+    "versions": "independent",
+    "release_source": "changesets",
+    "rule": "A public package or protocol change needs an explicit changeset before a package release. Runtime, protocol and template versions are reported separately; they are not assumed equal."
+  }
+}

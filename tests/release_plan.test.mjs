@@ -14,6 +14,13 @@ test('release-plan audit separates a pending workspace plan from the private pro
   assert.equal(report.product.codex_profile.hook_command, 'trace internal codex hook-stdio --route-from-event-cwd');
   assert.equal(report.product.codex_bundle.runtime, 'trace-runtime@0.6.0');
   assert.equal(report.requires_explicit_product_release_decision, true);
+  if (report.workspace_plan_resolution.available) {
+    assert.equal(report.pending_workspace_plan.patch.length, 9, 'resolved plan includes internal dependent patch releases');
+    assert.equal(report.pending_workspace_plan.minor.length, 15);
+  } else {
+    assert.match(report.workspace_plan_resolution.message, /declared changesets only/);
+    assert.equal(report.pending_workspace_plan.patch.length, 2, 'the dependency-free source checkout retains the declared plan');
+  }
   assert.equal(report.pending_workspace_plan.minor.length > 0, true);
   assert.equal(report.failures.length, 0);
 });

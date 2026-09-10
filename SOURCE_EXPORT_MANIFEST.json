@@ -855,8 +855,8 @@
     },
     {
       "path": "scripts/audit-release-plan.mjs",
-      "sha256": "9161647cd390f3f9d4e4054f3b37b7d6e231cf4362367b6e6edbf6c24d5ab083",
-      "bytes": 5508
+      "sha256": "4db6faf8cf0417cef5148f1d13fd5fbdb9eb9213340f838f863b44d0830155df",
+      "bytes": 7223
     },
     {
       "path": "scripts/audit-templates.mjs",
@@ -1170,8 +1170,8 @@
     },
     {
       "path": "tests/release_plan.test.mjs",
-      "sha256": "4460d1b3222065a71ccb353f1aa18bebd4dabb13479a6a36a65c3fa889598554",
-      "bytes": 1034
+      "sha256": "d2c99e4e293c49bf9fb9f5574f33d054e40effd30fbe49c57e74ddb1920ce393",
+      "bytes": 1510
     },
     {
       "path": "tests/sdk.test.mjs",
@@ -1239,5 +1239,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-10T06:46:07.413Z"
+  "created_at": "2026-09-10T06:49:13.551Z"
 }

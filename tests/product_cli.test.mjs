@@ -23,6 +23,59 @@ test('product CLI keeps the default path small, discovers the project, and hides
   assert.match(advanced.result.stdout, /change create/);
 });
 
+test('product CLI visibly migrates an older unlocked collaboration configuration without changing durable state', () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-product-legacy-profile-'));
+  const initialized = run(['init', '--project-dir', project, '--json']);
+  assert.equal(initialized.result.status, 0, initialized.result.stderr);
+  const traceDir = path.join(project, '.trace');
+  const database = path.join(traceDir, 'state', 'trace.sqlite');
+  const databaseBefore = fs.readFileSync(database);
+
+  // This precisely models a project created before collaboration profiles and
+  // their hash-only lock existed. The source profile and durable state remain.
+  fs.rmSync(path.join(traceDir, 'profiles', 'collaboration-model.json'));
+  fs.rmSync(path.join(traceDir, 'profiles', 'source-activation.json'));
+  fs.rmSync(path.join(traceDir, 'instance', 'activation.lock.json'));
+
+  const legacy = run(['profile', '--project-dir', project, '--json']);
+  assert.equal(legacy.result.status, 0, legacy.result.stderr);
+  assert.equal(legacy.json.configuration_state, 'legacy_unlocked');
+  assert.equal(legacy.json.activation_lock, null);
+  assert.equal(legacy.json.collaboration_model.model_id, 'trace.cognitive-collaboration-starter');
+
+  const refused = run(['profile', 'migrate', '--project-dir', project], {json: false});
+  assert.notEqual(refused.result.status, 0);
+  assert.match(refused.result.stdout, /USER_CONFIRMATION_REQUIRED/);
+
+  const migrated = run(['profile', 'migrate', '--project-dir', project, '--confirm', 'true', '--json']);
+  assert.equal(migrated.result.status, 0, migrated.result.stderr);
+  assert.equal(migrated.json.status, 'migrated');
+  assert.equal(migrated.json.previous_state, 'legacy_unlocked');
+  assert.equal(fs.existsSync(path.join(traceDir, 'profiles', 'collaboration-model.json')), true);
+  assert.equal(fs.existsSync(path.join(traceDir, 'profiles', 'source-activation.json')), true);
+  assert.equal(fs.existsSync(path.join(traceDir, 'instance', 'activation.lock.json')), true);
+  assert.deepEqual(fs.readFileSync(database), databaseBefore, 'migration must not alter the SQLite ledger');
+
+  const locked = run(['profile', '--project-dir', project, '--json']);
+  assert.equal(locked.result.status, 0, locked.result.stderr);
+  assert.equal(locked.json.configuration_state, 'locked');
+  assert.notEqual(locked.json.activation_lock, null);
+  const repeated = run(['profile', 'migrate', '--project-dir', project, '--confirm', 'true', '--json']);
+  assert.equal(repeated.result.status, 0, repeated.result.stderr);
+  assert.equal(repeated.json.status, 'already_locked');
+
+  const instanceLockFile = path.join(traceDir, 'instance', 'trace.lock.json');
+  const instanceLock = JSON.parse(fs.readFileSync(instanceLockFile, 'utf8'));
+  instanceLock.runtime_version = '0.6.0';
+  fs.writeFileSync(instanceLockFile, JSON.stringify(instanceLock, null, 2) + '\n', 'utf8');
+  const updateInspection = run(['upgrade', '--project-dir', project, '--json']);
+  assert.equal(updateInspection.result.status, 0, updateInspection.result.stderr);
+  assert.equal(updateInspection.json.status, 'inspected');
+  assert.equal(updateInspection.json.runtime.state, 'runtime_changed');
+  assert.deepEqual(updateInspection.json.automatic_changes, []);
+  assert.deepEqual(fs.readFileSync(database), databaseBefore, 'inspection must not alter the SQLite ledger');
+});
+
 test('product CLI initializes, reviews an explicit prompt case, enables Codex, and backs up without state-file flags', () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-product-cli-'));
   const hooks = path.join(project, 'hooks.json');

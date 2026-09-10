@@ -1,6 +1,6 @@
 # Codex bundle
 
-`trace.codex@0.4.0` 声明的是 Codex-first 的组合边界：`core/runtime`、`core/collaboration-context`、项目 instance、Codex adapter、Continuity/Activation Pack、host retrieval evidence、MyWiKi formal source 与 hooks installer。
+`trace.codex@0.4.1` 声明的是 Codex-first 的组合边界：`core/runtime`、`core/collaboration-context`、项目 instance、Codex adapter、Continuity/Activation Pack、host retrieval evidence、MyWiKi formal source 与 hooks installer。
 
 它不在 bundle 内复制用户认知源、聊天记录或运行时状态。产品模式使用项目 SQLite；开发兼容模式使用分离 JSONL；冷启动模板必须先 preview，再生成 instance lockfile。
 

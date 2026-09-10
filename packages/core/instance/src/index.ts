@@ -65,6 +65,7 @@ export interface ProjectActivationConfigurationInput {
   collaboration_model: CollaborationModel;
   source_activation: SourceActivationManifest;
 }
+export type ProjectActivationConfigurationState = 'locked' | 'legacy_unlocked';
 
 type AnyProjectInstanceProtocol = ProtocolVersioned & Record<string, unknown>;
 const projectInstanceUpcasters = new ProtocolVersionRegistry<AnyProjectInstanceProtocol>();
@@ -134,9 +135,10 @@ function assertActivationLockMatches(lock: ActivationLock, input: {template_id: 
 /**
  * The detailed model and source map live in the ignored profiles directory;
  * the committable activation lock retains only identities and hashes. Existing
- * projects fall back to the versioned built-in starter until re-initialized.
+ * projects can use a compatibility starter, but remain visibly legacy-unlocked
+ * until the user explicitly writes a local lock with `profile migrate`.
  */
-export function loadProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_profile: ProjectSourceProfileInput}): {collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock?: ActivationLock} {
+export function loadProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_profile: ProjectSourceProfileInput}): {collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock?: ActivationLock; configuration_state: ProjectActivationConfigurationState} {
   const traceDir = absolute(input.trace_dir, 'trace_dir');
   const modelFile = path.join(traceDir, 'profiles', 'collaboration-model.json');
   const sourceFile = path.join(traceDir, 'profiles', 'source-activation.json');
@@ -154,7 +156,7 @@ export function loadProjectActivationConfiguration(input: {trace_dir: string; te
     activation_lock = validateActivationLock(readJson(lockFile));
     assertActivationLockMatches(activation_lock, {template_id: input.template_id, model: collaboration_model, source: source_activation});
   }
-  return {collaboration_model, source_activation, ...(activation_lock === undefined ? {} : {activation_lock})};
+  return {collaboration_model, source_activation, configuration_state: activation_lock === undefined ? 'legacy_unlocked' : 'locked', ...(activation_lock === undefined ? {} : {activation_lock})};
 }
 
 /**
@@ -190,6 +192,33 @@ export function updateProjectActivationConfiguration(input: {trace_dir: string; 
     throw error;
   }
   return {collaboration_model, source_activation, activation_lock, backup_dir: backupDir};
+}
+
+/**
+ * One-way compatibility migration for pre-profile projects. It does not change
+ * the selected source, template, SQLite state, capabilities, or hooks: it
+ * only materializes the exact compatibility model/map currently in use and
+ * writes their hash-only lock.
+ */
+export function migrateProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_profile: ProjectSourceProfileInput; migrated_at?: string}): {migrated: boolean; previous_state: ProjectActivationConfigurationState; collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock?: ActivationLock; backup_dir?: string} {
+  const current = loadProjectActivationConfiguration(input);
+  if (current.configuration_state === 'locked') {
+    return {
+      migrated: false,
+      previous_state: 'locked',
+      collaboration_model: current.collaboration_model,
+      source_activation: current.source_activation,
+      ...(current.activation_lock === undefined ? {} : {activation_lock: current.activation_lock}),
+    };
+  }
+  const updated = updateProjectActivationConfiguration({
+    trace_dir: input.trace_dir,
+    template_id: input.template_id,
+    source_profile: input.source_profile,
+    configuration: {collaboration_model: current.collaboration_model, source_activation: current.source_activation},
+    ...(input.migrated_at === undefined ? {} : {updated_at: input.migrated_at}),
+  });
+  return {migrated: true, previous_state: 'legacy_unlocked', ...updated};
 }
 
 function profileFor(input: ProjectInitInput, traceDir: string): {profile: ProjectSourceProfileInput; sourceRoot: string; scope: ProjectScopeType} {

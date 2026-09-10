@@ -1,7 +1,7 @@
 {
   "bundle_id": "trace.codex",
-  "bundle_version": "0.4.0",
-  "runtime": "trace-runtime@0.7.0",
+  "bundle_version": "0.4.1",
+  "runtime": "trace-runtime@0.7.1",
   "host": "codex",
   "packages": [
     "core/protocol",

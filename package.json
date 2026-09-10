@@ -1,6 +1,6 @@
 {
   "name": "trace-runtime",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Trace TypeScript runtime packages and host adapters",
   "type": "module",

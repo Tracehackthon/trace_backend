@@ -73,3 +73,22 @@ trace status
 `trace profile` 显示这次协作所依据的协作模型、来源地图和 hash lock；`trace sources` 显示来源授权和 Codex **实际**搜索/读取的 evidence。前者不是“已读取清单”，后者也不等于“长期沉淀”。如果看到“Codex：尚未启用”或“待确认沉淀：0”，这不是错误：前者表示尚未执行 enable，后者表示尚未出现需要你判断的候选。二者都不会显示 raw prompt、来源正文、绝对路径或工具参数。
 
 个人或团队适配不靠隐藏画像：将版本化的 `collaboration_model` 与 `activation_manifest` 放入本地 source profile 再初始化，或在已有项目执行 `trace profile update --file <绝对路径> --confirm true`。见[让 Agent 逐步适配使用者](personalization.md)。
+
+## 后续更新 Trace
+
+以后安装新版 runtime 或拉取新版仓库后，在已有项目中先运行：
+
+```powershell
+trace upgrade
+trace doctor
+```
+
+`trace upgrade` 只读显示当前 runtime 与项目初始化 runtime、模板 lock 和协作配置状态；它不会自动替换你的 SQLite、认知源、模板、能力、Skill 或 Codex hooks。新模板和 starter 默认只用于之后的新项目。
+
+如果 `trace profile` 显示 `legacy_unlocked`，说明这个项目来自协作 profile/hash lock 出现之前。确认后运行：
+
+```powershell
+trace profile migrate --confirm true
+```
+
+它只将正在使用的兼容协作模型/来源地图写成本地 profile 并创建 hash lock，不重新初始化，也不改动数据和来源。需要换协作方式或来源地图时，继续使用显式的 `trace profile update --file <绝对路径> --confirm true`。更新策略与边界见[版本、协议与发布](versioning.md)。

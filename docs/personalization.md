@@ -110,7 +110,24 @@ trace init --source external --source-profile <配置文件绝对路径>
 
 `locator` 必须是相对 Markdown 路径，且必须落在 `host_retrieval.allowed_prefixes` 内。Trace 拒绝绝对路径、`..` traversal、未知字段和不在授权前缀中的入口。地图中的 locator 只是“值得原生读取的导航提示”；Codex 尚未读取前，不能说它已经知道该页。
 
-## 在已有项目中显式更新
+## 已有项目：先识别，再一次性固化兼容配置
+
+新版本 runtime 被安装或仓库被拉取后，**不会**自动覆盖已有项目的认知源、SQLite、模板、能力、Skill 或 Codex hooks。先在项目中查看：
+
+```powershell
+trace upgrade
+trace profile
+```
+
+早于协作模型/来源地图 lock 的项目会在 `trace profile` 中显示 `legacy_unlocked`：它仍使用兼容的通用 starter，但这份兼容配置尚未以本地 profile 和 hash lock 固化。确认后执行一次：
+
+```powershell
+trace profile migrate --confirm true
+```
+
+这不是“重新初始化”。它只把**当前正在使用**的兼容协作模型和来源地图写入 `.trace/profiles/`，再创建 `activation.lock.json`；不会改变已选认知源、状态库、模板内容、候选、能力或 hooks。重复执行是无操作。这样旧项目不会因为 runtime 更新突然换一套上下文，新项目也不会因为旧兼容路径而缺少可回放的配置身份。
+
+## 在已有项目中显式更新协作方式
 
 不要手改 `.trace/profiles/` 让 lock 漂移。把下一版协作模型和来源地图（只含 `collaboration_model` 与 `source_activation`）放到一个本地 JSON 文件，再显式更新：
 
@@ -120,6 +137,8 @@ trace profile
 ```
 
 更新会验证协议、scope 与来源前缀，写入新模型/地图、刷新 hash-only lock，并在 `.trace/backups/activation-profile-*/` 保存旧配置。没有这条显式更新路径时，Trace 遇到 profile 与 lock 不一致会 fail-closed，而不是悄悄让 Agent 在未知配置下运行。
+
+仓库中的新版 starter、模板和示例 profile 只影响**以后新建的项目**。它们不作为已有项目的自动更新来源；如果团队希望采用新版协作模型或来源地图，应先审阅差异，再由项目拥有者运行 `trace profile update`。模板的真实三方合并尚未实现，因此 Trace 明确不假装可以安全地自动替换已有模板内容。
 
 ## 在 Codex 中实际发生什么
 

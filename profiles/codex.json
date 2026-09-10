@@ -2,8 +2,8 @@
   "profile": "codex",
   "host": "codex",
   "runtime_package": "trace-runtime",
-  "runtime_version": "0.7.0",
-  "bundle": "trace.codex@0.4.0",
+  "runtime_version": "0.7.1",
+  "bundle": "trace.codex@0.4.1",
   "protocols": [
     "trace.change-set@0.2.0",
     "trace.data-envelope@0.3.0",

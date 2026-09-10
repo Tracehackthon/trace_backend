@@ -16,7 +16,7 @@ import {MyWikiSourceProvider, type MyWikiSourceProfile} from '../../../packages/
 import {CodexSkillInstaller} from '../../../packages/host/codex-skill/src/index.js';
 import {CodexHookInstaller} from '../../../packages/host/codex-hooks/src/index.js';
 import {SELECTABLE_TEMPLATES} from '../../../packages/template/catalog/src/index.js';
-import {initializeProject, loadProjectActivationConfiguration, updateProjectActivationConfiguration, validateProjectInstanceDescriptor, type ProjectSourceMode, type ProjectSourceProfileInput, type ProjectInstanceDescriptor, type ProjectActivationConfigurationInput} from '../../../packages/core/instance/src/index.js';
+import {initializeProject, loadProjectActivationConfiguration, migrateProjectActivationConfiguration, updateProjectActivationConfiguration, validateProjectInstanceDescriptor, type ProjectSourceMode, type ProjectSourceProfileInput, type ProjectInstanceDescriptor, type ProjectActivationConfigurationInput} from '../../../packages/core/instance/src/index.js';
 import {hashTransientPrompt} from '../../../packages/core/case-capture/src/index.js';
 
 const PRODUCT_USAGE = [
@@ -26,12 +26,14 @@ const PRODUCT_USAGE = [
     '  trace init [--project-dir ABS] [--source local|empty|external|team] [--source-profile ABS]',
     '  trace codex enable [--hooks-file ABS] [--dry-run]',
     '  trace status [--project-dir ABS] [--json]',
+    '  trace upgrade [--project-dir ABS] [--json]  # inspect an update; never overwrites project state',
     '',
     '日常：',
     '  trace inbox [--project-dir ABS] [--json]',
     '  trace review ID [--project-dir ABS] [--save ABS_CONTENT_FILE] [--json]',
     '  trace sources [--project-dir ABS] [--json]',
     '  trace profile [--project-dir ABS] [--json]',
+    '  trace profile migrate --confirm true [--project-dir ABS]  # lock an older project without changing its source/data',
     '  trace abilities [--project-dir ABS] [--json]',
     '',
     '维护：',
@@ -256,6 +258,38 @@ function activationConfigurationForContext(context: ProductProjectContext) {
   };
 }
 
+/**
+ * A runtime update is not a project migration. This view deliberately reads
+ * the installation-time lock only to make the difference visible; it never
+ * rewrites the lock, template, profile, ledger, capability, or host config.
+ */
+function projectRuntimeUpdateView(context: ProductProjectContext, currentRuntimeVersion: string): {
+  state: 'matching' | 'runtime_changed' | 'installation_lock_unavailable';
+  current_runtime_version: string;
+  initialized_runtime_version: string | null;
+  template: {id: string; project_version: string; locked_version: string | null};
+} {
+  const lockPath = path.join(context.trace_dir, 'instance', 'trace.lock.json');
+  let lock: Record<string, unknown> | undefined;
+  try { lock = readJsonFile(lockPath, 'instance lock'); } catch { /* status remains useful for a pre-lock project */ }
+  const initializedRuntimeVersion = lock === undefined ? null : textField(lock, 'runtime_version', '');
+  const lockedTemplate = lock !== undefined && lock.template !== null && typeof lock.template === 'object' && !Array.isArray(lock.template)
+    ? textField(lock.template as Record<string, unknown>, 'version', '')
+    : '';
+  return {
+    state: initializedRuntimeVersion === null || initializedRuntimeVersion.length === 0
+      ? 'installation_lock_unavailable'
+      : initializedRuntimeVersion === currentRuntimeVersion ? 'matching' : 'runtime_changed',
+    current_runtime_version: currentRuntimeVersion,
+    initialized_runtime_version: initializedRuntimeVersion === null || initializedRuntimeVersion.length === 0 ? null : initializedRuntimeVersion,
+    template: {
+      id: context.descriptor.template_id,
+      project_version: context.descriptor.template_version,
+      locked_version: lockedTemplate.length === 0 ? null : lockedTemplate,
+    },
+  };
+}
+
 function productRuntime(context: ProductProjectContext): TraceRuntime | undefined {
   return fs.existsSync(context.state_file) ? new TraceRuntime({sqliteStateFile: context.state_file}) : undefined;
 }
@@ -401,7 +435,7 @@ export async function run(argv: string[]): Promise<void> {
   const [group, action, ...rest] = argv;
   // Product commands discover the nearest project boundary rather than asking
   // users to repeatedly pass state-file, lineage and producer internals.
-  if (['init', 'status', 'inbox', 'sources', 'profile', 'abilities'].includes(group ?? '')) {
+  if (['init', 'status', 'upgrade', 'inbox', 'sources', 'profile', 'abilities'].includes(group ?? '')) {
     const parsed = args(action?.startsWith('--') ? [action, ...rest] : rest);
     if (group === 'init') {
       const projectDir = path.resolve(one(parsed, '--project-dir', false) ?? process.cwd());
@@ -440,8 +474,24 @@ export async function run(argv: string[]): Promise<void> {
       return;
     }
     const context = projectContext(parsed);
+    if (group === 'profile' && action === 'migrate') {
+      if (one(parsed, '--confirm', false) !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'profile migrate requires --confirm true');
+      const sourceProfile = sourceProfileForContext(context) as unknown as ProjectSourceProfileInput;
+      const migrated = migrateProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_profile: sourceProfile});
+      productResult(parsed, migrated.migrated ? [
+        '旧项目已完成协作配置迁移。',
+        `协作模型：${migrated.collaboration_model.display_name}（${migrated.collaboration_model.model_id}@${migrated.collaboration_model.version}）`,
+        `认知源地图：${migrated.source_activation.display_name}（${migrated.source_activation.entry_points.length} 个入口）`,
+        `原配置备份：${migrated.backup_dir ?? '无（旧项目没有配置文件）'}`,
+        '没有改动 SQLite 数据、已选认知源、模板、能力或 Codex hooks。',
+      ].join('\n') : [
+        '当前项目已经有有效的协作配置 lock；未改动任何文件。',
+        `协作模型：${migrated.collaboration_model.display_name}（${migrated.collaboration_model.model_id}@${migrated.collaboration_model.version}）`,
+      ].join('\n'), {status: migrated.migrated ? 'migrated' : 'already_locked', project: context.project_dir, previous_state: migrated.previous_state, collaboration_model: {model_id: migrated.collaboration_model.model_id, version: migrated.collaboration_model.version}, source_activation: {manifest_id: migrated.source_activation.manifest_id, version: migrated.source_activation.version}, ...(migrated.activation_lock === undefined ? {} : {activation_lock: migrated.activation_lock}), ...(migrated.backup_dir === undefined ? {} : {backup_dir: migrated.backup_dir})});
+      return;
+    }
     if (group === 'profile' && action === 'update') {
-      if (one(parsed, '--confirm') !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'profile update requires --confirm true');
+      if (one(parsed, '--confirm', false) !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'profile update requires --confirm true');
       const file = one(parsed, '--file')!;
       if (!path.isAbsolute(file)) throw new ProtocolError('INVALID_INPUT', '--file must be an absolute activation configuration file');
       const selected = readJsonFile(file, '--file') as unknown as ProjectActivationConfigurationInput;
@@ -461,7 +511,7 @@ export async function run(argv: string[]): Promise<void> {
       ].join('\n'), {status: 'updated', project: context.project_dir, collaboration_model: {model_id: updated.collaboration_model.model_id, version: updated.collaboration_model.version}, source_activation: {manifest_id: updated.source_activation.manifest_id, version: updated.source_activation.version, entry_points: updated.source_activation.entry_points.length}, activation_lock: updated.activation_lock, backup_dir: updated.backup_dir});
       return;
     }
-    if (group === 'profile' && action !== undefined && !action.startsWith('--')) throw new ProtocolError('INVALID_INPUT', 'trace profile supports inspection or: trace profile update --file ABS --confirm true');
+    if (group === 'profile' && action !== undefined && !action.startsWith('--')) throw new ProtocolError('INVALID_INPUT', 'trace profile supports inspection, migrate, or: trace profile update --file ABS --confirm true');
     if (group === 'profile') {
       const activation = activationConfigurationForContext(context);
       const model = activation.collaboration_model;
@@ -472,6 +522,7 @@ export async function run(argv: string[]): Promise<void> {
         project: context.project_dir,
         collaboration_model: {model_id: model.model_id, version: model.version, display_name: model.display_name, scope: model.scope, principles: model.principles, open_discussion: model.open_discussion, explicit_execution: model.explicit_execution, epistemic_practice: model.epistemic_practice, boundaries: model.boundaries, ...(model.current_focus === undefined ? {} : {current_focus: model.current_focus})},
         source_activation: {manifest_id: sourceMap.manifest_id, version: sourceMap.version, source_id: sourceMap.source_id, display_name: sourceMap.display_name, summary: sourceMap.summary, entry_points: sourceMap.entry_points, activation_profiles: sourceMap.activation_profiles},
+        configuration_state: activation.configuration_state,
         activation_lock: lock ?? null,
       };
       productResult(parsed, [
@@ -484,8 +535,41 @@ export async function run(argv: string[]): Promise<void> {
         `认知源地图：${sourceMap.display_name}（${sourceMap.manifest_id}@${sourceMap.version}）`,
         `来源说明：${sourceMap.summary}`,
         `入口：${sourceMap.entry_points.length === 0 ? '尚未由用户配置；Codex 仅在相关时原生搜索已授权来源。' : sourceMap.entry_points.map(entry => `${entry.label}${entry.locator === undefined ? '' : ` (${entry.locator})`}`).join('；')}`,
-        `锁定：${lock === undefined ? '旧项目兼容回退；下次重新初始化会写入 activation lock。' : `${lock.lock_id}；模型/来源地图以 hash 锁定。`}`,
+        `锁定：${lock === undefined ? '旧项目兼容模式；当前使用兼容协作模型，但尚未锁定。执行 trace profile migrate --confirm true 固化它，不会改动来源或数据。' : `${lock.lock_id}；模型/来源地图以 hash 锁定。`}`,
       ].join('\n'), profileView);
+      return;
+    }
+    if (group === 'upgrade') {
+      if (action !== undefined && !action.startsWith('--')) throw new ProtocolError('INVALID_INPUT', 'trace upgrade only inspects the current project; it does not apply changes');
+      const runtime = projectRuntimeUpdateView(context, runtimeVersionFor(parsed));
+      const activation = activationConfigurationForContext(context);
+      const next_actions = [
+        ...(runtime.state === 'runtime_changed' ? ['trace doctor', 'trace profile', 'trace codex status'] : []),
+        ...(runtime.state === 'installation_lock_unavailable' ? ['trace doctor'] : []),
+        ...(activation.configuration_state === 'legacy_unlocked' ? ['trace profile migrate --confirm true'] : []),
+      ];
+      const summary = runtime.state === 'matching'
+        ? '当前 runtime 与项目初始化记录一致；无需迁移。'
+        : runtime.state === 'runtime_changed'
+          ? '检测到 runtime 已变化。Trace 不会自动改写此项目；先检查，再只执行你明确选择的迁移。'
+          : '无法读取项目初始化 lock。Trace 不会猜测或重建它；请先运行 doctor。';
+      productResult(parsed, [
+        'Trace 更新检查（只读）。',
+        `运行中的 runtime：${runtime.current_runtime_version}`,
+        `项目初始化 runtime：${runtime.initialized_runtime_version ?? '不可用'}`,
+        `项目模板：${runtime.template.id}@${runtime.template.project_version}${runtime.template.locked_version === null ? '' : `（lock ${runtime.template.locked_version}）`}`,
+        `协作配置：${activation.configuration_state === 'locked' ? '已 lock；更新不会自动替换个人/项目协作配置。' : '旧项目兼容模式；可显式执行 trace profile migrate --confirm true。'}`,
+        '不会自动改动：SQLite 数据、认知源、模板内容、能力、Skill 或 Codex hooks。',
+        next_actions.length === 0 ? '下一步：继续正常使用；未来需要调整协作方式时执行 trace profile update。' : `建议：${next_actions.join(' → ')}`,
+      ].join('\n'), {
+        status: 'inspected',
+        project: context.project_dir,
+        runtime,
+        collaboration_configuration: {state: activation.configuration_state, locked: activation.activation_lock !== undefined},
+        automatic_changes: [],
+        next_actions,
+        summary,
+      });
       return;
     }
     if (group === 'status') {
@@ -509,6 +593,7 @@ export async function run(argv: string[]): Promise<void> {
       };
       const sourceUsage = hostSourceUsage(state.data);
       const activation = activationConfigurationForContext(context);
+      const runtime = projectRuntimeUpdateView(context, runtimeVersionFor(parsed));
       const snapshot = {
         status: 'ready', project: context.project_dir, template: context.descriptor.template_id, source_mode: context.descriptor.source_mode,
         source_id: typeof sources.source_id === 'string' ? sources.source_id : '未配置', codex: '运行 trace codex status 查看',
@@ -518,14 +603,17 @@ export async function run(argv: string[]): Promise<void> {
         candidate_capabilities: state.data.filter(item => item.kind === 'capability_candidate').length,
         latest_activation: latestActivation,
         host_source_usage: sourceUsage,
-        collaboration: {model_id: activation.collaboration_model.model_id, model_version: activation.collaboration_model.version, source_manifest_id: activation.source_activation.manifest_id, source_manifest_version: activation.source_activation.version, source_entry_points: activation.source_activation.entry_points.length, locked: activation.activation_lock !== undefined},
+        runtime,
+        collaboration: {model_id: activation.collaboration_model.model_id, model_version: activation.collaboration_model.version, source_manifest_id: activation.source_activation.manifest_id, source_manifest_version: activation.source_activation.version, source_entry_points: activation.source_activation.entry_points.length, state: activation.configuration_state, locked: activation.activation_lock !== undefined},
         next_action: inbox.length > 0 ? 'trace inbox' : '继续在 Codex 中协作；值得沉淀的内容会进入 inbox。',
       };
       productResult(parsed, [
         `当前项目：${snapshot.project}`,
         `模板：${snapshot.template}`,
         `认知源：${snapshot.source_mode} / ${snapshot.source_id}`,
+        `Trace runtime：当前 ${runtime.current_runtime_version}；项目初始化 ${runtime.initialized_runtime_version ?? '不可用'}；${runtime.state === 'matching' ? '一致。' : runtime.state === 'runtime_changed' ? '已变化（执行 trace upgrade 查看只读迁移建议）。' : '初始化 lock 不可用（执行 trace doctor）。'}`,
         `协作模型：${activation.collaboration_model.display_name} @ ${activation.collaboration_model.version}；认知源地图入口：${activation.source_activation.entry_points.length}`,
+        ...(activation.configuration_state === 'legacy_unlocked' ? ['协作配置：旧项目兼容模式，尚未 lock；建议执行 trace profile migrate --confirm true。'] : ['协作配置：已由 hash lock 固定。']),
         `开放协作主题：${snapshot.open_threads}`,
         `待确认沉淀：${snapshot.pending_reviews}`,
         `候选前例：${snapshot.candidate_precedents}`,

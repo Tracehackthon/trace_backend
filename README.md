@@ -91,6 +91,7 @@ trace codex enable --dry-run
 trace codex enable
 trace profile
 trace status
+trace upgrade      # 只读检查 runtime 与本项目的版本/迁移状态
 ```
 
 `trace init` 创建项目本地 `.trace/`：项目状态、候选、回执、备份和本地认知源都在这里。它不会复制其他人的 Wiki，也不会自动连接外部个人来源；使用 `--source external --source-profile <配置绝对路径>` 后，来源只在该项目的 hook 事件中按 cwd 加载。
@@ -98,6 +99,8 @@ trace status
 `trace codex enable --dry-run` 先展示将要管理的 Codex hooks；确认执行 `trace codex enable` 后才会写入配置，同时保留原配置备份与回执。
 
 `trace profile` 让用户查看本项目实际交给 Codex 的协作方式、认知源地图和版本 lock；它不显示或写入来源正文。冷启动使用通用 starter，不会假装认识你。需要个人/团队适配时，用本地 profile 显式提供协作契约与安全相对 locator；完整方式见[让 Agent 逐步适配使用者](docs/personalization.md)。
+
+之后拉取或安装新版 Trace 时，先执行 `trace upgrade`：它只显示“运行中的 runtime、项目初始化版本、模板 lock 与协作配置”是否有变化，**不会**自动改写你的 SQLite、认知源、模板、能力、Skill 或 Codex hooks。旧项目若显示 `legacy_unlocked`，可在确认后执行 `trace profile migrate --confirm true`，只把当前兼容协作配置固化为本地 profile/hash lock。完整更新规则见[版本、协议与发布](docs/versioning.md)。
 
 > 从源码仓库开发时，使用 `corepack pnpm exec trace <command>`；发行包安装后的 Windows launcher 同时提供 `trace` 与兼容名称 `trace-runtime`。
 
@@ -109,6 +112,7 @@ trace inbox        # 仍等待你讨论或决定的候选
 trace review <ID>  # 查看候选的理由、范围、保存状态和下一步
 trace sources      # 查看当前项目已授权认知源，以及 Codex 实际检索/读取的安全证据
 trace profile      # 查看 Agent 当前的协作契约、认知源地图及版本 lock
+trace upgrade      # 只读检查运行版本变化和需要你确认的迁移动作
 trace abilities    # 查看候选能力，而非把它们误当作已发布能力
 ```
 

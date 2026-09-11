@@ -111,6 +111,28 @@ test('Codex plugin installer restores the marketplace directory when Codex regis
   } finally { fs.rmSync(directory, {recursive: true, force: true}); }
 });
 
+test('Codex plugin installer never removes an existing marketplace when staging fails before the swap', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-plugin-stage-failure-'));
+  const runtime = path.join(directory, 'broken-runtime');
+  const marketplace = path.join(directory, 'marketplace');
+  try {
+    // pluginFiles() accepts the manifest and runtime entry; writeManagedPlugin()
+    // then fails because a malformed packaged plugin has no .mcp.json.
+    fs.mkdirSync(path.join(runtime, 'plugins', 'trace-codex', '.codex-plugin'), {recursive: true});
+    fs.mkdirSync(path.join(runtime, 'dist', 'apps', 'mcp', 'src'), {recursive: true});
+    fs.writeFileSync(path.join(runtime, 'plugins', 'trace-codex', '.codex-plugin', 'plugin.json'), '{}\n', 'utf8');
+    fs.writeFileSync(path.join(runtime, 'dist', 'apps', 'mcp', 'src', 'main.js'), '', 'utf8');
+    fs.mkdirSync(marketplace, {recursive: true});
+    fs.writeFileSync(path.join(marketplace, 'sentinel'), 'preserve this marketplace', 'utf8');
+
+    const failed = spawnSync(process.execPath, [codexPluginInstaller, '--runtime-root', runtime, '--marketplace-root', marketplace, '--replace', '--confirm', 'true'], {encoding: 'utf8'});
+    assert.notEqual(failed.status, 0);
+    assert.equal(fs.readFileSync(path.join(marketplace, 'sentinel'), 'utf8'), 'preserve this marketplace');
+    assert.deepEqual(fs.readdirSync(directory).filter(name => name.startsWith('marketplace.previous-')), [], 'the old marketplace must not be moved before staging succeeds');
+    assert.deepEqual(fs.readdirSync(directory).filter(name => name.startsWith('marketplace.staging-')), [], 'failed staging is cleaned up without touching the old marketplace');
+  } finally { fs.rmSync(directory, {recursive: true, force: true}); }
+});
+
 function fakeCodexCommand(directory) {
   const stateFile = path.join(directory, 'fake-codex-state.json');
   const scriptFile = path.join(directory, 'fake-codex.mjs');

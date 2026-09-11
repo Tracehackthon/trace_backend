@@ -120,7 +120,7 @@ function rollbackJournal(file, value) {
   try { fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n', {encoding: 'utf8', flag: 'wx'}); return file; }
   catch { return undefined; }
 }
-function rollbackTransaction({options, marketplaceRoot, staging, backup, priorRegistered, registeredByThisRun, priorPluginRemoved, cause}) {
+function rollbackTransaction({options, marketplaceRoot, staging, backup, priorRegistered, registeredByThisRun, priorPluginRemoved, transaction, cause}) {
   const steps = [];
   const attempt = (name, operation) => {
     try { operation(); steps.push({name, status: 'ok'}); }
@@ -135,21 +135,26 @@ function rollbackTransaction({options, marketplaceRoot, staging, backup, priorRe
     if (result.ok) { newRegistrationReleased = true; steps.push({name: 'unregister_new_marketplace', status: 'ok'}); }
     else steps.push({name: 'unregister_new_marketplace', status: 'failed', error: result.output || 'Codex did not remove the Trace marketplace'});
   }
-  if (backup && fs.existsSync(backup)) {
+  if (transaction.previousMarketplaceMoved && backup && fs.existsSync(backup)) {
     // Never delete a directory while Codex still has a registration pointing at
     // it; preserving a usable staged directory is safer than a broken path.
-    if (newRegistrationReleased && fs.existsSync(marketplaceRoot)) attempt('remove_new_marketplace_directory', () => fs.rmSync(marketplaceRoot, {recursive: true, force: true}));
+    if (newRegistrationReleased && transaction.newMarketplaceInstalled && fs.existsSync(marketplaceRoot)) attempt('remove_new_marketplace_directory', () => fs.rmSync(marketplaceRoot, {recursive: true, force: true}));
     if (newRegistrationReleased && !fs.existsSync(marketplaceRoot)) attempt('restore_previous_marketplace_directory', () => fs.renameSync(backup, marketplaceRoot));
     // A successful refresh removes the old plugin before adding the new one.
     // If adding failed, restore the exact managed plugin only when it had been
     // registered before this transaction; otherwise preserve the prior absence.
     if (priorPluginRemoved && priorRegistered && fs.existsSync(marketplaceRoot)) attempt('restore_previous_managed_plugin', () => runCodex(options.codexCommand, ['plugin', 'add', PLUGIN, '--json'], options.codexArgs));
-  } else {
-    if (newRegistrationReleased && fs.existsSync(marketplaceRoot)) attempt('remove_new_marketplace_directory', () => fs.rmSync(marketplaceRoot, {recursive: true, force: true}));
+  } else if (transaction.newMarketplaceInstalled && newRegistrationReleased && fs.existsSync(marketplaceRoot)) {
+    // Before the swap, marketplaceRoot is the user's pre-existing directory.
+    // Only remove a root this transaction actually installed.
+    attempt('remove_new_marketplace_directory', () => fs.rmSync(marketplaceRoot, {recursive: true, force: true}));
   }
-  const clean = newRegistrationReleased && steps.every(step => step.status === 'ok')
-    && (!backup || fs.existsSync(marketplaceRoot))
-    && (backup || !fs.existsSync(marketplaceRoot));
+  const originalMarketplaceRestored = transaction.previousMarketplaceMoved
+    ? Boolean(backup && fs.existsSync(marketplaceRoot) && !fs.existsSync(backup))
+    : backup !== null
+      ? fs.existsSync(marketplaceRoot)
+      : !fs.existsSync(marketplaceRoot);
+  const clean = newRegistrationReleased && !fs.existsSync(staging) && originalMarketplaceRestored && steps.every(step => step.status === 'ok');
   const journal = `${marketplaceRoot}.install-failure-${Date.now()}.json`;
   const journalFile = rollbackJournal(journal, {
     journal_id: 'trace.codex-plugin-install-failure',
@@ -157,6 +162,7 @@ function rollbackTransaction({options, marketplaceRoot, staging, backup, priorRe
     cause: cause instanceof Error ? cause.message : String(cause),
     marketplace: MARKETPLACE,
     plugin: PLUGIN,
+    transaction,
     rollback_clean: clean,
     steps,
   });
@@ -182,12 +188,15 @@ function install(options) {
   const priorRegistered = marketplaceIsRegistered(options.codexCommand, options.codexArgs);
   let registeredByThisRun = false;
   let priorPluginRemoved = false;
+  const transaction = {stagingCreated: false, previousMarketplaceMoved: false, newMarketplaceInstalled: false};
   try {
     fs.mkdirSync(staging, {recursive: true});
+    transaction.stagingCreated = true;
     writeManagedPlugin(plugin, staging, runtimeRoot);
     fs.writeFileSync(path.join(staging, 'marketplace.json'), JSON.stringify(managedMarketplace(), null, 2) + '\n', {encoding: 'utf8', flag: 'wx'});
-    if (backup) fs.renameSync(marketplaceRoot, backup);
+    if (backup) { fs.renameSync(marketplaceRoot, backup); transaction.previousMarketplaceMoved = true; }
     fs.renameSync(staging, marketplaceRoot);
+    transaction.newMarketplaceInstalled = true;
     const marketplaceOutput = priorRegistered ? 'already registered' : runCodex(options.codexCommand, ['plugin', 'marketplace', 'add', marketplaceRoot], options.codexArgs);
     registeredByThisRun = !priorRegistered;
     const removed = backup ? removeManagedPluginIfPresent(options.codexCommand, options.codexArgs) : {removed: false, output: 'not requested'};
@@ -195,7 +204,7 @@ function install(options) {
     const pluginOutput = runCodex(options.codexCommand, ['plugin', 'add', PLUGIN, '--json'], options.codexArgs);
     return {...plan, status: 'installed', backup_marketplace: backup, codex: {marketplace: marketplaceOutput, removed, plugin: pluginOutput}};
   } catch (cause) {
-    const rollback = rollbackTransaction({options, marketplaceRoot, staging, backup, priorRegistered, registeredByThisRun, priorPluginRemoved, cause});
+    const rollback = rollbackTransaction({options, marketplaceRoot, staging, backup, priorRegistered, registeredByThisRun, priorPluginRemoved, transaction, cause});
     if (!rollback.clean) throw new PluginInstallError('PARTIAL_ROLLBACK_REQUIRED', 'Trace could not fully restore the prior Codex marketplace state. Inspect the rollback journal before retrying.', rollback.journal);
     throw new PluginInstallError(cause instanceof PluginInstallError ? cause.code : 'INSTALL_FAILED', cause instanceof Error ? cause.message : String(cause), rollback.journal);
   }

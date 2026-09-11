@@ -18,7 +18,7 @@ Trace 的架构不是从“数据库、RAG 或 hook”倒推出来的，而是�
 
 Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。Codex 的用户级 hook 不携带某个固定项目路径，而是按每个事件的 `cwd` 找到最近 `.trace/`，再加载该项目 profile 与状态库；非 Trace 项目成功 no-op。它们可以传递 event、引用、correlation 与 causation，但不能绕过 runtime 直接写 SQLite / JSONL。
 
-对于认知源检索，职责不是“Trace 检索、Codex 读取预选页”，而是：`UserPromptSubmit` 先编译版本化的协作模型与来源地图（不含来源正文），再给当前宿主 source lease（正式根、prefix、预算）；Codex 使用自己的 native search/read/tool 能力决定实际访问；`PreToolUse` 对可识别 read 检查预算；`PostToolUse` 把实际访问写成无正文的 `host_retrieval_evidence`。个人/项目地图存于 ignored `profiles/`，`instance/activation.lock.json` 只保存身份/hash；配置变更通过显式更新与备份，避免隐式 drift；source profile 漂移时不发出 source lease，必须走显式 source update。因此用户可区分来源已提供、已搜索、已读取与未分类访问，不会把一个 pointer 当成 Agent 已读。完整协议见 [Codex 原生检索与 Trace 证据架构](host-native-retrieval.md) 与[适配使用者](personalization.md)。
+对于认知源检索，职责不是“Trace 检索、Codex 读取预选页”，而是：`UserPromptSubmit` 先编译版本化的协作模型与来源地图（不含来源正文），再给当前宿主 source lease（正式根、prefix、预算）；Codex 使用自己的 native search/read/tool 能力决定实际访问；`PreToolUse` 对可识别 read 检查预算；`PostToolUse` 把实际访问写成无正文的 `host_retrieval_evidence`。个人/项目地图存于 ignored `profiles/`，`instance/activation.lock.json` 只保存身份/hash；配置变更通过显式更新与备份，避免隐式 drift；source profile 漂移时不发出 source lease。`external` / `team` 的已审阅 profile 只能通过显式 source update 刷新 lock；`local` 固定指向该项目的 `.trace/source`，`empty` 固定禁用，二者不能藉 profile 更新取得任意外部 root，来源类型切换必须由单独的 selection migration 承担。因此用户可区分来源已提供、已搜索、已读取与未分类访问，不会把一个 pointer 当成 Agent 已读。完整协议见 [Codex 原生检索与 Trace 证据架构](host-native-retrieval.md) 与[适配使用者](personalization.md)。
 
 Desktop 与 DeepSeek Harness 仍是明确未实现的宿主边界：目录存在不等于产品已接入。真实 lifecycle、权限、事件顺序、replay、deactivate 与 rollback 必须先有可验证契约。
 

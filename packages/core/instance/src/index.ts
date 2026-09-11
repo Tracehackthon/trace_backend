@@ -95,6 +95,11 @@ function absolute(value: unknown, field: string): string {
   if (!path.isAbsolute(resolved)) throw new ProtocolError('INVALID_INPUT', `${field} must be absolute`);
   return resolved;
 }
+function sameAbsolutePath(left: string, right: string): boolean {
+  const normalize = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  return normalize(left) === normalize(right);
+}
+function projectManagedSourceRoot(traceDir: string): string { return path.join(traceDir, 'source'); }
 function sha256(value: string): string { return createHash('sha256').update(value, 'utf8').digest('hex'); }
 function json(value: unknown): string { return `${JSON.stringify(value, null, 2)}\n`; }
 function ensureDirectory(dir: string): void { fs.mkdirSync(dir, {recursive: true}); }
@@ -175,6 +180,27 @@ function selectedSourceFromLock(value: unknown): NonNullable<TemplateInstanceLoc
 }
 
 /**
+ * `local` and `empty` are descriptor-owned source modes, not editable aliases
+ * for an arbitrary external root. Their root and, for `empty`, their disabled
+ * policy are therefore invariant even when a profile hash has been refreshed.
+ */
+function assertProjectSourceDescriptorInvariant(input: {trace_dir: string; profile: ProjectSourceProfileInput; source_mode?: ProjectSourceMode; source_scope?: ProjectScopeType}): void {
+  const mode = input.source_mode ?? input.profile.source_mode;
+  const scope = input.source_scope ?? input.profile.scope_type;
+  if (mode === undefined || scope === undefined) throw new ProtocolError('SOURCE_DESCRIPTOR_INVARIANT', 'The selected source profile is missing its descriptor mode or scope');
+  if (input.profile.source_mode !== mode || input.profile.scope_type !== scope) throw new ProtocolError('SOURCE_DESCRIPTOR_INVARIANT', 'The selected source profile does not match this project source descriptor');
+  if (mode !== 'local' && mode !== 'empty') return;
+  if (scope !== 'project' || !sameAbsolutePath(input.profile.root, projectManagedSourceRoot(input.trace_dir))) {
+    throw new ProtocolError('SOURCE_DESCRIPTOR_INVARIANT', `${mode} sources must retain the project-local Trace source root`);
+  }
+  if (mode === 'empty') {
+    if (input.profile.read_enabled !== false || input.profile.write_enabled !== false || input.profile.host_retrieval?.mode !== 'disabled') {
+      throw new ProtocolError('SOURCE_DESCRIPTOR_INVARIANT', 'An empty source must remain disabled and cannot issue a source lease');
+    }
+  }
+}
+
+/**
  * A host may receive only a source profile whose exact on-disk bytes match the
  * project-local selected-source lock.  This protects a Codex event routed by
  * cwd from silently acquiring a newly edited absolute root.
@@ -200,6 +226,7 @@ export function loadLockedProjectSourceProfile(input: {trace_dir: string; source
   if (sha256(profileText) !== selected.profile_hash || profile.source_id !== selected.source_id || profile.scope_type !== selected.scope_type) sourceProfileLockMismatch();
   if (input.source_mode !== undefined && profile.source_mode !== input.source_mode) sourceProfileLockMismatch('The source profile mode differs from the project descriptor. No source lease was issued.');
   if (input.source_scope !== undefined && profile.scope_type !== input.source_scope) sourceProfileLockMismatch('The source profile scope differs from the project descriptor. No source lease was issued.');
+  assertProjectSourceDescriptorInvariant({trace_dir: traceDir, profile, ...(input.source_mode === undefined ? {} : {source_mode: input.source_mode}), ...(input.source_scope === undefined ? {} : {source_scope: input.source_scope})});
   return profile;
 }
 
@@ -305,6 +332,10 @@ export function updateProjectSourceProfile(input: {trace_dir: string; source_mod
   const traceDir = absolute(input.trace_dir, 'trace_dir');
   const profile = validateStoredSourceProfile(input.next_source_profile);
   if (profile.source_mode !== input.source_mode || profile.scope_type !== input.source_scope) throw new ProtocolError('SOURCE_PROFILE_LOCK_MISMATCH', 'The proposed source profile mode or scope does not match this project');
+  if (input.source_mode === 'local' || input.source_mode === 'empty') {
+    throw new ProtocolError('SOURCE_SELECTION_MIGRATION_REQUIRED', `${input.source_mode} sources are project-owned and cannot be replaced with source update; use an explicit source-selection migration`);
+  }
+  assertProjectSourceDescriptorInvariant({trace_dir: traceDir, profile, source_mode: input.source_mode, source_scope: input.source_scope});
   const lockFile = path.join(traceDir, 'instance', 'trace.lock.json');
   const profileFile = path.join(traceDir, 'profiles', 'source.profile.json');
   if (!fs.existsSync(lockFile) || !fs.existsSync(profileFile)) throw new ProtocolError('SOURCE_PROFILE_LOCK_REQUIRED', 'This project is missing its source profile or source lock');

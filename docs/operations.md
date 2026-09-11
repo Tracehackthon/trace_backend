@@ -32,6 +32,6 @@ trace backup restore --file <备份文件绝对路径> --replace
 
 ## SQLite driver
 
-Node `>=24.2.0` 默认使用稳定 `node:sqlite`。Node 22–24.1 默认使用随发行包提供的 `sql.js` asm fallback，不会加载实验性的 `node:sqlite`，也不需要 node-gyp 或本机编译器。
+Node `>=24.2.0` 默认使用稳定 `node:sqlite`。Node 22–24.1 默认使用随发行包提供的 `sql.js` asm fallback，不会加载实验性的 `node:sqlite`，也不需要 node-gyp 或本机编译器。两种 driver 都只接受单条 SQL statement；`all()` / `get()` 只接受只读查询（含安全的 CTE `SELECT` 与完整性检查），避免 driver 差异把查询接口变成写入路径。
 
 这是本地项目状态边界，不是多用户共享目录或网络文件系统的并发承诺。需要诊断 driver、correlation 或底层状态时使用 `trace --help --advanced`。

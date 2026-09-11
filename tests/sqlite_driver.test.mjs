@@ -53,3 +53,47 @@ test('sql.js all/get enforce the query boundary and cannot mutate through a read
     assert.equal(stillWritable.db.prepare('SELECT COUNT(*) AS count FROM evidence').get().count, 1);
   } finally { stillWritable.db.close(); }
 });
+
+function verifiedDrivers() {
+  const drivers = ['sql.js'];
+  if (!hasStableNodeSqlite()) return drivers;
+  const database = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-native-sqlite-probe-')), 'trace.sqlite');
+  try {
+    const opened = openSqlite(database, {driver: 'node'});
+    opened.db.close();
+    drivers.push('node');
+  } catch { /* A stable-version check does not promise a vendor-built node:sqlite module. */ }
+  return drivers;
+}
+
+test('every SQLite driver rejects multi-statement reads and preserves a uniform query boundary', () => {
+  for (const driver of verifiedDrivers()) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `trace-sqlite-statement-${driver.replace(/[^a-z]/g, '')}-`));
+    const database = path.join(directory, 'trace.sqlite');
+    const writable = openSqlite(database, {driver});
+    try {
+      writable.db.exec('CREATE TABLE evidence(value TEXT NOT NULL)');
+      writable.db.prepare('INSERT INTO evidence(value) VALUES (?)').run('keep');
+      assert.equal(writable.db.prepare('-- leading comment\nSELECT value FROM evidence;').get().value, 'keep', `${driver}: line-comment query`);
+      assert.equal(writable.db.prepare('WITH q AS (SELECT value FROM evidence) SELECT value FROM q').get().value, 'keep', `${driver}: CTE SELECT`);
+      assert.throws(() => writable.db.prepare('WITH q AS (SELECT value FROM evidence) DELETE FROM evidence RETURNING value').all(), error => error?.code === 'SQLITE_QUERY_REQUIRED', `${driver}: writable CTE is not a query`);
+      for (const multiStatement of ['SELECT 1; DELETE FROM evidence', 'PRAGMA integrity_check; DELETE FROM evidence']) {
+        assert.throws(() => writable.db.exec(multiStatement), error => error?.code === 'SQLITE_MULTIPLE_STATEMENTS', `${driver}: exec rejects ${multiStatement}`);
+        assert.throws(() => writable.db.prepare(multiStatement).all(), error => error?.code === 'SQLITE_MULTIPLE_STATEMENTS', `${driver}: all rejects ${multiStatement}`);
+      }
+      assert.equal(writable.db.prepare('SELECT COUNT(*) AS count FROM evidence').get().count, 1, `${driver}: no multi-statement write happened`);
+      assert.throws(() => writable.db.prepare('DELETE FROM evidence').all(), error => error?.code === 'SQLITE_QUERY_REQUIRED', `${driver}: writable all() rejects DML`);
+    } finally { writable.db.close(); }
+
+    const readOnly = openSqlite(database, {driver, readOnly: true});
+    try {
+      assert.equal(readOnly.db.prepare('WITH q AS (SELECT value FROM evidence) SELECT value FROM q').get().value, 'keep', `${driver}: read-only CTE SELECT`);
+      assert.throws(() => readOnly.db.exec('SELECT 1; DELETE FROM evidence'), error => error?.code === 'SQLITE_MULTIPLE_STATEMENTS', `${driver}: read-only exec cannot smuggle DELETE`);
+      assert.throws(() => readOnly.db.prepare('DELETE FROM evidence').get(), error => error?.code === 'SQLITE_READ_ONLY', `${driver}: read-only get rejects DML`);
+    } finally { readOnly.db.close(); }
+
+    const verify = openSqlite(database, {driver});
+    try { assert.equal(verify.db.prepare('SELECT COUNT(*) AS count FROM evidence').get().count, 1, `${driver}: read-only handle left data intact`); }
+    finally { verify.db.close(); fs.rmSync(directory, {recursive: true, force: true}); }
+  }
+});

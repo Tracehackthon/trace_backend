@@ -53,8 +53,8 @@
     },
     {
       "path": ".changeset/harden-codex-source-boundary.md",
-      "sha256": "d3a106376331796eab1e7caaf15cf13aa17c1e60b91063f853ade8cab34a7b89",
-      "bytes": 557
+      "sha256": "75712178b9498e354265dd4f94ac1c38a8c54792188b40c6300245224be05860",
+      "bytes": 759
     },
     {
       "path": ".changeset/modernize-trace-runtime.md",
@@ -83,8 +83,8 @@
     },
     {
       "path": "apps/cli/src/main.ts",
-      "sha256": "9d3fe1bc41530e77c5f3f4f005e4c9f97b5700a7b4b6d1a6d10c10907fdcb23d",
-      "bytes": 87456
+      "sha256": "72611f28abe8ee2bf226ad75b1b9ba484c8717517fee6ebb611881643d65c670",
+      "bytes": 87471
     },
     {
       "path": "apps/codex/package.json",
@@ -98,8 +98,8 @@
     },
     {
       "path": "apps/codex/src/index.ts",
-      "sha256": "78775695213d41bb2b3f443a73a4e6e5991ed92e45be73f87c6c6b538f17d5ca",
-      "bytes": 22714
+      "sha256": "27454e7a7ae199f655fe4a4731b79a6bef80cb4c7f27743c1e36c2cbbd876a29",
+      "bytes": 22941
     },
     {
       "path": "apps/desktop/package.json",
@@ -143,8 +143,8 @@
     },
     {
       "path": "docs/architecture.md",
-      "sha256": "d07acb8f554c51314d23b1068fbe1d559c98b3c4d6cc0ca46dc8b0c580d6ec8d",
-      "bytes": 3910
+      "sha256": "3ff4e6fa64e92ed0ea598725176d9d176999252576b9b4b4eb029cbc25692d00",
+      "bytes": 4161
     },
     {
       "path": "docs/codex-plugin.md",
@@ -168,8 +168,8 @@
     },
     {
       "path": "docs/operations.md",
-      "sha256": "57d12047c49e45c5f3d09dc997b44665a98d34de102b162ae15231367156c403",
-      "bytes": 1272
+      "sha256": "de5af275e4f1e4d208104a3afcba47c740dc48f272bc0e28b0abe278bf0e8b3e",
+      "bytes": 1470
     },
     {
       "path": "docs/personalization.md",
@@ -183,8 +183,8 @@
     },
     {
       "path": "docs/versioning.md",
-      "sha256": "6082a30221935b0df53417de2e0aee83b7d006165be99931116afa239107bc6f",
-      "bytes": 9288
+      "sha256": "3eb26dd1c5ba0090886412afa3a5c98bc02bbeaee9b7c1a8ba0dc231fe1ebbe4",
+      "bytes": 9514
     },
     {
       "path": "GIT_REMOTE_SETUP.md",
@@ -213,8 +213,8 @@
     },
     {
       "path": "native/install-codex-plugin.mjs",
-      "sha256": "0588053db6bcfb3ee7395fef8da8602f6cdc66f27f519a421110c14aaeffe8f4",
-      "bytes": 13246
+      "sha256": "444cdc0da849c4d5c0460cacc62f97b8c68fa0e886bb5876b968163e234d8969",
+      "bytes": 13989
     },
     {
       "path": "native/install.mjs",
@@ -243,8 +243,8 @@
     },
     {
       "path": "native/README.md",
-      "sha256": "ca084b9786484321c400f5fb80604f3d77c1bdf13fa31a5ea5197db0cb374412",
-      "bytes": 2651
+      "sha256": "2c458226c33bec03a373386c8351c503faae30ff6285cb8aaa257084c7453339",
+      "bytes": 2827
     },
     {
       "path": "package.json",
@@ -428,8 +428,8 @@
     },
     {
       "path": "packages/core/instance/src/index.ts",
-      "sha256": "7c7136a96e8c1e9e78966d05d80f5b1b36136b2b5590e58d638645f258c7ce2f",
-      "bytes": 33238
+      "sha256": "78bc71df4aeb42289ea251bc0b4afd6fb3de3da136e2559ff6021c30b3216fd5",
+      "bytes": 35775
     },
     {
       "path": "packages/core/migration/package.json",
@@ -593,8 +593,8 @@
     },
     {
       "path": "packages/core/storage/src/sqlite-driver.ts",
-      "sha256": "fd4fe89ea7f92d4bc1bf22dd10c2fa8b150163c9c6f66f3fde31195598e44dd9",
-      "bytes": 13719
+      "sha256": "a8b784221937bffbcddb8f40b3969e90405256ac62c1fc902cc452f7e517bd46",
+      "bytes": 21296
     },
     {
       "path": "packages/core/storage/src/sqlite.ts",
@@ -928,8 +928,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "6a853ae8fbcc609f64d18a13a9e6c194ca4e170e0d4d746f17ea98acddd6cc68",
-      "bytes": 9697
+      "sha256": "4d76786b5c0c65485fc96cc102168bde4cca447a0ec407c2dc3ad8452699b99a",
+      "bytes": 9969
     },
     {
       "path": "schemas/README.md",
@@ -1233,8 +1233,8 @@
     },
     {
       "path": "tests/codex_hook_routing.test.mjs",
-      "sha256": "2a6cd46734f45aa51f4ad2dc2cac39527ad42331c78a68a9a4995ef4ff49154f",
-      "bytes": 13542
+      "sha256": "68fd295870d99559b5c37dab410e054e5ee5b92ec7156aadd6c9b1d76de1dc76",
+      "bytes": 16751
     },
     {
       "path": "tests/codex_trigger.test.mjs",
@@ -1373,8 +1373,8 @@
     },
     {
       "path": "tests/native.test.mjs",
-      "sha256": "8bebe7a2e9ec985caa9834efb29f626b81d4ceabba31e264c63d41fbaf72a7a8",
-      "bytes": 10656
+      "sha256": "e785999c2d03925910196d4ceadb94b1f8e0cc1fff59815e67a41c2f09c5ab00",
+      "bytes": 12440
     },
     {
       "path": "tests/plugin-contract.test.mjs",
@@ -1458,8 +1458,8 @@
     },
     {
       "path": "tests/sqlite_driver.test.mjs",
-      "sha256": "7c90ef5d0d85dfce7c29107647ea8de386b90865402b99fb2a66e601dddc3dc9",
-      "bytes": 3691
+      "sha256": "18db5670d07377d1f482971ac58e5d14c77cb7050c9677f0994f32886a094e78",
+      "bytes": 6945
     },
     {
       "path": "tests/templates_assets.test.mjs",
@@ -1507,5 +1507,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-11T06:14:31.141Z"
+  "created_at": "2026-09-11T07:53:42.104Z"
 }

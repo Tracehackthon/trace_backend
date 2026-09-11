@@ -165,6 +165,9 @@ function sourceScope(profile: MyWikiSourceProfile): {type: 'personal' | 'project
 
 function sourceAvailability(sourceProfile: MyWikiSourceProfile | undefined): {status: SourceAvailability; resolved?: ResolvedSourceAccess} {
   if (sourceProfile === undefined) return {status: 'unconfigured'};
+  // Defense in depth: a descriptor-owned empty source never becomes a live
+  // lease merely because a caller constructs a permissive provider profile.
+  if (sourceProfile.source_mode === 'empty') return {status: 'disabled'};
   if (sourceProfile.read_enabled === false) return {status: 'disabled'};
   try {
     const provider = new MyWikiSourceProvider(sourceProfile);

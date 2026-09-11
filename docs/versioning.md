@@ -59,7 +59,7 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 
 `collaboration-model.json` 和 `source-activation.json` 是用户/项目本地配置，版本字段表达协作语义或地图内容的变化；它们不进入项目 Git。`activation.lock.json` 可提交但只保留两份配置的 id、version 和 SHA-256。这样团队可以审核“本项目锁定哪一版”，同时不会接收其他人的私有条款、来源 root 或正文。
 
-更新必须走显式的 `trace profile update --file <ABS> --confirm true`：runtime 先校验 schema、来源 ID、relative locator 和 host policy，再备份旧配置、更新 lock。手改 source profile 后，hash 与 lock 不符会 fail-closed；先审阅新 profile，再执行 `trace source update --file <ABS> --confirm true` 才会原子刷新 selected-source lock。协作模型/来源地图仍使用 `trace profile update`。这比静默把 Agent 换到新上下文更可回放。详见[适配使用者](personalization.md)。
+更新必须走显式的 `trace profile update --file <ABS> --confirm true`：runtime 先校验 schema、来源 ID、relative locator 和 host policy，再备份旧配置、更新 lock。手改 source profile 后，hash 与 lock 不符会 fail-closed；先审阅 `external` / `team` 的新 profile，再执行 `trace source update --file <ABS> --confirm true` 才会原子刷新 selected-source lock。`local` 固定为项目 `.trace/source`，`empty` 固定为禁用，不接受此命令作为外部来源转换；需要改变来源类型时，必须等待并采用单独的 source-selection migration。协作模型/来源地图仍使用 `trace profile update`。这比静默把 Agent 换到新上下文更可回放。详见[适配使用者](personalization.md)。
 
 ## 发布决策顺序
 

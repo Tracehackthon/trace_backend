@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {openSqlite} from '../dist/packages/core/storage/src/index.js';
 
 const root = path.resolve(process.cwd());
@@ -206,4 +207,52 @@ test('a profile edit cannot expand a cwd-routed source lease until an explicit s
   const output = invokeGlobalHook(project.project, {hook_event_name: 'UserPromptSubmit', cwd: project.project, session_id: 'drift-session', prompt: 'now use the approved source'});
   const visible = visibleHookOutput(output);
   assert.deepEqual(visible.source_access.allowed_roots, [path.join(changedRoot, 'wiki')]);
+});
+
+test('descriptor-owned local and empty sources cannot be converted into external leases through source update or a forged matching lock', () => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-owned-source-'));
+  const hash = value => createHash('sha256').update(value, 'utf8').digest('hex');
+  try {
+    for (const mode of ['local', 'empty']) {
+      const project = path.join(sandbox, `project-${mode}`);
+      const outside = path.join(sandbox, `outside-${mode}`);
+      fs.mkdirSync(project, {recursive: true});
+      fs.mkdirSync(path.join(outside, 'wiki'), {recursive: true});
+      runJson(['init', '--project-dir', project, '--source', mode, '--json']);
+
+      if (mode === 'empty') {
+        const initial = visibleHookOutput(invokeGlobalHook(project, {hook_event_name: 'UserPromptSubmit', cwd: project, session_id: 'empty-session', prompt: 'do not offer a source lease'}));
+        assert.equal(initial.source_status, 'disabled');
+        assert.equal('source_access' in initial, false);
+      }
+
+      const profileFile = path.join(project, '.trace', 'profiles', 'source.profile.json');
+      const proposed = JSON.parse(fs.readFileSync(profileFile, 'utf8'));
+      proposed.root = outside;
+      proposed.read_enabled = true;
+      proposed.host_retrieval = {mode: 'native_observed', allowed_prefixes: ['wiki'], max_reads_per_turn: 8};
+      const proposalFile = path.join(sandbox, `${mode}-outside-profile.json`);
+      fs.writeFileSync(proposalFile, JSON.stringify(proposed, null, 2) + '\n', 'utf8');
+
+      const rejectedUpdate = run(['source', 'update', '--project-dir', project, '--file', proposalFile, '--confirm', 'true', '--json']);
+      assert.notEqual(rejectedUpdate.status, 0, `${mode}: project-owned sources cannot use source update`);
+      assert.match(`${rejectedUpdate.stdout}\n${rejectedUpdate.stderr}`, /SOURCE_SELECTION_MIGRATION_REQUIRED/);
+
+      // Even if an untrusted project edits both profile and selected-source hash,
+      // the immutable descriptor semantics still refuse a host lease.
+      const forgedProfile = fs.readFileSync(proposalFile, 'utf8');
+      fs.writeFileSync(profileFile, forgedProfile, 'utf8');
+      const lockFile = path.join(project, '.trace', 'instance', 'trace.lock.json');
+      const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+      lock.selected_source.profile_hash = hash(forgedProfile);
+      fs.writeFileSync(lockFile, JSON.stringify(lock, null, 2) + '\n', 'utf8');
+      const forgedLease = run(['internal', 'codex', 'hook-stdio', '--route-from-event-cwd'], {
+        input: JSON.stringify({hook_event_name: 'UserPromptSubmit', cwd: project, session_id: `${mode}-forged-session`, prompt: 'do not disclose an outside source root'}),
+      });
+      assert.notEqual(forgedLease.status, 0, `${mode}: forged lock must not issue a source lease`);
+      const failure = `${forgedLease.stdout}\n${forgedLease.stderr}`;
+      assert.match(failure, /SOURCE_DESCRIPTOR_INVARIANT/);
+      assert.equal(failure.includes(outside), false, `${mode}: failed lease must not disclose the forged root`);
+    }
+  } finally { fs.rmSync(sandbox, {recursive: true, force: true}); }
 });

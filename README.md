@@ -132,7 +132,7 @@ Trace 把“安装新版”与“迁移用户项目”严格分开：
 | 使用新 starter 初始化项目 | 不会把 starter 反写到旧项目 |
 | 检查版本差异 | 不会执行升级或重建状态 |
 
-已有 lock 的项目继续使用自己的 profile。更早的项目会显示为 `legacy_unlocked`，先让用户审阅兼容配置；只有明确 adopt 后，才把当前配置固化为 lock。未知协议、缺少 upcaster 或 source profile / lock hash 漂移会 fail-closed，不会静默“修好”。profile 被有意修改时，先审阅新 profile，再显式执行 `trace source update --file <绝对路径> --confirm true` 写入新的 lock。
+已有 lock 的项目继续使用自己的 profile。更早的项目会显示为 `legacy_unlocked`，先让用户审阅兼容配置；只有明确 adopt 后，才把当前配置固化为 lock。未知协议、缺少 upcaster 或 source profile / lock hash 漂移会 fail-closed，不会静默“修好”。`external` / `team` profile 被有意修改时，先审阅新 profile，再显式执行 `trace source update --file <绝对路径> --confirm true` 写入新的 lock。`local` 与 `empty` 属于项目拥有的来源边界：前者固定在项目 `.trace/source`，后者始终不发出来源 lease；它们不能借由 profile update 变成外部来源，切换来源必须走未来单独的 source-selection migration。
 
 ## 3 分钟开始
 

@@ -26,7 +26,7 @@ node <installed-runtime-directory>\native\install-codex-plugin.mjs --dry-run
 node <installed-runtime-directory>\native\install-codex-plugin.mjs --confirm true
 ```
 
-它会复制受管理的 Plugin marketplace、注册 `trace-codex` 并为其 MCP 写入 runtime 位置；**不会**创建或升级项目 `.trace/`、读取认知源、迁移 profile，或启用 hooks。更新 Plugin 才显式追加 `--replace`，且只刷新 `trace-codex@trace-runtime-local`。安装失败会尝试恢复旧 marketplace；若无法完整恢复，会留下失败 journal，必须先审阅它再重试。
+它会复制受管理的 Plugin marketplace、注册 `trace-codex` 并为其 MCP 写入 runtime 位置；**不会**创建或升级项目 `.trace/`、读取认知源、迁移 profile，或启用 hooks。更新 Plugin 才显式追加 `--replace`，且只刷新 `trace-codex@trace-runtime-local`。安装先在 staging 完成 Plugin 校验，旧 marketplace 只有在 staging 成功后才会移动；因此 staging 失败不会触碰已有 marketplace。交换之后若失败，安装器会尝试恢复旧 marketplace；若无法完整恢复，会留下失败 journal，必须先审阅它再重试。
 
 完整的项目状态和版本行为见[Codex Plugin 文档](../docs/codex-plugin.md)与[版本、协议与发布](../docs/versioning.md)。
 

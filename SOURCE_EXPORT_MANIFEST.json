@@ -1458,8 +1458,8 @@
     },
     {
       "path": "tests/sqlite_driver.test.mjs",
-      "sha256": "18db5670d07377d1f482971ac58e5d14c77cb7050c9677f0994f32886a094e78",
-      "bytes": 6945
+      "sha256": "1969d3b7f0fc99827f713dc2ed81c07204a6b289f00c06a4700f423a3c40585d",
+      "bytes": 6884
     },
     {
       "path": "tests/templates_assets.test.mjs",
@@ -1507,5 +1507,5 @@
       "bytes": 409
     }
   ],
-  "created_at": "2026-09-11T07:53:42.104Z"
+  "created_at": "2026-09-11T07:55:58.805Z"
 }

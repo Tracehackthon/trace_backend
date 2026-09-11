@@ -56,13 +56,12 @@ test('sql.js all/get enforce the query boundary and cannot mutate through a read
 
 function verifiedDrivers() {
   const drivers = ['sql.js'];
-  if (!hasStableNodeSqlite()) return drivers;
   const database = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-native-sqlite-probe-')), 'trace.sqlite');
   try {
     const opened = openSqlite(database, {driver: 'node'});
     opened.db.close();
     drivers.push('node');
-  } catch { /* A stable-version check does not promise a vendor-built node:sqlite module. */ }
+  } catch { /* A Node version or vendor build may not provide node:sqlite. */ }
   return drivers;
 }
 

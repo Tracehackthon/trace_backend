@@ -179,3 +179,31 @@ test('a single user-level Codex hook routes by event cwd, delegates retrieval to
   assert.deepEqual(noOp, {});
   assert.equal(fs.existsSync(path.join(unrelated, '.trace')), false);
 });
+
+test('a profile edit cannot expand a cwd-routed source lease until an explicit source update refreshes its lock', () => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-source-drift-'));
+  const project = createExternalProject(sandbox, 'drift', 'DRIFT_ORIGINAL', 'original body');
+  const profileFile = path.join(project.project, '.trace', 'profiles', 'source.profile.json');
+  const changedRoot = path.join(sandbox, 'source-drift-replacement'); fs.mkdirSync(path.join(changedRoot, 'wiki'), {recursive: true});
+  const changed = JSON.parse(fs.readFileSync(profileFile, 'utf8')); changed.root = changedRoot;
+  fs.writeFileSync(profileFile, JSON.stringify(changed, null, 2) + '\n', 'utf8');
+
+  const failed = run(['internal', 'codex', 'hook-stdio', '--route-from-event-cwd'], {
+    input: JSON.stringify({hook_event_name: 'UserPromptSubmit', cwd: project.project, session_id: 'drift-session', prompt: 'do not leak a new root'}),
+  });
+  assert.notEqual(failed.status, 0);
+  const failure = `${failed.stdout}\n${failed.stderr}`;
+  assert.match(failure, /SOURCE_PROFILE_LOCK_MISMATCH/);
+  assert.equal(failure.includes(changedRoot), false, 'a failed lease must not disclose the changed absolute root');
+
+  const proposedProfile = path.join(sandbox, 'approved-source-profile.json');
+  fs.writeFileSync(proposedProfile, JSON.stringify(changed, null, 2) + '\n', 'utf8');
+  const updated = runJson(['source', 'update', '--project-dir', project.project, '--file', proposedProfile, '--confirm', 'true', '--json']);
+  assert.equal(updated.status, 'updated');
+  assert.match(updated.source.profile_hash, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(updated).includes(changedRoot), false, 'the source update receipt returns hashes, never an absolute root');
+
+  const output = invokeGlobalHook(project.project, {hook_event_name: 'UserPromptSubmit', cwd: project.project, session_id: 'drift-session', prompt: 'now use the approved source'});
+  const visible = visibleHookOutput(output);
+  assert.deepEqual(visible.source_access.allowed_roots, [path.join(changedRoot, 'wiki')]);
+});

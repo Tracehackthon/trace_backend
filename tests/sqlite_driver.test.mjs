@@ -24,3 +24,32 @@ test('the actual current runtime opens SQLite through the selected fallback driv
     assert.equal(opened.driver.kind, process.versions.node.startsWith('22.') ? 'sql.js' : opened.driver.kind);
   } finally { opened.db.close(); }
 });
+
+test('sql.js all/get enforce the query boundary and cannot mutate through a read-only handle', () => {
+  const database = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-sqlite-read-only-')), 'trace.sqlite');
+  const writable = openSqlite(database, {driver: 'sql.js'});
+  try {
+    writable.db.exec('CREATE TABLE evidence(value TEXT NOT NULL)');
+    writable.db.prepare('INSERT INTO evidence(value) VALUES (?)').run('keep');
+  } finally { writable.db.close(); }
+
+  const readOnly = openSqlite(database, {driver: 'sql.js', readOnly: true});
+  try {
+    assert.equal(readOnly.db.prepare('SELECT value FROM evidence').get().value, 'keep');
+    assert.equal(readOnly.db.prepare('/* source comment */ SELECT value FROM evidence').get().value, 'keep');
+    assert.equal(readOnly.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+    for (const statement of ['DELETE FROM evidence', '/* source comment */ DELETE FROM evidence', 'UPDATE evidence SET value = \'changed\'', 'INSERT INTO evidence(value) VALUES (\'new\')', 'CREATE TABLE unwanted(value TEXT)']) {
+      assert.throws(() => readOnly.db.prepare(statement).all(), error => error?.code === 'SQLITE_READ_ONLY');
+      assert.throws(() => readOnly.db.prepare(statement).get(), error => error?.code === 'SQLITE_READ_ONLY');
+    }
+  } finally { readOnly.db.close(); }
+
+  const stillWritable = openSqlite(database, {driver: 'sql.js'});
+  try {
+    assert.equal(stillWritable.db.prepare('SELECT COUNT(*) AS count FROM evidence').get().count, 1);
+    assert.equal(stillWritable.db.prepare('SELECT value FROM evidence').get().value, 'keep');
+    assert.throws(() => stillWritable.db.prepare('DELETE FROM evidence').all(), error => error?.code === 'SQLITE_QUERY_REQUIRED');
+    assert.throws(() => stillWritable.db.prepare('DELETE FROM evidence').get(), error => error?.code === 'SQLITE_QUERY_REQUIRED');
+    assert.equal(stillWritable.db.prepare('SELECT COUNT(*) AS count FROM evidence').get().count, 1);
+  } finally { stillWritable.db.close(); }
+});

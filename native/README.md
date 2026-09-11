@@ -12,22 +12,21 @@
 
 ```powershell
 corepack pnpm package -- --out <release-directory>
-node <release-directory>
-ative\install.mjs --target <installed-runtime-directory>
+node <release-directory>\native\install.mjs --target <installed-runtime-directory>
 ```
 
 ### 2. 一次性连接 Codex Plugin
 
-runtime 已安装后，先预览再确认：
+runtime 已安装后，普通用户直接双击安装根目录的 `Connect-Trace-to-Codex.cmd`。它会先运行安全预览并在写入 Codex 前询问确认，不需要用户填写 Node 路径。
+
+无图形/批处理启动器的维护场景，才使用下面两条**单行**命令：
 
 ```powershell
-node <installed-runtime-directory>
-ative\install-codex-plugin.mjs --dry-run
-node <installed-runtime-directory>
-ative\install-codex-plugin.mjs --confirm true
+node <installed-runtime-directory>\native\install-codex-plugin.mjs --dry-run
+node <installed-runtime-directory>\native\install-codex-plugin.mjs --confirm true
 ```
 
-它会复制受管理的 Plugin marketplace、注册 `trace-codex` 并为其 MCP 写入 runtime 位置；**不会**创建或升级项目 `.trace/`、读取认知源、迁移 profile，或启用 hooks。更新 Plugin 才显式追加 `--replace`，且只刷新 `trace-codex@trace-runtime-local`。
+它会复制受管理的 Plugin marketplace、注册 `trace-codex` 并为其 MCP 写入 runtime 位置；**不会**创建或升级项目 `.trace/`、读取认知源、迁移 profile，或启用 hooks。更新 Plugin 才显式追加 `--replace`，且只刷新 `trace-codex@trace-runtime-local`。安装失败会尝试恢复旧 marketplace；若无法完整恢复，会留下失败 journal，必须先审阅它再重试。
 
 完整的项目状态和版本行为见[Codex Plugin 文档](../docs/codex-plugin.md)与[版本、协议与发布](../docs/versioning.md)。
 

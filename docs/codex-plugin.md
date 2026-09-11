@@ -16,6 +16,10 @@
 
 Trace runtime 已安装后，运行：
 
+在 Trace 安装目录双击 `Connect-Trace-to-Codex.cmd`。它先展示预览、再询问确认；成功后直接回到 Codex 使用 `$trace`。
+
+只有在没有 Windows 启动器的维护环境，才使用以下单行命令：
+
 ```powershell
 node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --dry-run
 node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true

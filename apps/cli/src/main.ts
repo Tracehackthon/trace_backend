@@ -16,7 +16,7 @@ import {MyWikiSourceProvider, type MyWikiSourceProfile} from '../../../packages/
 import {CodexSkillInstaller} from '../../../packages/host/codex-skill/src/index.js';
 import {CodexHookInstaller} from '../../../packages/host/codex-hooks/src/index.js';
 import {SELECTABLE_TEMPLATES} from '../../../packages/template/catalog/src/index.js';
-import {initializeProject, loadProjectActivationConfiguration, migrateProjectActivationConfiguration, updateProjectActivationConfiguration, validateProjectInstanceDescriptor, type ProjectSourceMode, type ProjectSourceProfileInput, type ProjectInstanceDescriptor, type ProjectActivationConfigurationInput} from '../../../packages/core/instance/src/index.js';
+import {initializeProject, loadLockedProjectSourceProfile, loadProjectActivationConfiguration, migrateProjectActivationConfiguration, updateProjectActivationConfiguration, updateProjectSourceProfile, validateProjectInstanceDescriptor, type ProjectSourceMode, type ProjectSourceProfileInput, type ProjectInstanceDescriptor, type ProjectActivationConfigurationInput} from '../../../packages/core/instance/src/index.js';
 import {hashTransientPrompt} from '../../../packages/core/case-capture/src/index.js';
 import {startTraceMcpServer} from '../../mcp/src/main.js';
 
@@ -35,6 +35,7 @@ const PRODUCT_USAGE = [
     '  trace sources [--project-dir ABS] [--json]',
     '  trace profile [--project-dir ABS] [--json]',
     '  trace profile migrate --confirm true [--project-dir ABS]  # lock an older project without changing its source/data',
+    '  trace source update --file ABS --confirm true [--project-dir ABS]  # explicitly accept an intentional source-profile change',
     '  trace abilities [--project-dir ABS] [--json]',
     '',
     '维护：',
@@ -73,6 +74,7 @@ const ADVANCED_USAGE = [
     '  trace-runtime template list',
     '  trace-runtime project init --project-dir ABS --user-id ID [--template ID] [--template-manifest ABS] [--source-mode local|external|team|empty] [--source-root ABS --source-id ID | --source-profile ABS] [--instance-id ID] [--runtime-version VERSION] --confirm true',
     '  trace profile update --file ABS --confirm true [--project-dir ABS]  # explicit local collaboration-model/source-activation update',
+    '  trace source update --file ABS --confirm true [--project-dir ABS]  # explicit selected-source profile repair/update',
     '  trace-runtime migrate sqlite --change-state-file ABS --data-state-file ABS --sqlite-state-file ABS [--report ABS]',
     '  trace-runtime capability preview|stage|validate|publish|rollback ... [--sqlite-state-file <absolute-path>]',
     '  trace-runtime codex activate --sqlite-state-file ABS --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--thread-id ID] [--correlation-id ID --causation-id ID] [--forbidden-scope TEXT]',
@@ -249,15 +251,11 @@ function eventProjectContext(event: Record<string, unknown>): ProductProjectCont
 }
 
 function sourceProfileForContext(context: ProductProjectContext): MyWikiSourceProfile {
-  return readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile') as unknown as MyWikiSourceProfile;
+  return loadLockedProjectSourceProfile({trace_dir: context.trace_dir, source_mode: context.descriptor.source_mode, source_scope: context.descriptor.source_scope}) as unknown as MyWikiSourceProfile;
 }
 
 function activationConfigurationForContext(context: ProductProjectContext) {
-  const profile = sourceProfileForContext(context) as unknown as ProjectSourceProfileInput;
-  return {
-    source_profile: profile as unknown as MyWikiSourceProfile,
-    ...loadProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_profile: profile}),
-  };
+  return loadProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_mode: context.descriptor.source_mode, source_scope: context.descriptor.source_scope});
 }
 
 /**
@@ -441,7 +439,7 @@ export async function run(argv: string[]): Promise<void> {
   const [group, action, ...rest] = argv;
   // Product commands discover the nearest project boundary rather than asking
   // users to repeatedly pass state-file, lineage and producer internals.
-  if (['init', 'status', 'upgrade', 'inbox', 'sources', 'profile', 'abilities'].includes(group ?? '')) {
+  if (['init', 'status', 'upgrade', 'inbox', 'sources', 'source', 'profile', 'abilities'].includes(group ?? '')) {
     const parsed = args(action?.startsWith('--') ? [action, ...rest] : rest);
     if (group === 'init') {
       const projectDir = path.resolve(one(parsed, '--project-dir', false) ?? process.cwd());
@@ -480,10 +478,30 @@ export async function run(argv: string[]): Promise<void> {
       return;
     }
     const context = projectContext(parsed);
+    if (group === 'source' && action === 'update') {
+      if (one(parsed, '--confirm', false) !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'source update requires --confirm true');
+      const file = one(parsed, '--file')!;
+      if (!path.isAbsolute(file)) throw new ProtocolError('INVALID_INPUT', '--file must be an absolute source profile file');
+      const updated = updateProjectSourceProfile({
+        trace_dir: context.trace_dir,
+        source_mode: context.descriptor.source_mode,
+        source_scope: context.descriptor.source_scope,
+        next_source_profile: readJsonFile(file, '--file') as unknown as ProjectSourceProfileInput,
+      });
+      productResult(parsed, [
+        '认知源 profile 已按你的明确确认更新，并重新写入项目 lock。',
+        `认知源：${updated.source_id}`,
+        `原 profile hash：${updated.previous_profile_hash}`,
+        `当前 profile hash：${updated.profile_hash}`,
+        `可恢复备份：${updated.backup_dir}`,
+        'Trace 没有读取来源正文、改写 SQLite 数据、能力或 Codex hooks。',
+      ].join('\n'), {status: 'updated', project: context.project_dir, source: updated});
+      return;
+    }
+    if (group === 'source') throw new ProtocolError('INVALID_INPUT', 'trace source supports: trace source update --file ABS --confirm true');
     if (group === 'profile' && action === 'migrate') {
       if (one(parsed, '--confirm', false) !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'profile migrate requires --confirm true');
-      const sourceProfile = sourceProfileForContext(context) as unknown as ProjectSourceProfileInput;
-      const migrated = migrateProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_profile: sourceProfile});
+      const migrated = migrateProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_mode: context.descriptor.source_mode, source_scope: context.descriptor.source_scope});
       productResult(parsed, migrated.migrated ? [
         '旧项目已完成协作配置迁移。',
         `协作模型：${migrated.collaboration_model.display_name}（${migrated.collaboration_model.model_id}@${migrated.collaboration_model.version}）`,
@@ -501,11 +519,11 @@ export async function run(argv: string[]): Promise<void> {
       const file = one(parsed, '--file')!;
       if (!path.isAbsolute(file)) throw new ProtocolError('INVALID_INPUT', '--file must be an absolute activation configuration file');
       const selected = readJsonFile(file, '--file') as unknown as ProjectActivationConfigurationInput;
-      const sourceProfile = sourceProfileForContext(context) as unknown as ProjectSourceProfileInput;
       const updated = updateProjectActivationConfiguration({
         trace_dir: context.trace_dir,
         template_id: context.descriptor.template_id,
-        source_profile: sourceProfile,
+        source_mode: context.descriptor.source_mode,
+        source_scope: context.descriptor.source_scope,
         configuration: selected,
       });
       productResult(parsed, [
@@ -582,10 +600,7 @@ export async function run(argv: string[]): Promise<void> {
       const state = productState(context);
       const inbox = productInbox(context);
       const threads = state.continuity.filter(item => item.kind === 'thread');
-      const sources = (() => {
-        try { return readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile'); }
-        catch { return {}; }
-      })();
+      const sources = sourceProfileForContext(context) as unknown as Record<string, unknown>;
       const latestActivationRecord = state.continuity
         .filter(item => item.kind === 'activation_receipt')
         .sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
@@ -637,7 +652,7 @@ export async function run(argv: string[]): Promise<void> {
       return;
     }
     if (group === 'sources') {
-      const profile = readJsonFile(path.join(context.trace_dir, 'profiles', 'source.profile.json'), 'source profile');
+      const profile = sourceProfileForContext(context) as unknown as Record<string, unknown>;
       const activation = activationConfigurationForContext(context);
       const state = productState(context);
       const usage = hostSourceUsage(state.data);

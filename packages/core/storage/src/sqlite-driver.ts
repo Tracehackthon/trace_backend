@@ -107,8 +107,24 @@ export function selectSqliteDriver(input: {preference?: SqliteDriverPreference; 
   return {kind: 'node:sqlite', warning: 'sql.js is unavailable and node:sqlite is experimental before Node 24.2.0; install the packaged fallback or upgrade Node.'};
 }
 
-function isReadOnly(sql: string): boolean {
-  return /^(?:\s|\/\*[\s\S]*?\*\/)*(?:SELECT|EXPLAIN)\b/i.test(sql);
+/**
+ * Only statements whose *result* is read through the statement API belong on
+ * `all()` / `get()`.  sql.js will happily execute DML while stepping such a
+ * statement, so this is a semantic boundary rather than a convenience check.
+ * Keep PRAGMA deliberately narrow: integrity checks are used by doctor, while
+ * arbitrary PRAGMA can change connection or database state.
+ */
+function isReadOnlyQuery(sql: string): boolean {
+  const leading = /^(?:\s|\/\*[\s\S]*?\*\/)*/;
+  const normalized = sql.replace(leading, '').trim();
+  return /^(?:SELECT|EXPLAIN)\b/i.test(normalized)
+    || /^PRAGMA\s+(?:main\.)?(?:integrity_check|quick_check)\s*;?\s*$/i.test(normalized);
+}
+
+function assertQueryStatement(sql: string, readOnly: boolean): void {
+  if (isReadOnlyQuery(sql)) return;
+  if (readOnly) throw new StorageError('SQLITE_READ_ONLY', 'Read-only database rejects non-query statements through all() and get()');
+  throw new StorageError('SQLITE_QUERY_REQUIRED', 'all() and get() accept query statements only; use run() for writes');
 }
 
 function fileSignature(file: string): string | undefined {
@@ -234,12 +250,13 @@ class SqlJsFileCore {
       finally { this.transaction = false; this.releaseLock(); }
       return;
     }
-    if (readOnly && !isReadOnly(sql)) throw new StorageError('SQLITE_READ_ONLY', 'Cannot write to a read-only database');
-    if (isReadOnly(sql)) { this.beforeRead(); this.db.run(sql); return; }
+    if (readOnly && !isReadOnlyQuery(sql)) throw new StorageError('SQLITE_READ_ONLY', 'Cannot write to a read-only database');
+    if (isReadOnlyQuery(sql)) { this.beforeRead(); this.db.run(sql); return; }
     this.write(() => this.db.run(sql), readOnly);
   }
 
-  query(sql: string, parameters: unknown[]): Record<string, unknown>[] {
+  query(sql: string, parameters: unknown[], readOnly: boolean): Record<string, unknown>[] {
+    assertQueryStatement(sql, readOnly);
     this.beforeRead();
     const statement = this.db.prepare(sql);
     try {
@@ -272,8 +289,8 @@ class SqlJsFileCore {
 
 class SqlJsStatementAdapter implements SqliteStatement {
   constructor(private readonly core: SqlJsFileCore, private readonly sql: string, private readonly readOnly: boolean) {}
-  all(...parameters: unknown[]): unknown[] { return this.core.query(this.sql, parameters); }
-  get(...parameters: unknown[]): unknown { return this.core.query(this.sql, parameters)[0]; }
+  all(...parameters: unknown[]): unknown[] { return this.core.query(this.sql, parameters, this.readOnly); }
+  get(...parameters: unknown[]): unknown { return this.core.query(this.sql, parameters, this.readOnly)[0]; }
   run(...parameters: unknown[]): unknown { return this.core.run(this.sql, parameters, this.readOnly); }
 }
 

@@ -33,13 +33,12 @@ MCP 不会通用保存或返回 raw prompt、来源正文、认知源绝对 root
 
 ## 安装一次，日常不再配置
 
-```powershell
-node <installed-runtime-directory>
-ative\install-codex-plugin.mjs --dry-run
-node <installed-runtime-directory>
-ative\install-codex-plugin.mjs --confirm true
+在 Trace 安装目录双击：
+
+```text
+Connect-Trace-to-Codex.cmd
 ```
 
-它只连接 Plugin 与本地 MCP，不会初始化 `.trace/`、读取认知源、迁移 profile 或启用 hooks。日常只需回到 Codex 使用 `$trace`。
+它会先展示计划、询问确认，再连接 Plugin 与本地 MCP；不会初始化 `.trace/`、读取认知源、迁移 profile 或启用 hooks。日常只需回到 Codex 使用 `$trace`。
 
 完整安装、可见性与旧用户版本行为见[Trace Codex Plugin 文档](../../docs/codex-plugin.md)。

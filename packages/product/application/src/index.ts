@@ -14,6 +14,7 @@ import {ProtocolError} from '../../../core/protocol/src/index.js';
 import {TraceRuntime} from '../../../core/runtime/src/index.js';
 import {
   initializeProject,
+  loadLockedProjectSourceProfile,
   loadProjectActivationConfiguration,
   migrateProjectActivationConfiguration,
   updateProjectActivationConfiguration,
@@ -129,7 +130,7 @@ export function findTraceProject(directory?: string): ProductProjectContext | un
     const descriptorFile = path.join(traceDir, 'project.json');
     if (fs.existsSync(descriptorFile)) {
       const descriptor = validateProjectInstanceDescriptor(readObject(descriptorFile, 'Trace project descriptor'));
-      const sourceProfile = readObject(path.join(traceDir, 'profiles', 'source.profile.json'), 'Trace source profile') as unknown as ProjectSourceProfileInput;
+      const sourceProfile = loadLockedProjectSourceProfile({trace_dir: traceDir, source_mode: descriptor.source_mode, source_scope: descriptor.source_scope});
       return {project_dir: cursor, trace_dir: traceDir, state_file: path.join(cursor, descriptor.state_file), descriptor, source_profile: sourceProfile};
     }
     const parent = path.dirname(cursor);
@@ -145,7 +146,7 @@ export function requireTraceProject(directory?: string): ProductProjectContext {
 }
 
 function activationFor(context: ProductProjectContext) {
-  return loadProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_profile: context.source_profile});
+  return loadProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_mode: context.descriptor.source_mode, source_scope: context.descriptor.source_scope});
 }
 function withRuntime<T>(context: ProductProjectContext, fallback: T, callback: (runtime: TraceRuntime) => T): T {
   if (!fs.existsSync(context.state_file)) return fallback;
@@ -366,7 +367,7 @@ export function applyProfileMigration(input: {project_dir?: string; proposal_id:
   if (proposal.proposal_id !== input.proposal_id) throw new ProtocolError('STALE_PROPOSAL', 'Profile migration proposal is stale; inspect the new proposal before adopting it.');
   assertAdopted(proposal, input.approval);
   const context = requireTraceProject(input.project_dir);
-  const migrated = migrateProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_profile: context.source_profile});
+  const migrated = migrateProjectActivationConfiguration({trace_dir: context.trace_dir, template_id: context.descriptor.template_id, source_mode: context.descriptor.source_mode, source_scope: context.descriptor.source_scope});
   return {
     status: migrated.migrated ? 'migrated' : 'already_locked', proposal_id: proposal.proposal_id,
     configuration: {state: 'locked', collaboration_model: migrated.collaboration_model.display_name, source_activation: migrated.source_activation.display_name},
@@ -407,7 +408,7 @@ export function applyProfileUpdate(input: ProfileUpdateInput & {proposal_id: str
   if (proposal.proposal_id !== input.proposal_id) throw new ProtocolError('STALE_PROPOSAL', 'Profile update proposal is stale; inspect the new proposal before adopting it.');
   assertAdopted(proposal, input.approval);
   const selected = validatedProfileUpdate(input.project_dir, input.configuration);
-  const updated = updateProjectActivationConfiguration({trace_dir: selected.context.trace_dir, template_id: selected.context.descriptor.template_id, source_profile: selected.context.source_profile, configuration: selected.configuration});
+  const updated = updateProjectActivationConfiguration({trace_dir: selected.context.trace_dir, template_id: selected.context.descriptor.template_id, source_mode: selected.context.descriptor.source_mode, source_scope: selected.context.descriptor.source_scope, configuration: selected.configuration});
   return {
     status: 'updated', proposal_id: proposal.proposal_id,
     configuration: {state: 'locked', collaboration_model: updated.collaboration_model.display_name, source_activation: updated.source_activation.display_name},

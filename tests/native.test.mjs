@@ -57,6 +57,8 @@ test('distribution retains product documentation and the trace launcher', () => 
     assert.equal(fs.existsSync(path.join(output, 'native', 'launcher', 'trace.mjs')), true);
     assert.equal(fs.existsSync(path.join(output, 'native', 'launcher', 'trace.cmd')), true);
     assert.equal(fs.existsSync(path.join(output, 'native', 'install-codex-plugin.mjs')), true);
+    assert.equal(fs.existsSync(path.join(output, 'Connect-Trace-to-Codex.cmd')), true);
+    assert.match(fs.readFileSync(path.join(output, 'Connect-Trace-to-Codex.cmd'), 'utf8'), /native\\install-codex-plugin\.mjs/);
     assert.equal(fs.existsSync(path.join(output, 'plugins', 'trace-codex', '.codex-plugin', 'plugin.json')), true);
     assert.equal(fs.existsSync(path.join(output, 'dist', 'apps', 'mcp', 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', 'server', 'mcp.js')), true);
     const manifest = JSON.parse(fs.readFileSync(path.join(output, 'release-manifest.json'), 'utf8'));
@@ -88,4 +90,62 @@ test('Codex plugin installer is explicit and its dry run never alters a user mar
   } finally {
     fs.rmSync(directory, {recursive: true, force: true});
   }
+});
+
+test('Codex plugin installer restores the marketplace directory when Codex registration fails', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-plugin-install-rollback-'));
+  const marketplace = path.join(directory, 'marketplace');
+  const invoke = replace => spawnSync(process.execPath, [codexPluginInstaller, '--runtime-root', root, '--marketplace-root', marketplace, '--codex-command', process.execPath, '--confirm', 'true', ...(replace ? ['--replace'] : [])], {encoding: 'utf8'});
+  try {
+    const firstFailure = invoke(false);
+    assert.notEqual(firstFailure.status, 0);
+    assert.equal(JSON.parse(firstFailure.stderr).code, 'CODEX_COMMAND_FAILED');
+    assert.equal(fs.existsSync(marketplace), false, 'a first install failure must remove its managed marketplace directory');
+
+    fs.mkdirSync(marketplace, {recursive: true});
+    fs.writeFileSync(path.join(marketplace, 'preserve-on-rollback.txt'), 'old marketplace marker', 'utf8');
+    const replacementFailure = invoke(true);
+    assert.notEqual(replacementFailure.status, 0);
+    assert.equal(JSON.parse(replacementFailure.stderr).code, 'CODEX_COMMAND_FAILED');
+    assert.equal(fs.readFileSync(path.join(marketplace, 'preserve-on-rollback.txt'), 'utf8'), 'old marketplace marker');
+  } finally { fs.rmSync(directory, {recursive: true, force: true}); }
+});
+
+function fakeCodexCommand(directory) {
+  const stateFile = path.join(directory, 'fake-codex-state.json');
+  const scriptFile = path.join(directory, 'fake-codex.mjs');
+  fs.writeFileSync(stateFile, JSON.stringify({marketplace: false, plugin: false}), 'utf8');
+  const source = [
+    "import fs from 'node:fs';",
+    "const stateFile = process.env.FAKE_CODEX_STATE;",
+    "const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));",
+    "const args = process.argv.slice(2);",
+    "const fail = process.env.FAKE_CODEX_FAIL;",
+    "const save = () => fs.writeFileSync(stateFile, JSON.stringify(state), 'utf8');",
+    "if (args.join(' ') === 'plugin marketplace list --json') { process.stdout.write(JSON.stringify({marketplaces: state.marketplace ? [{name: 'trace-runtime-local'}] : []})); }",
+    "else if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') { if (fail === 'marketplace-add') { process.stderr.write('marketplace add failed'); process.exit(17); } state.marketplace = true; save(); process.stdout.write('added'); }",
+    "else if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'remove') { state.marketplace = false; save(); process.stdout.write('removed'); }",
+    "else if (args[0] === 'plugin' && args[1] === 'remove') { state.plugin = false; save(); process.stdout.write('removed'); }",
+    "else if (args[0] === 'plugin' && args[1] === 'add') { if (fail === 'plugin-add' && !state.plugin_add_failed) { state.plugin_add_failed = true; save(); process.stderr.write('plugin add failed'); process.exit(18); } state.plugin = true; save(); process.stdout.write('installed'); }",
+    "else { process.stderr.write('unexpected fake codex command'); process.exit(19); }",
+  ].join('\n');
+  fs.writeFileSync(scriptFile, source, 'utf8');
+  return {command: process.execPath, stateFile, argument: scriptFile};
+}
+
+test('Codex plugin installer restores a replaced plugin after plugin add fails', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-plugin-add-rollback-'));
+  const marketplace = path.join(directory, 'marketplace');
+  const fake = fakeCodexCommand(directory);
+  const invoke = failure => spawnSync(process.execPath, [codexPluginInstaller, '--runtime-root', root, '--marketplace-root', marketplace, '--codex-command', fake.command, '--codex-arg', fake.argument, '--confirm', 'true', ...(fs.existsSync(marketplace) ? ['--replace'] : [])], {encoding: 'utf8', env: {...process.env, FAKE_CODEX_STATE: fake.stateFile, ...(failure ? {FAKE_CODEX_FAIL: failure} : {})}});
+  try {
+    const installed = invoke(); assert.equal(installed.status, 0, installed.stderr);
+    fs.writeFileSync(path.join(marketplace, 'old-marketplace-marker.txt'), 'old', 'utf8');
+    const failed = invoke('plugin-add');
+    assert.notEqual(failed.status, 0);
+    assert.equal(JSON.parse(failed.stderr).code, 'CODEX_COMMAND_FAILED');
+    assert.equal(fs.readFileSync(path.join(marketplace, 'old-marketplace-marker.txt'), 'utf8'), 'old');
+    const recovered = JSON.parse(fs.readFileSync(fake.stateFile, 'utf8'));
+    assert.equal(recovered.marketplace, true); assert.equal(recovered.plugin, true);
+  } finally { fs.rmSync(directory, {recursive: true, force: true}); }
 });

@@ -132,22 +132,19 @@ Trace 把“安装新版”与“迁移用户项目”严格分开：
 | 使用新 starter 初始化项目 | 不会把 starter 反写到旧项目 |
 | 检查版本差异 | 不会执行升级或重建状态 |
 
-已有 lock 的项目继续使用自己的 profile。更早的项目会显示为 `legacy_unlocked`，先让用户审阅兼容配置；只有明确 adopt 后，才把当前配置固化为 lock。未知协议、缺少 upcaster 或 hash 漂移会 fail-closed，不会静默“修好”。
+已有 lock 的项目继续使用自己的 profile。更早的项目会显示为 `legacy_unlocked`，先让用户审阅兼容配置；只有明确 adopt 后，才把当前配置固化为 lock。未知协议、缺少 upcaster 或 source profile / lock hash 漂移会 fail-closed，不会静默“修好”。profile 被有意修改时，先审阅新 profile，再显式执行 `trace source update --file <绝对路径> --confirm true` 写入新的 lock。
 
 ## 3 分钟开始
 
 ### 连接 Codex（只需一次）
 
-Trace runtime 安装后，先预览再确认：
+Trace runtime 安装后，直接双击安装目录里的：
 
-```powershell
-node <installed-runtime-directory>
-ative\install-codex-plugin.mjs --dry-run
-node <installed-runtime-directory>
-ative\install-codex-plugin.mjs --confirm true
+```text
+Connect-Trace-to-Codex.cmd
 ```
 
-该动作只安装 `trace-codex` Plugin 与本地 MCP。它不会创建项目、读取认知源、修改旧项目、迁移 profile 或启用 hooks。
+它会先显示将要连接的 Plugin，询问你是否确认；成功后回到 Codex 即可使用 `$trace`。该动作只安装 `trace-codex` Plugin 与本地 MCP。它不会创建项目、读取认知源、修改旧项目、迁移 profile 或启用 hooks。需要替换已有 Plugin 时，再由维护者在 [Native 发行与安装边界](native/README.md) 使用显式维护命令。
 
 ### 在项目中开始协作
 

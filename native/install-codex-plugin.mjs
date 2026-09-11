@@ -11,7 +11,12 @@ import {fileURLToPath} from 'node:url';
 const nativeRoot = path.dirname(fileURLToPath(import.meta.url));
 const defaultRuntimeRoot = path.resolve(nativeRoot, '..');
 const codexHome = process.env.CODEX_HOME ?? (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, '.codex') : undefined);
+const MARKETPLACE = 'trace-runtime-local';
+const PLUGIN = 'trace-codex@trace-runtime-local';
 
+class PluginInstallError extends Error {
+  constructor(code, message, journal) { super(message); this.code = code; this.journal = journal; }
+}
 function absolute(value, field) {
   if (!value || !path.isAbsolute(value)) throw new Error(`${field} must be an absolute path`);
   return path.resolve(value);
@@ -42,6 +47,7 @@ function parse(argv) {
     runtimeRoot: defaultRuntimeRoot,
     marketplaceRoot: codexHome ? path.join(codexHome, 'trace-marketplace') : undefined,
     codexCommand: process.env.TRACE_CODEX_COMMAND ?? 'codex',
+    codexArgs: [],
     dryRun: false,
     replace: false,
     confirmed: false,
@@ -51,11 +57,12 @@ function parse(argv) {
     if (arg === '--runtime-root') options.runtimeRoot = absolute(argv[++index], '--runtime-root');
     else if (arg === '--marketplace-root') options.marketplaceRoot = absolute(argv[++index], '--marketplace-root');
     else if (arg === '--codex-command') options.codexCommand = absolute(argv[++index], '--codex-command');
+    else if (arg === '--codex-arg') { const value = argv[++index]; if (!value || value.includes('\0')) throw new Error('--codex-arg requires a non-empty safe argument'); options.codexArgs.push(value); }
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--replace') options.replace = true;
     else if (arg === '--confirm') options.confirmed = argv[++index] === 'true';
     else if (arg === '--help' || arg === '-h') {
-      process.stdout.write('Usage: node native/install-codex-plugin.mjs --confirm true [--runtime-root ABS] [--marketplace-root ABS] [--replace] [--dry-run]\n');
+      process.stdout.write('Usage: node native/install-codex-plugin.mjs --confirm true [--runtime-root ABS] [--marketplace-root ABS] [--replace] [--dry-run] [--codex-command ABS --codex-arg ARG]\n');
       process.exit(0);
     } else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -69,9 +76,9 @@ function pluginFiles(runtimeRoot) {
   if (!fs.existsSync(entry)) throw new Error(`Missing built Trace MCP entry: ${entry}`);
   return {plugin};
 }
-function managedMarketplace(runtimeRoot) {
+function managedMarketplace() {
   return {
-    name: 'trace-runtime-local', interface: {displayName: 'Trace Runtime'}, plugins: [{
+    name: MARKETPLACE, interface: {displayName: 'Trace Runtime'}, plugins: [{
       name: 'trace-codex', source: {source: 'local', path: './plugins/trace-codex'},
       policy: {installation: 'AVAILABLE', authentication: 'ON_INSTALL'}, category: 'Productivity',
     }],
@@ -87,27 +94,73 @@ function writeManagedPlugin(source, staging, runtimeRoot) {
   trace.env = {...(trace.env && typeof trace.env === 'object' && !Array.isArray(trace.env) ? trace.env : {}), TRACE_RUNTIME_ROOT: runtimeRoot};
   fs.writeFileSync(mcpFile, JSON.stringify(mcp, null, 2) + '\n', {encoding: 'utf8', flag: 'w'});
 }
-function runCodex(command, args) {
-  const result = spawnSync(command, args, {encoding: 'utf8', shell: false});
-  if (result.error) throw new Error(`Could not launch Codex CLI: ${result.error.message}`);
-  if (result.status !== 0) throw new Error(`Codex command failed (${args.join(' ')}): ${(result.stderr || result.stdout || '').trim().slice(0, 1200)}`);
-  return (result.stdout || '').trim();
+function codexResult(command, args, prefix = []) {
+  const result = spawnSync(command, [...prefix, ...args], {encoding: 'utf8', shell: false});
+  if (result.error) return {ok: false, output: `Could not launch Codex CLI: ${result.error.message}`};
+  return {ok: result.status === 0, output: (result.stdout || result.stderr || '').trim().slice(0, 1200)};
 }
-function marketplaceIsRegistered(command) {
-  const result = spawnSync(command, ['plugin', 'marketplace', 'list', '--json'], {encoding: 'utf8', shell: false});
-  if (result.error || result.status !== 0) return false;
+function runCodex(command, args, prefix = []) {
+  const result = codexResult(command, args, prefix);
+  if (!result.ok) throw new PluginInstallError('CODEX_COMMAND_FAILED', `Codex command failed (${args.join(' ')}): ${result.output}`);
+  return result.output;
+}
+function marketplaceIsRegistered(command, prefix = []) {
+  const result = codexResult(command, ['plugin', 'marketplace', 'list', '--json'], prefix);
+  if (!result.ok) return false;
   try {
-    const value = JSON.parse(result.stdout);
-    return Array.isArray(value.marketplaces) && value.marketplaces.some(item => item?.name === 'trace-runtime-local');
+    const value = JSON.parse(result.output);
+    return Array.isArray(value.marketplaces) && value.marketplaces.some(item => item?.name === MARKETPLACE);
   } catch { return false; }
 }
-function removeManagedPluginIfPresent(command) {
-  // `--replace` is an explicit request to refresh this exact managed plugin.
-  // A missing prior plugin is harmless; any other unexpected command failure
-  // is retained in the receipt rather than being treated as success.
-  const result = spawnSync(command, ['plugin', 'remove', 'trace-codex@trace-runtime-local', '--json'], {encoding: 'utf8', shell: false});
-  if (result.error) throw new Error(`Could not launch Codex CLI: ${result.error.message}`);
-  return {removed: result.status === 0, output: (result.stdout || result.stderr || '').trim()};
+function removeManagedPluginIfPresent(command, prefix = []) {
+  const result = codexResult(command, ['plugin', 'remove', PLUGIN, '--json'], prefix);
+  return {removed: result.ok, output: result.output};
+}
+function rollbackJournal(file, value) {
+  try { fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n', {encoding: 'utf8', flag: 'wx'}); return file; }
+  catch { return undefined; }
+}
+function rollbackTransaction({options, marketplaceRoot, staging, backup, priorRegistered, registeredByThisRun, priorPluginRemoved, cause}) {
+  const steps = [];
+  const attempt = (name, operation) => {
+    try { operation(); steps.push({name, status: 'ok'}); }
+    catch (error) { steps.push({name, status: 'failed', error: error instanceof Error ? error.message : String(error)}); }
+  };
+  if (fs.existsSync(staging)) attempt('remove_staging', () => fs.rmSync(staging, {recursive: true, force: true}));
+  // Registration belongs to a directory path. Remove a registration created by
+  // this run before discarding the newly staged directory.
+  let newRegistrationReleased = !registeredByThisRun || priorRegistered;
+  if (registeredByThisRun && !priorRegistered) {
+    const result = codexResult(options.codexCommand, ['plugin', 'marketplace', 'remove', MARKETPLACE, '--json'], options.codexArgs);
+    if (result.ok) { newRegistrationReleased = true; steps.push({name: 'unregister_new_marketplace', status: 'ok'}); }
+    else steps.push({name: 'unregister_new_marketplace', status: 'failed', error: result.output || 'Codex did not remove the Trace marketplace'});
+  }
+  if (backup && fs.existsSync(backup)) {
+    // Never delete a directory while Codex still has a registration pointing at
+    // it; preserving a usable staged directory is safer than a broken path.
+    if (newRegistrationReleased && fs.existsSync(marketplaceRoot)) attempt('remove_new_marketplace_directory', () => fs.rmSync(marketplaceRoot, {recursive: true, force: true}));
+    if (newRegistrationReleased && !fs.existsSync(marketplaceRoot)) attempt('restore_previous_marketplace_directory', () => fs.renameSync(backup, marketplaceRoot));
+    // A successful refresh removes the old plugin before adding the new one.
+    // If adding failed, restore the exact managed plugin only when it had been
+    // registered before this transaction; otherwise preserve the prior absence.
+    if (priorPluginRemoved && priorRegistered && fs.existsSync(marketplaceRoot)) attempt('restore_previous_managed_plugin', () => runCodex(options.codexCommand, ['plugin', 'add', PLUGIN, '--json'], options.codexArgs));
+  } else {
+    if (newRegistrationReleased && fs.existsSync(marketplaceRoot)) attempt('remove_new_marketplace_directory', () => fs.rmSync(marketplaceRoot, {recursive: true, force: true}));
+  }
+  const clean = newRegistrationReleased && steps.every(step => step.status === 'ok')
+    && (!backup || fs.existsSync(marketplaceRoot))
+    && (backup || !fs.existsSync(marketplaceRoot));
+  const journal = `${marketplaceRoot}.install-failure-${Date.now()}.json`;
+  const journalFile = rollbackJournal(journal, {
+    journal_id: 'trace.codex-plugin-install-failure',
+    created_at: new Date().toISOString(),
+    cause: cause instanceof Error ? cause.message : String(cause),
+    marketplace: MARKETPLACE,
+    plugin: PLUGIN,
+    rollback_clean: clean,
+    steps,
+  });
+  return {clean, steps, journal: journalFile};
 }
 function install(options) {
   const runtimeRoot = absolute(options.runtimeRoot, '--runtime-root');
@@ -115,34 +168,42 @@ function install(options) {
   noSymlink(runtimeRoot); noSymlink(path.dirname(marketplaceRoot));
   const {plugin} = pluginFiles(runtimeRoot);
   const plan = {
-    status: 'planned', runtime_root: runtimeRoot, marketplace_root: marketplaceRoot, plugin: 'trace-codex', marketplace: 'trace-runtime-local',
+    status: 'planned', runtime_root: runtimeRoot, marketplace_root: marketplaceRoot, plugin: 'trace-codex', marketplace: MARKETPLACE,
     automatic_upgrade: false,
     will_do: ['copy the versioned Trace plugin to a managed local marketplace', 'register that marketplace with Codex', 'install trace-codex from it'],
     will_not_do: ['rewrite any Trace project', 'migrate project profiles', 'enable Trace hooks', 'update an existing plugin without --replace'],
   };
   if (options.dryRun) return {...plan, dry_run: true};
-  if (!options.confirmed) throw new Error('USER_CONFIRMATION_REQUIRED: pass --confirm true after reviewing --dry-run');
-  if (fs.existsSync(marketplaceRoot) && !options.replace) throw new Error(`Managed Trace marketplace already exists: ${marketplaceRoot}. Inspect it first; use --replace only to stage a new plugin copy.`);
+  if (!options.confirmed) throw new PluginInstallError('USER_CONFIRMATION_REQUIRED', 'pass --confirm true after reviewing --dry-run');
+  if (fs.existsSync(marketplaceRoot) && !options.replace) throw new PluginInstallError('MARKETPLACE_EXISTS', `Managed Trace marketplace already exists: ${marketplaceRoot}. Inspect it first; use --replace only to stage a new plugin copy.`);
   const staging = `${marketplaceRoot}.staging-${process.pid}`;
   const backup = fs.existsSync(marketplaceRoot) ? `${marketplaceRoot}.previous-${Date.now()}` : null;
-  if (fs.existsSync(staging) || (backup && fs.existsSync(backup))) throw new Error('Marketplace staging/backup path already exists');
+  if (fs.existsSync(staging) || (backup && fs.existsSync(backup))) throw new PluginInstallError('STAGING_EXISTS', 'Marketplace staging/backup path already exists');
+  const priorRegistered = marketplaceIsRegistered(options.codexCommand, options.codexArgs);
+  let registeredByThisRun = false;
+  let priorPluginRemoved = false;
   try {
     fs.mkdirSync(staging, {recursive: true});
     writeManagedPlugin(plugin, staging, runtimeRoot);
-    fs.writeFileSync(path.join(staging, 'marketplace.json'), JSON.stringify(managedMarketplace(runtimeRoot), null, 2) + '\n', {encoding: 'utf8', flag: 'wx'});
+    fs.writeFileSync(path.join(staging, 'marketplace.json'), JSON.stringify(managedMarketplace(), null, 2) + '\n', {encoding: 'utf8', flag: 'wx'});
     if (backup) fs.renameSync(marketplaceRoot, backup);
     fs.renameSync(staging, marketplaceRoot);
-    const registered = marketplaceIsRegistered(options.codexCommand);
-    const marketplaceOutput = registered ? 'already registered' : runCodex(options.codexCommand, ['plugin', 'marketplace', 'add', marketplaceRoot]);
-    const removed = backup ? removeManagedPluginIfPresent(options.codexCommand) : {removed: false, output: 'not requested'};
-    const pluginOutput = runCodex(options.codexCommand, ['plugin', 'add', 'trace-codex@trace-runtime-local', '--json']);
+    const marketplaceOutput = priorRegistered ? 'already registered' : runCodex(options.codexCommand, ['plugin', 'marketplace', 'add', marketplaceRoot], options.codexArgs);
+    registeredByThisRun = !priorRegistered;
+    const removed = backup ? removeManagedPluginIfPresent(options.codexCommand, options.codexArgs) : {removed: false, output: 'not requested'};
+    priorPluginRemoved = Boolean(backup && removed.removed);
+    const pluginOutput = runCodex(options.codexCommand, ['plugin', 'add', PLUGIN, '--json'], options.codexArgs);
     return {...plan, status: 'installed', backup_marketplace: backup, codex: {marketplace: marketplaceOutput, removed, plugin: pluginOutput}};
-  } catch (error) {
-    if (fs.existsSync(staging)) fs.rmSync(staging, {recursive: true, force: true});
-    if (backup && fs.existsSync(backup) && !fs.existsSync(marketplaceRoot)) fs.renameSync(backup, marketplaceRoot);
-    throw error;
+  } catch (cause) {
+    const rollback = rollbackTransaction({options, marketplaceRoot, staging, backup, priorRegistered, registeredByThisRun, priorPluginRemoved, cause});
+    if (!rollback.clean) throw new PluginInstallError('PARTIAL_ROLLBACK_REQUIRED', 'Trace could not fully restore the prior Codex marketplace state. Inspect the rollback journal before retrying.', rollback.journal);
+    throw new PluginInstallError(cause instanceof PluginInstallError ? cause.code : 'INSTALL_FAILED', cause instanceof Error ? cause.message : String(cause), rollback.journal);
   }
 }
 
 try { process.stdout.write(JSON.stringify(install(parse(process.argv.slice(2)))) + '\n'); }
-catch (error) { process.stderr.write(JSON.stringify({status: 'failed', error: error instanceof Error ? error.message : String(error)}) + '\n'); process.exitCode = 1; }
+catch (error) {
+  const typed = error instanceof PluginInstallError ? error : undefined;
+  process.stderr.write(JSON.stringify({status: 'failed', code: typed?.code ?? 'INSTALL_FAILED', error: error instanceof Error ? error.message : String(error), ...(typed?.journal === undefined ? {} : {journal: typed.journal})}) + '\n');
+  process.exitCode = 1;
+}

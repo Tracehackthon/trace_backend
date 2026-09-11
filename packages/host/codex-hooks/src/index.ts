@@ -85,7 +85,9 @@ export class CodexHookInstaller {
   rollback(receipt: CodexHookReceipt): CodexHookReceipt {
     if (receipt.protocol_id !== 'trace.codex-hook-install' || !['0.1.0', '0.2.0'].includes(receipt.protocol_version) || receipt.status !== 'installed' || !receipt.backup_file) throw new Error('Unsupported hook receipt');
     const backup = absolute(receipt.backup_file, 'backup_file'); noSymlink(backup); if (!fs.existsSync(backup)) throw new Error('Hook backup does not exist');
-    const current = load(this.hooksFile); const restored = fs.readFileSync(backup, 'utf8'); const staging = `${this.hooksFile}.trace-rollback-${process.pid}`; fs.writeFileSync(staging, restored, {flag: 'wx'});
+    const current = load(this.hooksFile);
+    if (hash(current.raw) !== receipt.after_hash) throw new Error('STALE_HOOK_ROLLBACK: hooks.json changed after Trace installed it; preserve the current file and inspect the receipt before retrying');
+    const restored = fs.readFileSync(backup, 'utf8'); const staging = `${this.hooksFile}.trace-rollback-${process.pid}`; fs.writeFileSync(staging, restored, {flag: 'wx'});
     try { fs.renameSync(staging, this.hooksFile); } catch (error) { fs.rmSync(staging, {force: true}); throw error; }
     return {...receipt, status: 'rolled_back', before_hash: hash(current.raw), after_hash: hash(restored), installed_at: new Date().toISOString()};
   }

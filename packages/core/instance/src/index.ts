@@ -132,14 +132,86 @@ function assertActivationLockMatches(lock: ActivationLock, input: {template_id: 
   }
 }
 
+function sourceProfileLockMismatch(message = 'The source profile differs from this project lock. No source lease was issued.'): never {
+  throw new ProtocolError('SOURCE_PROFILE_LOCK_MISMATCH', message);
+}
+
+/** Parse only the source fields that can influence a host source lease. */
+function validateStoredSourceProfile(value: unknown): ProjectSourceProfileInput {
+  const raw = requireObject(value, 'source_profile');
+  const sourceMode = raw.source_mode;
+  const scope = raw.scope_type;
+  if (!['local', 'external', 'team', 'empty'].includes(sourceMode as string)) throw new ProtocolError('SOURCE_PROFILE_INVALID', 'source profile mode is invalid');
+  if (!['personal', 'project', 'team', 'domain'].includes(scope as string)) throw new ProtocolError('SOURCE_PROFILE_INVALID', 'source profile scope is invalid');
+  const formalPrefix = text(raw.formal_prefix ?? 'wiki', 'source_profile.formal_prefix', 200);
+  const activationExcludedPaths = raw.activation_excluded_paths ?? [];
+  if (!Array.isArray(activationExcludedPaths) || activationExcludedPaths.length > 128 || activationExcludedPaths.some(item => typeof item !== 'string')) throw new ProtocolError('SOURCE_PROFILE_INVALID', 'source profile activation_excluded_paths is invalid');
+  if (raw.read_enabled !== undefined && typeof raw.read_enabled !== 'boolean') throw new ProtocolError('SOURCE_PROFILE_INVALID', 'source profile read_enabled is invalid');
+  if (raw.write_enabled !== undefined && typeof raw.write_enabled !== 'boolean') throw new ProtocolError('SOURCE_PROFILE_INVALID', 'source profile write_enabled is invalid');
+  return {
+    source_id: text(raw.source_id, 'source_profile.source_id', 240),
+    root: absolute(raw.root, 'source_profile.root'),
+    formal_prefix: formalPrefix,
+    read_enabled: raw.read_enabled ?? true,
+    write_enabled: raw.write_enabled ?? false,
+    activation_excluded_paths: [...activationExcludedPaths],
+    host_retrieval: normalizeHostRetrievalPolicy(raw.host_retrieval as Partial<HostRetrievalPolicy> | undefined, formalPrefix),
+    user_id: text(raw.user_id, 'source_profile.user_id', 240),
+    scope_type: scope as ProjectScopeType,
+    source_mode: sourceMode as ProjectSourceMode,
+  };
+}
+
+function selectedSourceFromLock(value: unknown): NonNullable<TemplateInstanceLock['selected_source']> {
+  const lock = requireObject(value, 'template_lock');
+  const selected = lock.selected_source;
+  if (!selected || typeof selected !== 'object' || Array.isArray(selected)) throw new ProtocolError('SOURCE_PROFILE_LOCK_REQUIRED', 'This project has no selected source lock; migrate or reinitialize it before issuing a source lease');
+  const item = selected as Record<string, unknown>;
+  const scope = item.scope_type;
+  if (!['personal', 'project', 'team', 'domain'].includes(scope as string)) throw new ProtocolError('SOURCE_PROFILE_LOCK_REQUIRED', 'The selected source lock is invalid');
+  const profileHash = text(item.profile_hash, 'selected_source.profile_hash', 128);
+  if (!/^[a-f0-9]{64}$/.test(profileHash)) throw new ProtocolError('SOURCE_PROFILE_LOCK_REQUIRED', 'The selected source lock hash is invalid');
+  return {source_id: text(item.source_id, 'selected_source.source_id', 240), profile_hash: profileHash, scope_type: scope as ProjectScopeType};
+}
+
+/**
+ * A host may receive only a source profile whose exact on-disk bytes match the
+ * project-local selected-source lock.  This protects a Codex event routed by
+ * cwd from silently acquiring a newly edited absolute root.
+ */
+export function loadLockedProjectSourceProfile(input: {trace_dir: string; source_mode?: ProjectSourceMode; source_scope?: ProjectScopeType}): ProjectSourceProfileInput {
+  const traceDir = absolute(input.trace_dir, 'trace_dir');
+  const profileFile = path.join(traceDir, 'profiles', 'source.profile.json');
+  const lockFile = path.join(traceDir, 'instance', 'trace.lock.json');
+  if (!fs.existsSync(profileFile) || !fs.existsSync(lockFile)) throw new ProtocolError('SOURCE_PROFILE_LOCK_REQUIRED', 'This project is missing its source profile or source lock; no source lease was issued');
+  let profileText: string;
+  let profile: ProjectSourceProfileInput;
+  try { profileText = fs.readFileSync(profileFile, 'utf8'); profile = validateStoredSourceProfile(JSON.parse(profileText)); }
+  catch (error) {
+    if (error instanceof ProtocolError) throw error;
+    throw new ProtocolError('SOURCE_PROFILE_INVALID', 'The project source profile is unreadable; no source lease was issued');
+  }
+  let selected: NonNullable<TemplateInstanceLock['selected_source']>;
+  try { selected = selectedSourceFromLock(readJson(lockFile)); }
+  catch (error) {
+    if (error instanceof ProtocolError) throw error;
+    throw new ProtocolError('SOURCE_PROFILE_LOCK_REQUIRED', 'The project source lock is unreadable; no source lease was issued');
+  }
+  if (sha256(profileText) !== selected.profile_hash || profile.source_id !== selected.source_id || profile.scope_type !== selected.scope_type) sourceProfileLockMismatch();
+  if (input.source_mode !== undefined && profile.source_mode !== input.source_mode) sourceProfileLockMismatch('The source profile mode differs from the project descriptor. No source lease was issued.');
+  if (input.source_scope !== undefined && profile.scope_type !== input.source_scope) sourceProfileLockMismatch('The source profile scope differs from the project descriptor. No source lease was issued.');
+  return profile;
+}
+
 /**
  * The detailed model and source map live in the ignored profiles directory;
  * the committable activation lock retains only identities and hashes. Existing
  * projects can use a compatibility starter, but remain visibly legacy-unlocked
  * until the user explicitly writes a local lock with `profile migrate`.
  */
-export function loadProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_profile: ProjectSourceProfileInput}): {collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock?: ActivationLock; configuration_state: ProjectActivationConfigurationState} {
+export function loadProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_mode?: ProjectSourceMode; source_scope?: ProjectScopeType}): {source_profile: ProjectSourceProfileInput; collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock?: ActivationLock; configuration_state: ProjectActivationConfigurationState} {
   const traceDir = absolute(input.trace_dir, 'trace_dir');
+  const source_profile = loadLockedProjectSourceProfile({trace_dir: traceDir, ...(input.source_mode === undefined ? {} : {source_mode: input.source_mode}), ...(input.source_scope === undefined ? {} : {source_scope: input.source_scope})});
   const modelFile = path.join(traceDir, 'profiles', 'collaboration-model.json');
   const sourceFile = path.join(traceDir, 'profiles', 'source-activation.json');
   const lockFile = path.join(traceDir, 'instance', 'activation.lock.json');
@@ -148,15 +220,15 @@ export function loadProjectActivationConfiguration(input: {trace_dir: string; te
     : defaultCollaborationModel(input.template_id);
   const source_activation = fs.existsSync(sourceFile)
     ? validateSourceActivationManifest(readJson(sourceFile))
-    : defaultSourceActivationManifest({source_id: input.source_profile.source_id, source_mode: input.source_profile.source_mode ?? 'local', template_id: input.template_id});
-  if (source_activation.source_id !== input.source_profile.source_id) throw new ProtocolError('INVALID_INPUT', 'source activation manifest source_id does not match the selected source profile');
-  assertActivationMapWithinSourcePolicy(source_activation, input.source_profile);
+    : defaultSourceActivationManifest({source_id: source_profile.source_id, source_mode: source_profile.source_mode ?? 'local', template_id: input.template_id});
+  if (source_activation.source_id !== source_profile.source_id) throw new ProtocolError('INVALID_INPUT', 'source activation manifest source_id does not match the selected source profile');
+  assertActivationMapWithinSourcePolicy(source_activation, source_profile);
   let activation_lock: ActivationLock | undefined;
   if (fs.existsSync(lockFile)) {
     activation_lock = validateActivationLock(readJson(lockFile));
     assertActivationLockMatches(activation_lock, {template_id: input.template_id, model: collaboration_model, source: source_activation});
   }
-  return {collaboration_model, source_activation, configuration_state: activation_lock === undefined ? 'legacy_unlocked' : 'locked', ...(activation_lock === undefined ? {} : {activation_lock})};
+  return {source_profile, collaboration_model, source_activation, configuration_state: activation_lock === undefined ? 'legacy_unlocked' : 'locked', ...(activation_lock === undefined ? {} : {activation_lock})};
 }
 
 /**
@@ -165,12 +237,13 @@ export function loadProjectActivationConfiguration(input: {trace_dir: string; te
  * refreshed atomically enough to either retain the prior files or leave a
  * recoverable backup under .trace/backups/.
  */
-export function updateProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_profile: ProjectSourceProfileInput; configuration: ProjectActivationConfigurationInput; updated_at?: string}): {collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock: ActivationLock; backup_dir: string} {
+export function updateProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_mode?: ProjectSourceMode; source_scope?: ProjectScopeType; configuration: ProjectActivationConfigurationInput; updated_at?: string}): {collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock: ActivationLock; backup_dir: string} {
   const traceDir = absolute(input.trace_dir, 'trace_dir');
+  const source_profile = loadLockedProjectSourceProfile({trace_dir: traceDir, ...(input.source_mode === undefined ? {} : {source_mode: input.source_mode}), ...(input.source_scope === undefined ? {} : {source_scope: input.source_scope})});
   const collaboration_model = validateCollaborationModel(input.configuration.collaboration_model);
   const source_activation = validateSourceActivationManifest(input.configuration.source_activation);
-  if (source_activation.source_id !== input.source_profile.source_id) throw new ProtocolError('INVALID_INPUT', 'source activation manifest source_id does not match the selected source profile');
-  assertActivationMapWithinSourcePolicy(source_activation, input.source_profile);
+  if (source_activation.source_id !== source_profile.source_id) throw new ProtocolError('INVALID_INPUT', 'source activation manifest source_id does not match the selected source profile');
+  assertActivationMapWithinSourcePolicy(source_activation, source_profile);
   const activation_lock = buildActivationLock({template_id: input.template_id, model: collaboration_model, source: source_activation, ...(input.updated_at === undefined ? {} : {created_at: input.updated_at})});
   const profilesDir = path.join(traceDir, 'profiles');
   const instanceDir = path.join(traceDir, 'instance');
@@ -200,7 +273,7 @@ export function updateProjectActivationConfiguration(input: {trace_dir: string; 
  * only materializes the exact compatibility model/map currently in use and
  * writes their hash-only lock.
  */
-export function migrateProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_profile: ProjectSourceProfileInput; migrated_at?: string}): {migrated: boolean; previous_state: ProjectActivationConfigurationState; collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock?: ActivationLock; backup_dir?: string} {
+export function migrateProjectActivationConfiguration(input: {trace_dir: string; template_id: string; source_mode?: ProjectSourceMode; source_scope?: ProjectScopeType; migrated_at?: string}): {migrated: boolean; previous_state: ProjectActivationConfigurationState; collaboration_model: CollaborationModel; source_activation: SourceActivationManifest; activation_lock?: ActivationLock; backup_dir?: string} {
   const current = loadProjectActivationConfiguration(input);
   if (current.configuration_state === 'locked') {
     return {
@@ -214,11 +287,53 @@ export function migrateProjectActivationConfiguration(input: {trace_dir: string;
   const updated = updateProjectActivationConfiguration({
     trace_dir: input.trace_dir,
     template_id: input.template_id,
-    source_profile: input.source_profile,
+    ...(input.source_mode === undefined ? {} : {source_mode: input.source_mode}),
+    ...(input.source_scope === undefined ? {} : {source_scope: input.source_scope}),
     configuration: {collaboration_model: current.collaboration_model, source_activation: current.source_activation},
     ...(input.migrated_at === undefined ? {} : {updated_at: input.migrated_at}),
   });
   return {migrated: true, previous_state: 'legacy_unlocked', ...updated};
+}
+
+/**
+ * Explicit recovery path for an intentional source-profile change.  A project
+ * refuses a changed profile during normal use; this operation is the only path
+ * that writes the matching selected-source hash after the user has reviewed a
+ * separate profile file and confirmed the change.
+ */
+export function updateProjectSourceProfile(input: {trace_dir: string; source_mode: ProjectSourceMode; source_scope: ProjectScopeType; next_source_profile: ProjectSourceProfileInput}): {source_id: string; previous_profile_hash: string; profile_hash: string; backup_dir: string} {
+  const traceDir = absolute(input.trace_dir, 'trace_dir');
+  const profile = validateStoredSourceProfile(input.next_source_profile);
+  if (profile.source_mode !== input.source_mode || profile.scope_type !== input.source_scope) throw new ProtocolError('SOURCE_PROFILE_LOCK_MISMATCH', 'The proposed source profile mode or scope does not match this project');
+  const lockFile = path.join(traceDir, 'instance', 'trace.lock.json');
+  const profileFile = path.join(traceDir, 'profiles', 'source.profile.json');
+  if (!fs.existsSync(lockFile) || !fs.existsSync(profileFile)) throw new ProtocolError('SOURCE_PROFILE_LOCK_REQUIRED', 'This project is missing its source profile or source lock');
+  const lockRaw = readJson(lockFile);
+  const selected = selectedSourceFromLock(lockRaw);
+  if (profile.source_id !== selected.source_id) throw new ProtocolError('SOURCE_PROFILE_LOCK_MISMATCH', 'The proposed source id differs from the selected project source; reinitialize or use a source migration instead');
+  const sourceMapFile = path.join(traceDir, 'profiles', 'source-activation.json');
+  if (fs.existsSync(sourceMapFile)) {
+    const sourceMap = validateSourceActivationManifest(readJson(sourceMapFile));
+    if (sourceMap.source_id !== profile.source_id) throw new ProtocolError('SOURCE_PROFILE_LOCK_MISMATCH', 'The proposed source profile does not match this project source activation map');
+    assertActivationMapWithinSourcePolicy(sourceMap, profile);
+  }
+  const profileText = json(profile);
+  const profileHash = sha256(profileText);
+  const lock = requireObject(lockRaw, 'template_lock');
+  const nextLock = {...lock, selected_source: {...selected, profile_hash: profileHash}};
+  const backupDir = path.join(traceDir, 'backups', `source-profile-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  ensureDirectory(backupDir);
+  fs.copyFileSync(profileFile, path.join(backupDir, 'source.profile.json'));
+  fs.copyFileSync(lockFile, path.join(backupDir, 'trace.lock.json'));
+  try {
+    writeAtomic(profileFile, profileText);
+    writeAtomic(lockFile, json(nextLock));
+  } catch (error) {
+    fs.copyFileSync(path.join(backupDir, 'source.profile.json'), profileFile);
+    fs.copyFileSync(path.join(backupDir, 'trace.lock.json'), lockFile);
+    throw error;
+  }
+  return {source_id: profile.source_id, previous_profile_hash: selected.profile_hash, profile_hash: profileHash, backup_dir: backupDir};
 }
 
 function profileFor(input: ProjectInitInput, traceDir: string): {profile: ProjectSourceProfileInput; sourceRoot: string; scope: ProjectScopeType} {

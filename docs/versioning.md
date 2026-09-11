@@ -31,7 +31,7 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 | 新用户 / 新项目执行 `trace init` | 使用发行包当前模板、starter、协议与 runtime 生成新的项目 lock。 | 正常执行 `trace init → trace codex enable → trace profile`。 |
 | 已有的已 lock 项目 | 新 runtime 可以读取旧状态并执行只读 in-memory upcast；它**不**替换 `.trace/profiles/`、认知源、SQLite、模板、能力、Skill 或 hooks。 | `trace upgrade` 查看差异；`trace doctor` 验证状态；仅在需要时分别执行明确的 profile/hook/能力操作。 |
 | 早于协作 profile lock 的项目 | `trace profile` 显示 `legacy_unlocked`，继续使用兼容 starter，但不会伪造“已锁定”。 | 审阅后运行一次 `trace profile migrate --confirm true`；只固化当前兼容模型/地图与 hash lock，不动数据或来源。 |
-| runtime/协议不再兼容 | 未知协议、缺失 upcaster 或 profile-lock hash 漂移会 fail-closed；不会把不确定状态静默改写。 | 先 `trace doctor`、备份，再执行随该版本提供的显式迁移命令。 |
+| runtime/协议不再兼容 | 未知协议、缺失 upcaster 或 source profile / lock hash 漂移会 fail-closed；不会把不确定状态静默改写。 | 先 `trace doctor`、备份，再执行随该版本提供的显式迁移命令。 |
 
 `trace upgrade` 是**只读检查**：它显示当前 runtime、项目初始化 runtime、模板 lock 与协作配置状态，并给出下一条显式动作；`automatic_changes` 固定为空。它不执行升级、不会重建项目，也不会触碰 SQLite。`trace status` 同样会把“当前 runtime 与初始化 runtime 是否变化”显示为可见状态，而不把版本变化藏在后台。
 
@@ -59,7 +59,7 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 
 `collaboration-model.json` 和 `source-activation.json` 是用户/项目本地配置，版本字段表达协作语义或地图内容的变化；它们不进入项目 Git。`activation.lock.json` 可提交但只保留两份配置的 id、version 和 SHA-256。这样团队可以审核“本项目锁定哪一版”，同时不会接收其他人的私有条款、来源 root 或正文。
 
-更新必须走显式的 `trace profile update --file <ABS> --confirm true`：runtime 先校验 schema、来源 ID、relative locator 和 host policy，再备份旧配置、更新 lock。手改 profile 后，hash 与 lock 不符会 fail-closed；这比静默把 Agent 换到新上下文更可回放。详见[适配使用者](personalization.md)。
+更新必须走显式的 `trace profile update --file <ABS> --confirm true`：runtime 先校验 schema、来源 ID、relative locator 和 host policy，再备份旧配置、更新 lock。手改 source profile 后，hash 与 lock 不符会 fail-closed；先审阅新 profile，再执行 `trace source update --file <ABS> --confirm true` 才会原子刷新 selected-source lock。协作模型/来源地图仍使用 `trace profile update`。这比静默把 Agent 换到新上下文更可回放。详见[适配使用者](personalization.md)。
 
 ## 发布决策顺序
 

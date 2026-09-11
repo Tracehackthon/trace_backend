@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {ZhihuHttpTransport, ZhihuTransportError} from '../dist/packages/integration/zhihu-transport/src/index.js';
 import {MyWikiSourceProvider} from '../dist/packages/integration/mywiki-source/src/index.js';
 import {CodexSkillInstaller} from '../dist/packages/host/codex-skill/src/index.js';
@@ -72,8 +73,28 @@ test('A v0.1 hook-install receipt remains rollback-compatible after the v0.2 eve
   fs.writeFileSync(hooksFile, current, 'utf8');
   const backupFile = path.join(backupRoot, 'hooks-legacy.json'); fs.writeFileSync(backupFile, original, 'utf8');
   const installer = new CodexHookInstaller(hooksFile);
-  const rolledBack = installer.rollback({protocol_id: 'trace.codex-hook-install', protocol_version: '0.1.0', status: 'installed', hooks_file: hooksFile, before_hash: 'before', after_hash: 'after', backup_file: backupFile, managed_events: ['SessionStart', 'UserPromptSubmit'], installed_at: '2026-09-09T00:00:00.000Z'});
+  const rolledBack = installer.rollback({protocol_id: 'trace.codex-hook-install', protocol_version: '0.1.0', status: 'installed', hooks_file: hooksFile, before_hash: 'before', after_hash: createHash('sha256').update(current, 'utf8').digest('hex'), backup_file: backupFile, managed_events: ['SessionStart', 'UserPromptSubmit'], installed_at: '2026-09-09T00:00:00.000Z'});
   assert.equal(rolledBack.status, 'rolled_back');
   assert.equal(rolledBack.protocol_version, '0.1.0');
   assert.equal(fs.readFileSync(hooksFile, 'utf8'), original);
+});
+
+
+test('host rollback preserves a user edit made after a Trace installation', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-host-rollback-cas-'));
+  const source = path.join(dir, 'skill'); fs.mkdirSync(source);
+  fs.writeFileSync(path.join(source, 'SKILL.md'), '---\nname: trace-cas\n---\n', 'utf8');
+  const skillRoot = path.join(dir, 'skills'); const existing = path.join(skillRoot, 'trace-cas'); fs.mkdirSync(existing, {recursive: true}); fs.writeFileSync(path.join(existing, 'SKILL.md'), 'old skill\n', 'utf8');
+  const skill = new CodexSkillInstaller(skillRoot);
+  const skillReceipt = skill.install(source, {backup_root: path.join(dir, 'backups'), approval: 'approve:trace-cas'});
+  fs.appendFileSync(path.join(existing, 'SKILL.md'), 'user changed after install\n', 'utf8');
+  assert.throws(() => skill.rollback(skillReceipt), /STALE_SKILL_ROLLBACK/);
+  assert.match(fs.readFileSync(path.join(existing, 'SKILL.md'), 'utf8'), /user changed after install/);
+
+  const hooksFile = path.join(dir, 'hooks.json'); fs.writeFileSync(hooksFile, '{"hooks":{}}\n', 'utf8');
+  const hooks = new CodexHookInstaller(hooksFile);
+  const hookReceipt = hooks.install({command: 'node trace hook', backup_root: path.join(dir, 'hook-backups'), approval: 'approve:codex-hooks'});
+  fs.writeFileSync(hooksFile, '{"hooks":{"Stop":["user-changed-after-install"]}}\n', 'utf8');
+  assert.throws(() => hooks.rollback(hookReceipt), /STALE_HOOK_ROLLBACK/);
+  assert.match(fs.readFileSync(hooksFile, 'utf8'), /user-changed-after-install/);
 });

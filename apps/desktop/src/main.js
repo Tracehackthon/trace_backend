@@ -14,13 +14,7 @@ const incomingObservation = {
   source: params.get('source') || defaultObservation.source,
 }
 
-const handoffPhrases = [
-  '让思想不断蜕变，让认知不再局限',
-  '上一个判断，正在等你复核',
-  '这条想法，值得一条证据',
-  '想清楚的事，才留得下来',
-  '别让好想法，只活三秒钟',
-]
+const handoffPhrase = '让思想不断蜕变，让认知不再局限'
 
 const escapeHtml = (value) => String(value)
   .replaceAll('&', '&amp;')
@@ -248,28 +242,6 @@ function setFoxBubble(open) {
   if (open) window.setTimeout(() => foxBubbleInput.focus(), 120)
 }
 
-function nextHandoffPhrase() {
-  try {
-    const storedQueue = JSON.parse(sessionStorage.getItem('trace-handoff-queue') || '[]')
-    const last = sessionStorage.getItem('trace-handoff-last')
-    const queue = Array.isArray(storedQueue) ? storedQueue.filter((item) => typeof item === 'number' && handoffPhrases[item]) : []
-    if (queue.length === 0) {
-      const nextQueue = handoffPhrases.map((_, index) => index).filter((index) => String(index) !== last)
-      for (let index = nextQueue.length - 1; index > 0; index -= 1) {
-        const target = Math.floor(Math.random() * (index + 1))
-        ;[nextQueue[index], nextQueue[target]] = [nextQueue[target], nextQueue[index]]
-      }
-      queue.push(...nextQueue)
-    }
-    const selected = queue.shift()
-    sessionStorage.setItem('trace-handoff-queue', JSON.stringify(queue))
-    sessionStorage.setItem('trace-handoff-last', String(selected))
-    return handoffPhrases[selected] || handoffPhrases[0]
-  } catch {
-    return handoffPhrases[Math.floor(Math.random() * handoffPhrases.length)]
-  }
-}
-
 function showToast(message) {
   toast.textContent = message
   toast.classList.add('toast-visible')
@@ -279,9 +251,9 @@ function showToast(message) {
 function runHandoffTransition() {
   if (params.get('from') !== 'deepseek-harness') return
   const transition = document.querySelector('#handoff-transition')
-  document.querySelector('#handoff-phrase').textContent = nextHandoffPhrase()
+  document.querySelector('#handoff-phrase').textContent = handoffPhrase
   transition.classList.add('handoff-transition-visible')
-  window.setTimeout(() => transition.classList.remove('handoff-transition-visible'), 480)
+  window.setTimeout(() => transition.classList.remove('handoff-transition-visible'), 1500)
 }
 
 function appendMessage(message) {

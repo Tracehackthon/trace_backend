@@ -87,6 +87,7 @@ body { overflow: hidden; }
 .thread-item:hover { background: rgba(255, 255, 255, .75); }
 .thread-item-active { background: #fff; box-shadow: 0 8px 25px rgba(35, 60, 48, .07); }
 .thread-status-dot { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: #c8cfcb; }
+.thread-status-dot-observation { background: #e7b54f; box-shadow: 0 0 0 4px #fff5d8; }
 .thread-item-active .thread-status-dot { background: #56a073; box-shadow: 0 0 0 4px #e3f1e7; }
 .thread-item strong, .thread-item small { display: block; }
 .thread-item strong { overflow: hidden; font-size: 12px; font-weight: 680; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
@@ -167,6 +168,30 @@ body { overflow: hidden; }
 
 .context-panel { overflow-y: auto; padding: 27px 22px; border-left: 1px solid var(--line); background: rgba(250, 249, 246, .78); backdrop-filter: blur(18px); transition: transform 220ms cubic-bezier(.34, 1.3, .64, 1), opacity 220ms cubic-bezier(.34, 1.3, .64, 1); }
 .context-panel-hidden { transform: translateX(100%); opacity: 0; pointer-events: none; }
+.context-toggle-handle {
+  position: fixed;
+  top: 46%;
+  right: 0;
+  z-index: 24;
+  width: 29px;
+  padding: 13px 6px;
+  border: 1px solid rgba(45, 106, 79, .18);
+  border-right: 0;
+  border-radius: 12px 0 0 12px;
+  background: rgba(250, 253, 250, .94);
+  box-shadow: -7px 10px 24px rgba(31, 67, 46, .12);
+  color: var(--green-dark);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.25;
+  writing-mode: vertical-rl;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(10px);
+  transition: transform 220ms cubic-bezier(.34, 1.3, .64, 1), opacity 180ms cubic-bezier(.34, 1.3, .64, 1);
+}
+.context-toggle-handle-visible { opacity: 1; pointer-events: auto; transform: translateX(0); }
 .context-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 19px; }
 .context-heading h2 { margin: 6px 0 0; font-size: 17px; }
 .icon-button { border: 0; background: transparent; color: #9ba39f; font-size: 22px; cursor: pointer; }

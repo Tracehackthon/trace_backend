@@ -65,6 +65,14 @@ const relatedThreads = [
   { id: 'thread-evidence', title: '检索结果必须附带可追溯证据', meta: '9 月 11 日 · 已采用' },
 ]
 
+function renderThreadItem(thread) {
+  return `
+    <button class="thread-item ${thread.active ? 'thread-item-active' : ''}" type="button" data-thread-id="${escapeHtml(thread.id)}">
+      <span class="thread-status-dot ${thread.meta.includes('观察') ? 'thread-status-dot-observation' : ''}"></span>
+      <span><strong>${escapeHtml(thread.title)}</strong><small>${escapeHtml(thread.meta)}</small></span>
+    </button>`
+}
+
 function renderMessage(message, index) {
   const isAgent = message.role === 'agent'
   const prompts = message.prompts?.length
@@ -94,13 +102,7 @@ function appTemplate() {
         <button class="new-thread" type="button" id="new-thread-button"><span>＋</span> 新建讨论</button>
 
         <div class="sidebar-label">最近的思考</div>
-        <nav class="thread-list">
-          ${relatedThreads.map((thread) => `
-            <button class="thread-item ${thread.active ? 'thread-item-active' : ''}" type="button" data-thread-id="${escapeHtml(thread.id)}">
-              <span class="thread-status-dot"></span>
-              <span><strong>${escapeHtml(thread.title)}</strong><small>${escapeHtml(thread.meta)}</small></span>
-            </button>`).join('')}
-        </nav>
+        <nav class="thread-list" id="thread-list">${relatedThreads.map(renderThreadItem).join('')}</nav>
 
         <div class="sidebar-footer">
           <span class="runtime-dot"></span>
@@ -182,6 +184,7 @@ function appTemplate() {
           <p>继续讨论、补充证据后，再由你决定是否进入候选变化。</p>
         </section>
       </aside>
+      <button class="context-toggle-handle" id="context-toggle-handle" type="button" aria-label="重新打开右侧现场面板">现场 ›</button>
 
       <aside class="fox-desk-pet" aria-label="Trace 白狐轻接收入口">
         <div class="fox-light-dots" id="fox-light-dots" aria-label="已记下的想法数量"></div>
@@ -211,10 +214,27 @@ const composerInput = document.querySelector('#composer-input')
 const sendButton = document.querySelector('#send-button')
 const contextPanel = document.querySelector('.context-panel')
 const toast = document.querySelector('#toast')
+const threadList = document.querySelector('#thread-list')
 const foxButton = document.querySelector('#fox-button')
 const foxBubble = document.querySelector('#fox-bubble')
 const foxBubbleInput = document.querySelector('#fox-bubble-input')
 const foxLightDots = document.querySelector('#fox-light-dots')
+const contextHandle = document.querySelector('#context-toggle-handle')
+
+function renderThreadList() {
+  threadList.innerHTML = relatedThreads.map(renderThreadItem).join('')
+}
+
+function formatObservationTime() {
+  const now = new Date()
+  return `今天 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} · 观察`
+}
+
+function setContextPanel(open) {
+  contextPanel.classList.toggle('context-panel-hidden', !open)
+  contextHandle.classList.toggle('context-toggle-handle-visible', !open)
+  contextHandle.setAttribute('aria-hidden', String(open))
+}
 
 function renderFoxLights() {
   foxLightDots.innerHTML = Array.from({ length: Math.min(state.foxLightCount, 6) }, (_, index) => `<i class="fox-light-dot fox-light-dot-${index}"></i>`).join('')
@@ -306,6 +326,11 @@ document.addEventListener('click', (event) => {
     composerInput.value = promptButton.dataset.prompt
     composerInput.focus()
   }
+
+  const threadButton = event.target.closest('[data-thread-id]')
+  if (threadButton && threadButton.dataset.threadId !== state.activeThreadId) {
+    showToast('历史讨论切换将在接入 Trace Runtime 后开放。')
+  }
 })
 
 document.querySelector('#candidate-button').addEventListener('click', () => {
@@ -322,8 +347,9 @@ document.querySelector('#candidate-button').addEventListener('click', () => {
   showToast(state.candidateState === '候选中' ? '已进入候选，但尚未采用或写入长期能力。' : '已撤回候选，继续保持讨论状态。')
 })
 
-document.querySelector('#show-source-button').addEventListener('click', () => contextPanel.classList.remove('context-panel-hidden'))
-document.querySelector('#close-context-button').addEventListener('click', () => contextPanel.classList.add('context-panel-hidden'))
+document.querySelector('#show-source-button').addEventListener('click', () => setContextPanel(true))
+document.querySelector('#close-context-button').addEventListener('click', () => setContextPanel(false))
+contextHandle.addEventListener('click', () => setContextPanel(true))
 document.querySelector('#new-thread-button').addEventListener('click', () => {
   composerInput.value = ''
   composerInput.focus()
@@ -333,11 +359,23 @@ document.querySelector('#new-thread-button').addEventListener('click', () => {
 foxButton.addEventListener('click', () => setFoxBubble(!foxBubble.classList.contains('fox-bubble-visible')))
 document.querySelector('#fox-capture-button').addEventListener('click', () => {
   const text = foxBubbleInput.value.trim()
+  if (!text) {
+    showToast('先写下一句想法，再把它接住。')
+    foxBubbleInput.focus()
+    return
+  }
+  relatedThreads.unshift({
+    id: `fox-thought-${Date.now()}`,
+    title: text,
+    meta: formatObservationTime(),
+    active: false,
+  })
   state.foxLightCount += 1
   foxBubbleInput.value = ''
+  renderThreadList()
   renderFoxLights()
   setFoxBubble(false)
-  showToast(text ? '已记下，先不急着归类。' : '已为这个念头留下一枚光点。')
+  showToast('已记下，已加入最近的思考。')
 })
 document.querySelector('#fox-deepen-button').addEventListener('click', () => {
   const text = foxBubbleInput.value.trim()
@@ -351,10 +389,3 @@ document.querySelector('#fox-deepen-button').addEventListener('click', () => {
 
 renderFoxLights()
 runHandoffTransition()
-
-for (const threadButton of document.querySelectorAll('[data-thread-id]')) {
-  threadButton.addEventListener('click', () => {
-    if (threadButton.dataset.threadId === state.activeThreadId) return
-    showToast('历史讨论切换将在接入 Trace Runtime 后开放。')
-  })
-}

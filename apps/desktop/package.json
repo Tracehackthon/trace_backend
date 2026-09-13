@@ -3,5 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Reserved desktop shell boundary; it must call Trace through SDK/RPC"
+  "description": "Trace desktop Agent workspace prototype",
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs"
+  }
 }

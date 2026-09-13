@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Trace desktop Agent workspace prototype",
   "scripts": {
+    "build": "node --check server.mjs && node --check src/main.js",
     "dev": "node server.mjs",
     "start": "node server.mjs"
   }

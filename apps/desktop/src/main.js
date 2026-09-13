@@ -14,6 +14,14 @@ const incomingObservation = {
   source: params.get('source') || defaultObservation.source,
 }
 
+const handoffPhrases = [
+  '让思想不断蜕变，让认知不再局限',
+  '上一个判断，正在等你复核',
+  '这条想法，值得一条证据',
+  '想清楚的事，才留得下来',
+  '别让好想法，只活三秒钟',
+]
+
 const escapeHtml = (value) => String(value)
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -21,9 +29,22 @@ const escapeHtml = (value) => String(value)
   .replaceAll('"', '&quot;')
   .replaceAll("'", '&#039;')
 
+function foxSvg(className = '') {
+  return `<svg class="${className}" viewBox="0 0 120 130" role="img" aria-label="Trace 白狐" xmlns="http://www.w3.org/2000/svg">
+    <path d="M27 58C14 37 18 13 36 8l15 24c6-3 13-4 19-3L85 7c17 7 20 29 8 50 11 11 16 27 12 42-4 16-19 24-36 21l-9-6-10 6c-19 2-33-8-36-24-3-15 2-29 13-38Z" fill="#fff" stroke="#D7E3DA" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M34 25l7 15-13-4c0-4 2-8 6-11Zm51 0 6 11-13 4 7-15Z" fill="#E6F1E9"/>
+    <path d="M76 77c19-8 31 2 27 17-4 15-20 24-38 20 8-8 11-16 11-26 0-4 0-7 0-11Z" fill="#F0F6F1" stroke="#D7E3DA" stroke-width="4" stroke-linejoin="round"/>
+    <circle cx="45" cy="62" r="4.5" fill="#2D6A4F"/>
+    <circle cx="71" cy="62" r="4.5" fill="#2D6A4F"/>
+    <path d="M54 75c4 3 8 3 12 0" fill="none" stroke="#2D6A4F" stroke-width="3" stroke-linecap="round"/>
+    <path d="M46 96c8 5 20 5 28 0" fill="none" stroke="#B7D3BE" stroke-width="4" stroke-linecap="round"/>
+  </svg>`
+}
+
 const state = {
   activeThreadId: incomingObservation.id,
   candidateState: '讨论中',
+  foxLightCount: 0,
   messages: [
     {
       role: 'user',
@@ -51,7 +72,7 @@ function renderMessage(message, index) {
     : ''
   return `
     <article class="message ${isAgent ? 'message-agent' : 'message-user'}" data-message-index="${index}">
-      <div class="message-avatar">${isAgent ? '<img src="/public/liukanshan.png" alt="刘看山" />' : '你'}</div>
+      <div class="message-avatar">${isAgent ? foxSvg('fox-message-mark') : '你'}</div>
       <div class="message-content">
         <div class="message-role">${isAgent ? 'Trace Agent' : '现场观察'}</div>
         <p>${escapeHtml(message.content)}</p>
@@ -66,7 +87,7 @@ function appTemplate() {
     <div class="desktop-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark"><img src="/public/liukanshan.png" alt="刘看山" /></div>
+          <div class="brand-mark">${foxSvg('fox-brand-mark')}</div>
           <div><strong>Trace</strong><span>让想法继续生长</span></div>
         </div>
 
@@ -161,8 +182,24 @@ function appTemplate() {
           <p>继续讨论、补充证据后，再由你决定是否进入候选变化。</p>
         </section>
       </aside>
+
+      <aside class="fox-desk-pet" aria-label="Trace 白狐轻接收入口">
+        <div class="fox-light-dots" id="fox-light-dots" aria-label="已记下的想法数量"></div>
+        <div class="fox-bubble" id="fox-bubble" aria-hidden="true">
+          <span class="fox-bubble-label">随手接住一个想法</span>
+          <textarea id="fox-bubble-input" rows="4" placeholder="不用整理，先说出来……"></textarea>
+          <div class="fox-bubble-actions">
+            <button class="quiet-button" id="fox-capture-button" type="button">记下它</button>
+            <button class="primary-button" id="fox-deepen-button" type="button">深度思考</button>
+          </div>
+        </div>
+        <button class="fox-button" id="fox-button" type="button" aria-expanded="false" aria-label="打开白狐想法气泡">
+          ${foxSvg('fox-pet-svg')}
+        </button>
+      </aside>
     </div>
 
+    <div class="handoff-transition" id="handoff-transition" aria-live="polite"><p id="handoff-phrase"></p></div>
     <div class="toast" id="toast" role="status"></div>`
 }
 
@@ -174,11 +211,57 @@ const composerInput = document.querySelector('#composer-input')
 const sendButton = document.querySelector('#send-button')
 const contextPanel = document.querySelector('.context-panel')
 const toast = document.querySelector('#toast')
+const foxButton = document.querySelector('#fox-button')
+const foxBubble = document.querySelector('#fox-bubble')
+const foxBubbleInput = document.querySelector('#fox-bubble-input')
+const foxLightDots = document.querySelector('#fox-light-dots')
+
+function renderFoxLights() {
+  foxLightDots.innerHTML = Array.from({ length: Math.min(state.foxLightCount, 6) }, (_, index) => `<i class="fox-light-dot fox-light-dot-${index}"></i>`).join('')
+  foxLightDots.setAttribute('aria-label', `本会话已记下 ${state.foxLightCount} 条想法`)
+}
+
+function setFoxBubble(open) {
+  foxBubble.classList.toggle('fox-bubble-visible', open)
+  foxBubble.setAttribute('aria-hidden', String(!open))
+  foxButton.setAttribute('aria-expanded', String(open))
+  if (open) window.setTimeout(() => foxBubbleInput.focus(), 120)
+}
+
+function nextHandoffPhrase() {
+  try {
+    const storedQueue = JSON.parse(sessionStorage.getItem('trace-handoff-queue') || '[]')
+    const last = sessionStorage.getItem('trace-handoff-last')
+    const queue = Array.isArray(storedQueue) ? storedQueue.filter((item) => typeof item === 'number' && handoffPhrases[item]) : []
+    if (queue.length === 0) {
+      const nextQueue = handoffPhrases.map((_, index) => index).filter((index) => String(index) !== last)
+      for (let index = nextQueue.length - 1; index > 0; index -= 1) {
+        const target = Math.floor(Math.random() * (index + 1))
+        ;[nextQueue[index], nextQueue[target]] = [nextQueue[target], nextQueue[index]]
+      }
+      queue.push(...nextQueue)
+    }
+    const selected = queue.shift()
+    sessionStorage.setItem('trace-handoff-queue', JSON.stringify(queue))
+    sessionStorage.setItem('trace-handoff-last', String(selected))
+    return handoffPhrases[selected] || handoffPhrases[0]
+  } catch {
+    return handoffPhrases[Math.floor(Math.random() * handoffPhrases.length)]
+  }
+}
 
 function showToast(message) {
   toast.textContent = message
   toast.classList.add('toast-visible')
   window.setTimeout(() => toast.classList.remove('toast-visible'), 2200)
+}
+
+function runHandoffTransition() {
+  if (params.get('from') !== 'deepseek-harness') return
+  const transition = document.querySelector('#handoff-transition')
+  document.querySelector('#handoff-phrase').textContent = nextHandoffPhrase()
+  transition.classList.add('handoff-transition-visible')
+  window.setTimeout(() => transition.classList.remove('handoff-transition-visible'), 480)
 }
 
 function appendMessage(message) {
@@ -229,6 +312,13 @@ document.querySelector('#candidate-button').addEventListener('click', () => {
   state.candidateState = state.candidateState === '候选中' ? '讨论中' : '候选中'
   document.querySelector('#candidate-state').textContent = state.candidateState
   document.querySelector('#candidate-card').classList.toggle('candidate-card-active', state.candidateState === '候选中')
+  if (params.get('from') === 'deepseek-harness' && window.opener) {
+    window.opener.postMessage({
+      type: 'trace.desktop.candidate',
+      observationId: incomingObservation.id,
+      status: state.candidateState === '候选中' ? '候选中' : '待确认',
+    }, 'http://127.0.0.1:3080')
+  }
   showToast(state.candidateState === '候选中' ? '已进入候选，但尚未采用或写入长期能力。' : '已撤回候选，继续保持讨论状态。')
 })
 
@@ -239,6 +329,28 @@ document.querySelector('#new-thread-button').addEventListener('click', () => {
   composerInput.focus()
   showToast('新讨论入口已准备；V0.1 不会自动保存空会话。')
 })
+
+foxButton.addEventListener('click', () => setFoxBubble(!foxBubble.classList.contains('fox-bubble-visible')))
+document.querySelector('#fox-capture-button').addEventListener('click', () => {
+  const text = foxBubbleInput.value.trim()
+  state.foxLightCount += 1
+  foxBubbleInput.value = ''
+  renderFoxLights()
+  setFoxBubble(false)
+  showToast(text ? '已记下，先不急着归类。' : '已为这个念头留下一枚光点。')
+})
+document.querySelector('#fox-deepen-button').addEventListener('click', () => {
+  const text = foxBubbleInput.value.trim()
+  if (text) composerInput.value = text
+  foxBubbleInput.value = ''
+  setFoxBubble(false)
+  composerInput.focus()
+  composerInput.setSelectionRange(composerInput.value.length, composerInput.value.length)
+  showToast('已回到深度讨论输入框。')
+})
+
+renderFoxLights()
+runHandoffTransition()
 
 for (const threadButton of document.querySelectorAll('[data-thread-id]')) {
   threadButton.addEventListener('click', () => {

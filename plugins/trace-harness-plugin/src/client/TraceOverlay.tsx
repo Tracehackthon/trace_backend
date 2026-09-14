@@ -387,9 +387,16 @@ export function TraceOverlay() {
   }, [])
 
   const currentPetPosition = petPosition ?? getDefaultPetPosition(viewport)
+  const lastPetCenterXRef = useRef<number | null>(null)
   useEffect(() => {
-    const nextFacing: PetFacing = currentPetPosition.x + petSize.width / 2 < viewport.width / 2 ? 'right' : 'left'
-    setPetFacing(nextFacing)
+    const centerX = currentPetPosition.x + petSize.width / 2
+    const lastX = lastPetCenterXRef.current
+    if (lastX === null) {
+      setPetFacing(centerX < viewport.width / 2 ? 'right' : 'left')
+    } else if (Math.abs(centerX - lastX) > 1) {
+      setPetFacing(centerX > lastX ? 'right' : 'left')
+    }
+    lastPetCenterXRef.current = centerX
   }, [currentPetPosition.x, viewport.width])
   const reminderPlacement = getReminderPlacement(currentPetPosition, viewport)
   const defaultPanelPosition = getDefaultPanelPosition(currentPetPosition, viewport)

@@ -1,7 +1,7 @@
 import {AppendOnlyStore, SqliteVersionedStore, StorageError, type VersionedStore} from '../../storage/src/index.js';
 import {ChangeSetService} from '../../change-set/src/index.js';
 import {DataLedger} from '../../data/src/index.js';
-import {ContinuityLedger, type CreateDiscussionTurn, type CreateReceipt, type CreateThread, type UpdateThread, type ContinuityEnvelope} from '../../continuity/src/index.js';
+import {ContinuityLedger, DecisionTrail, type CreateDecisionPoint, type CreateDiscussionTurn, type CreateReceipt, type CreateThread, type ResolveDecisionPoint, type ReviseDecisionPoint, type UpdateThread, type ContinuityEnvelope} from '../../continuity/src/index.js';
 import {ProtocolError, type ChangeSet, type CreateChangeSet, type UpdateChangeSet, type ChangeStatus} from '../../protocol/src/index.js';
 import type {CreateDataRecord, DataEnvelope, DataKind, UpdateDataRecord} from '../../data/src/index.js';
 import {buildCapabilityCandidateRecord, type CapabilityCandidateInput} from '../../capability-candidate/src/index.js';
@@ -24,6 +24,7 @@ export class TraceRuntime {
   readonly changes: ChangeSetService;
   readonly data: DataLedger;
   readonly continuity?: ContinuityLedger;
+  readonly decisions?: DecisionTrail;
   readonly events?: SqliteTraceEventStore;
   readonly promptCases: PromptCaseCaptureService;
 
@@ -43,8 +44,9 @@ export class TraceRuntime {
     this.data = data;
     this.promptCases = new PromptCaseCaptureService(this.data);
     if (paths.sqliteStateFile || paths.continuityStateFile) {
-      const continuityStore = paths.sqliteStateFile ? new SqliteVersionedStore<ContinuityEnvelope>(paths.sqliteStateFile, 'continuity_records') : new AppendOnlyStore<ContinuityEnvelope>(paths.continuityStateFile!);
+      const continuityStore: VersionedStore<ContinuityEnvelope> = paths.sqliteStateFile ? new SqliteVersionedStore<ContinuityEnvelope>(paths.sqliteStateFile, 'continuity_records') : new AppendOnlyStore<ContinuityEnvelope>(paths.continuityStateFile!);
       this.continuity = new ContinuityLedger(continuityStore);
+      this.decisions = new DecisionTrail(this.continuity);
     }
     if (paths.sqliteStateFile) this.events = new SqliteTraceEventStore(paths.sqliteStateFile);
   }
@@ -109,11 +111,21 @@ export class TraceRuntime {
     return this.continuity;
   }
 
+  private requireDecisions(): DecisionTrail {
+    if (!this.decisions) throw new StorageError('CONTINUITY_UNAVAILABLE', 'Continuity state is not configured for this runtime');
+    return this.decisions;
+  }
+
   createThread(input: CreateThread) { return this.requireContinuity().createThread(input); }
   updateThread(threadId: string, input: UpdateThread) { return this.requireContinuity().updateThread(threadId, input); }
   appendDiscussionTurn(input: CreateDiscussionTurn) { return this.requireContinuity().appendTurn(input); }
   createReceipt(input: CreateReceipt) { return this.requireContinuity().createReceipt(input); }
   listContinuity(threadId?: string) { return this.requireContinuity().list(threadId); }
+  createDecisionPoint(input: CreateDecisionPoint) { return this.requireDecisions().createDecisionPoint(input); }
+  resolveDecisionPoint(recordId: string, input: ResolveDecisionPoint) { return this.requireDecisions().resolveDecisionPoint(recordId, input); }
+  reviseDecisionPoint(recordId: string, input: ReviseDecisionPoint) { return this.requireDecisions().reviseDecisionPoint(recordId, input); }
+  pendingDecisions(threadId?: string) { return this.requireDecisions().pendingFor(threadId); }
+  decisionPath(threadId: string) { return this.requireDecisions().pathFor(threadId); }
   recordTraceEvent(input: CreateTraceEvent): TraceEvent {
     if (!this.events) throw new StorageError('TRACE_EVENTS_UNAVAILABLE', 'Trace event storage requires sqliteStateFile');
     return this.events.record(input);

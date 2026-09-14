@@ -13,6 +13,6 @@ test('release governance uses main and validates separate runtime, package and p
   assert.equal(report.status, 'healthy');
   assert.equal(report.release_branch, 'main');
   assert.equal(report.runtime_version, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
-  assert.equal(report.protocol_tracks['trace.continuity'], '0.2.0');
+  assert.equal(report.protocol_tracks['trace.continuity'], '0.3.0');
   assert.ok(report.workspace_packages > 10);
 });

@@ -9,3 +9,4 @@ release/
 *.tsbuildinfo
 python/sdk/.venv/
 .workbuddy-ai/
+trace-upcast-contract-test-*.jsonl

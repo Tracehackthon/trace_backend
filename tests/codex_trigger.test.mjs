@@ -41,7 +41,7 @@ test('Codex trigger can switch to the TypeScript runtime without a Python hook',
   assert.equal(output.receipt.kind, 'activation_receipt');
   assert.equal(output.pack.forbidden_scopes.includes('raw-chat-transcript'), true);
   assert.equal(output.correlation_id, 'codex-session:thread-trigger-001');
-  assert.equal(output.receipt.protocol_version, '0.2.0');
+  assert.equal(output.receipt.protocol_version, '0.3.0');
   assert.equal(output.receipt.correlation_id, output.correlation_id);
   assert.equal(output.receipt.causation_id, output.causation_id);
   assert.equal(output.trace_event.outcome, 'success');

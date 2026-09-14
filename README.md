@@ -88,7 +88,8 @@ Trace 的冷启动 starter 只提供通用、可解释的协作原则，例如�
 | 产品面 | 用户获得什么 | 当前状态 |
 |---|---|---|
 | **Trace for Codex** | `$trace`、`$trace-adapt`、`$trace-review` 的自然语言入口 | 已实现 |
-| **Local MCP** | 状态、proposal、adopt、apply、receipt 的标准控制面 | 已实现 |
+| **对话引擎与决策路径** | scripted 多轮对话（onboard / adapt / review）、每个岔路带理由落账、修订成链、拒绝理由反哺提案、跨会话接续、`trace path` 回放 | 已实现 |
+| **Local MCP** | 状态、proposal、adopt、apply、receipt、对话与候选审阅的标准控制面 | 已实现 |
 | **项目 Trace Space** | 每个项目独立的 `.trace/`、profile lock、SQLite、备份与恢复 | 已实现 |
 | **认知来源接续** | 受控 source lease、来源路由与真实访问 evidence | 已实现，Codex 保留原生检索 |
 | **候选与案例沉淀** | transient → capture proposal → source snapshot → precedent | 已实现，完整案例必须显式选择 |
@@ -171,6 +172,7 @@ trace backup create
 
 - [从 Codex 开始使用 Trace](docs/codex-plugin.md)
 - [第一次使用与项目初始化](docs/getting-started.md)
+- [对话引擎与决策路径](docs/dialogue-engine.md)
 - [日常协作、候选与沉淀](docs/daily-workflow.md)
 - [让 Agent 逐步适配使用者](docs/personalization.md)
 - [版本、协议与旧用户迁移](docs/versioning.md)

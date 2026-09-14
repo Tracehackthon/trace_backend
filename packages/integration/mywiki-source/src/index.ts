@@ -79,9 +79,17 @@ function safeRelative(value: string): string {
   return normalized;
 }
 function noSymlink(file: string): void {
+  // Check the target and its not-yet-existing ancestry; host-level symlinked
+  // ancestors above the deepest existing entry (e.g. macOS /var → /private/var)
+  // are environment, not managed state.
   let cursor = file;
   while (true) {
-    try { if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`Symlink is not allowed: ${file}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    let stat: fs.Stats | undefined;
+    try { stat = fs.lstatSync(cursor); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (stat !== undefined) {
+      if (stat.isSymbolicLink()) throw new Error(`Symlink is not allowed: ${file}`);
+      return;
+    }
     const parent = path.dirname(cursor); if (parent === cursor) return; cursor = parent;
   }
 }

@@ -29,12 +29,20 @@ function inside(root, relative) {
 }
 
 function noSymlink(file) {
+  // Check the target and its not-yet-existing ancestry; host-level symlinked
+  // ancestors above the deepest existing entry (e.g. macOS /var → /private/var)
+  // are environment, not managed state.
   let cursor = file;
   while (true) {
+    let stat;
     try {
-      if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`Symlink is not allowed: ${file}`);
+      stat = fs.lstatSync(cursor);
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
+    }
+    if (stat !== undefined) {
+      if (stat.isSymbolicLink()) throw new Error(`Symlink is not allowed: ${file}`);
+      return;
     }
     const parent = path.dirname(cursor);
     if (parent === cursor) return;

@@ -25,13 +25,13 @@ function legacyThread() {
 
 test('continuity v0.1 records are upcast in memory without rewriting history', () => {
   const upgraded = validateContinuityEnvelope(legacyThread());
-  assert.equal(upgraded.protocol_version, '0.2.0');
+  assert.equal(upgraded.protocol_version, '0.3.0');
   assert.equal(upgraded.correlation_id, 'legacy-continuity:legacy-thread-001');
   assert.equal(upgraded.causation_id, 'legacy-continuity:legacy-thread-001@1');
-  assert.throws(() => validateContinuityEnvelope({...legacyThread(), protocol_version: '9.9.9'}), /PROTOCOL_MIGRATION_REQUIRED|Unsupported continuity protocol version/);
+  assert.throws(() => validateContinuityEnvelope({...legacyThread(), protocol_version: '9.9.9'}), /No upcaster|PROTOCOL_MIGRATION_REQUIRED|Unsupported continuity protocol version/);
 });
 
-test('a legacy SQLite continuity revision remains immutable and can be followed by a v0.2 revision', () => {
+test('a legacy SQLite continuity revision remains immutable and can be followed by a current-version revision', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-protocol-upcast-'));
   const database = path.join(directory, 'trace.sqlite');
   const bootstrap = new TraceRuntime({sqliteStateFile: database});
@@ -43,9 +43,9 @@ test('a legacy SQLite continuity revision remains immutable and can be followed 
 
   const runtime = new TraceRuntime({sqliteStateFile: database});
   const loaded = runtime.listContinuity('legacy-thread-001');
-  assert.equal(loaded[0].protocol_version, '0.2.0');
+  assert.equal(loaded[0].protocol_version, '0.3.0');
   const updated = runtime.updateThread('legacy-thread-001', {expected_revision: 1, status: 'watching'});
-  assert.equal(updated.protocol_version, '0.2.0');
+  assert.equal(updated.protocol_version, '0.3.0');
   assert.equal(updated.revision, 2);
   runtime.close();
 
@@ -53,6 +53,6 @@ test('a legacy SQLite continuity revision remains immutable and can be followed 
   const revisions = raw.prepare('SELECT revision, payload FROM continuity_records WHERE identity = ? ORDER BY revision').all('legacy-thread-001');
   raw.close();
   assert.equal(JSON.parse(revisions[0].payload).protocol_version, '0.1.0');
-  assert.equal(JSON.parse(revisions[1].payload).protocol_version, '0.2.0');
+  assert.equal(JSON.parse(revisions[1].payload).protocol_version, '0.3.0');
   assert.equal(doctorSqlite(database).status, 'healthy');
 });

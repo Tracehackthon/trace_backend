@@ -8,7 +8,7 @@
   },
   "protocol_tracks": {
     "trace.data-envelope": "0.3.0",
-    "trace.continuity": "0.2.0",
+    "trace.continuity": "0.3.0",
     "trace.context-record": "0.2.0",
     "trace.project-instance": "0.2.0",
     "trace.source-profile": "0.3.0",

@@ -15,9 +15,18 @@ function inside(root: string, relative: string): string {
   if (target !== base && !target.startsWith(`${base}${path.sep}`)) throw new ProtocolError('INVALID_PATH', `Path escapes root: ${relative}`);
   return target;
 }
-function noSymlink(file: string): void {
-  let cursor = file;
+function noSymlink(file: string, root?: string): void {
+  // Symlinks are rejected at or below the managed tree root. Host-level
+  // symlinked ancestors above that boundary (e.g. macOS /var → /private/var
+  // under os.tmpdir()) are environment, not capability content.
+  const stops = new Set<string>([path.parse(path.resolve(file)).root]);
+  if (root !== undefined) {
+    stops.add(path.resolve(root));
+    try { stops.add(fs.realpathSync(root)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  let cursor = path.resolve(file);
   while (true) {
+    if (stops.has(cursor)) return;
     try { if (fs.lstatSync(cursor).isSymbolicLink()) throw new ProtocolError('INVALID_PATH', `Symlinks are not allowed: ${file}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     const parent = path.dirname(cursor); if (parent === cursor) return; cursor = parent;
   }
@@ -27,7 +36,7 @@ function listFiles(root: string): string[] {
   const output: string[] = [];
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
-      const file = path.join(dir, entry.name); noSymlink(file);
+      const file = path.join(dir, entry.name); noSymlink(file, root);
       if (entry.isDirectory()) visit(file); else if (entry.isFile()) output.push(path.relative(root, file).split(path.sep).join('/')); else throw new ProtocolError('INVALID_PATH', `Unsupported entry: ${file}`);
     }
   };
@@ -58,7 +67,7 @@ function requireCandidateGate(spec: CapabilitySpec, resolver: CapabilityPublishe
 function sourceFiles(spec: CapabilitySpec): {sources: Record<string, string>; files: Record<string, Buffer>} {
   const sources: Record<string, string> = {}; const files: Record<string, Buffer> = {};
   for (const item of spec.files) {
-    const source = inside(spec.source_root, item.source); noSymlink(source);
+    const source = inside(spec.source_root, item.source); noSymlink(source, spec.source_root);
     const content = read(source); if (!content) throw new ProtocolError('NOT_FOUND', `Missing source file: ${source}`);
     const target = item.target ?? item.source; sources[item.source] = hash(content); files[target] = content;
   }

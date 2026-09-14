@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import liukanshanImage from './assets/liukanshan.png'
+import crawlAImage from './assets/pet/crawl_A.png'
+import crawlBImage from './assets/pet/crawl_B.png'
+import sitAImage from './assets/pet/sit_A.png'
+import sitBImage from './assets/pet/sit_B.png'
 import { candidateJudgement, seedObservations, type CandidateStatus, type Observation, type ObservationStatus } from './mock-data'
 import { TracePanel } from './TracePanel'
 
@@ -14,8 +17,10 @@ const traceSessionStore: {
 }
 
 const petSize = { width: 92, height: 116 }
-// V1.5 card proportions: enough room for the complete status/title/source stack.
-const orbitCardSize = { width: 206, height: 82 }
+const petBottomInset = 6
+// Compact memory bubbles: the fan geometry remains unchanged, while the cards
+// themselves are one size tighter so they do not cover the reading canvas.
+const orbitCardSize = { width: 188, height: 74 }
 const orbitPadding = 12
 const panelSize = { width: 460, height: 590 }
 const panelInset = 16
@@ -23,6 +28,19 @@ const panelInset = 16
 type Viewport = { width: number; height: number }
 type PetPosition = { x: number; y: number }
 type TraceReminder = { observationId: string; text: string }
+type ReminderPlacement = { side: 'top' | 'bottom' | 'inside'; style: CSSProperties }
+type PetPose = 'crawl' | 'sit'
+type PetFacing = 'left' | 'right'
+type OrbitPosition = {
+  x: number
+  y: number
+  rotate: number
+  originX: number
+  originY: number
+  originRotate: number
+  stacked: boolean
+  stackTop: boolean
+}
 type OrbitItem =
   | { id: string; kind: 'observation'; observation: Observation }
   | { id: string; kind: 'guide' | 'capture'; kicker: string; title: string; detail: string; tone: string; action: 'capture' | 'focus-first' }
@@ -42,14 +60,14 @@ function getViewport(): Viewport {
 function getDefaultPetPosition(viewport: Viewport): PetPosition {
   return {
     x: Math.max(8, viewport.width - 22 - petSize.width),
-    y: Math.max(8, viewport.height - 22 - petSize.height),
+    y: Math.max(8, viewport.height - petBottomInset - petSize.height),
   }
 }
 
 function clampPetPosition(position: PetPosition, viewport: Viewport): PetPosition {
   return {
     x: Math.min(Math.max(8, position.x), Math.max(8, viewport.width - petSize.width - 8)),
-    y: Math.min(Math.max(8, position.y), Math.max(8, viewport.height - petSize.height - 8)),
+    y: Math.min(Math.max(8, position.y), Math.max(8, viewport.height - petSize.height - petBottomInset)),
   }
 }
 
@@ -90,7 +108,7 @@ function distanceBetween(first: PetPosition, second: PetPosition) {
   return Math.hypot(first.x - second.x, first.y - second.y)
 }
 
-function getOrbitPositions(petPosition: PetPosition, viewport: Viewport, items: OrbitItem[]) {
+function getOrbitPositions(petPosition: PetPosition, viewport: Viewport, items: OrbitItem[]): OrbitPosition[] {
   if (items.length === 0) return []
 
   const petCenter = {
@@ -113,7 +131,7 @@ function getOrbitPositions(petPosition: PetPosition, viewport: Viewport, items: 
   const cardHalfWidth = orbitCardSize.width / 2 + 18
   const cardHalfHeight = orbitCardSize.height / 2 + 22
 
-  return items.map((_, index) => {
+  const naturalCenters = items.map((_, index) => {
     const angle = innerAngle - fanSpan / 2 + step * index
     const radialOffset = radialOffsets[index % radialOffsets.length]
     const tangentOffset = tangentOffsets[index % tangentOffsets.length]
@@ -126,12 +144,127 @@ function getOrbitPositions(petPosition: PetPosition, viewport: Viewport, items: 
       x: Math.min(Math.max(cardHalfWidth + orbitPadding, targetCenter.x), viewport.width - cardHalfWidth - orbitPadding),
       y: Math.min(Math.max(cardHalfHeight + orbitPadding, targetCenter.y), viewport.height - cardHalfHeight - orbitPadding),
     }
+    return safeCenter
+  })
+
+  // Compression is driven by actual viewport pressure, not by a corner flag.
+  // Use the overlap over the smaller card's area so a card covered by >=80% of
+  // another card joins the same compact stack.
+  const overlapRatio = (first: PetPosition, second: PetPosition) => {
+    const firstLeft = first.x - orbitCardSize.width / 2
+    const firstRight = first.x + orbitCardSize.width / 2
+    const firstTop = first.y - orbitCardSize.height / 2
+    const firstBottom = first.y + orbitCardSize.height / 2
+    const secondLeft = second.x - orbitCardSize.width / 2
+    const secondRight = second.x + orbitCardSize.width / 2
+    const secondTop = second.y - orbitCardSize.height / 2
+    const secondBottom = second.y + orbitCardSize.height / 2
+    const width = Math.max(0, Math.min(firstRight, secondRight) - Math.max(firstLeft, secondLeft))
+    const height = Math.max(0, Math.min(firstBottom, secondBottom) - Math.max(firstTop, secondTop))
+    return (width * height) / (orbitCardSize.width * orbitCardSize.height)
+  }
+
+  const parent = items.map((_, index) => index)
+  const find = (index: number): number => {
+    if (parent[index] === index) return index
+    parent[index] = find(parent[index])
+    return parent[index]
+  }
+  const join = (first: number, second: number) => {
+    const firstRoot = find(first)
+    const secondRoot = find(second)
+    if (firstRoot !== secondRoot) parent[secondRoot] = firstRoot
+  }
+  for (let first = 0; first < naturalCenters.length; first += 1) {
+    for (let second = first + 1; second < naturalCenters.length; second += 1) {
+      if (overlapRatio(naturalCenters[first], naturalCenters[second]) >= .8) join(first, second)
+    }
+  }
+
+  const groups = new Map<number, number[]>()
+  parent.forEach((_, index) => {
+    const root = find(index)
+    const group = groups.get(root) ?? []
+    group.push(index)
+    groups.set(root, group)
+  })
+  const stackedByIndex = new Map<number, { center: PetPosition; top: boolean }>()
+  const clampCardCenter = (center: PetPosition) => ({
+    x: Math.min(Math.max(cardHalfWidth + orbitPadding, center.x), viewport.width - cardHalfWidth - orbitPadding),
+    y: Math.min(Math.max(cardHalfHeight + orbitPadding, center.y), viewport.height - cardHalfHeight - orbitPadding),
+  })
+  for (const members of groups.values()) {
+    if (members.length < 2) continue
+    const average = members.reduce((sum, index) => ({
+      x: sum.x + naturalCenters[index].x / members.length,
+      y: sum.y + naturalCenters[index].y / members.length,
+    }), { x: 0, y: 0 })
+    const anchor = clampCardCenter(average)
+    const direction = {
+      x: anchor.x <= viewport.width / 2 ? 1 : -1,
+      y: anchor.y <= viewport.height / 2 ? 1 : -1,
+    }
+    const length = Math.hypot(direction.x, direction.y * .35)
+    const tangent = { x: direction.x / length, y: direction.y * .35 / length }
+    members.forEach((index, stackIndex) => {
+      stackedByIndex.set(index, {
+        center: clampCardCenter({ x: anchor.x + tangent.x * stackIndex * 20, y: anchor.y + tangent.y * stackIndex * 20 }),
+        top: stackIndex === members.length - 1,
+      })
+    })
+  }
+
+  return naturalCenters.map((naturalCenter, index) => {
+    const stacked = stackedByIndex.get(index)
+    const center = stacked?.center ?? naturalCenter
     return {
-      x: safeCenter.x - petPosition.x - 46,
-      y: safeCenter.y - petPosition.y - 58,
+      x: center.x - petPosition.x - 46,
+      y: center.y - petPosition.y - 58,
       rotate: rotations[index % rotations.length],
+      originX: 0,
+      originY: 0,
+      originRotate: 0,
+      stacked: Boolean(stacked),
+      stackTop: stacked?.top ?? false,
     }
   })
+}
+
+function getReminderPlacement(petPosition: PetPosition, viewport: Viewport): ReminderPlacement {
+  const width = Math.max(0, Math.min(232, viewport.width - 32))
+  const height = 72
+  const gap = 42
+  const petCenter = {
+    x: petPosition.x + petSize.width / 2,
+    y: petPosition.y + petSize.height / 2,
+  }
+  const clampLeft = (left: number) => Math.min(Math.max(16, left), Math.max(16, viewport.width - width - 16))
+  const clampTop = (top: number) => Math.min(Math.max(16, top), Math.max(16, viewport.height - height - 16))
+  const avoidReadingCenter = (left: number) => {
+    const centerStart = viewport.width * .42
+    const centerEnd = viewport.width * .58
+    const overlapsReadingZone = left < centerEnd && left + width > centerStart
+    if (!overlapsReadingZone) return clampLeft(left)
+    const pushedLeft = petCenter.x < viewport.width / 2
+      ? centerEnd + 18
+      : centerStart - width - 18
+    return clampLeft(pushedLeft)
+  }
+  const top = petPosition.y - gap - height
+  if (top >= 16) {
+    return { side: 'top', style: { left: `${avoidReadingCenter(petCenter.x - width / 2)}px`, top: `${top}px`, width: `${width}px` } }
+  }
+  const bottom = petPosition.y + petSize.height + gap
+  if (bottom + height <= viewport.height - 16) {
+    return { side: 'bottom', style: { left: `${avoidReadingCenter(petCenter.x - width / 2)}px`, top: `${bottom}px`, width: `${width}px` } }
+  }
+  const inwardLeft = petCenter.x < viewport.width / 2
+    ? petPosition.x + petSize.width + 18
+    : petPosition.x - width - 18
+  return {
+    side: 'inside',
+    style: { left: `${clampLeft(inwardLeft)}px`, top: `${clampTop(petCenter.y - height / 2)}px`, width: `${width}px` },
+  }
 }
 
 export function TraceOverlay() {
@@ -147,11 +280,17 @@ export function TraceOverlay() {
   const [reminder, setReminder] = useState<TraceReminder | null>(null)
   const [panelPosition, setPanelPosition] = useState<PetPosition | null>(null)
   const [hugging, setHugging] = useState(false)
+  const [petPose, setPetPose] = useState<PetPose>('crawl')
+  const [petFrame, setPetFrame] = useState<0 | 1>(0)
+  const [petFacing, setPetFacing] = useState<PetFacing>('left')
+  const [crawlRunning, setCrawlRunning] = useState(false)
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; origin: PetPosition; moved: boolean } | null>(null)
   const panelDragRef = useRef<{ pointerId: number; startX: number; startY: number; origin: PetPosition } | null>(null)
   const suppressClickRef = useRef(false)
   const petClickTimerRef = useRef<number | undefined>()
   const hugTimerRef = useRef<number | undefined>()
+  const crawlTimerRef = useRef<number | undefined>()
+  const petClickSideRef = useRef<'left' | 'right'>('left')
   const lastReminderIndexRef = useRef(-1)
 
   useEffect(() => {
@@ -168,7 +307,19 @@ export function TraceOverlay() {
   useEffect(() => () => {
     if (petClickTimerRef.current !== undefined) window.clearTimeout(petClickTimerRef.current)
     if (hugTimerRef.current !== undefined) window.clearTimeout(hugTimerRef.current)
+    if (crawlTimerRef.current !== undefined) window.clearTimeout(crawlTimerRef.current)
   }, [])
+
+  useEffect(() => {
+    if (petPose === 'crawl' && !crawlRunning) {
+      setPetFrame(0)
+      return
+    }
+    const interval = window.setInterval(() => {
+      setPetFrame((frame) => frame === 0 ? 1 : 0)
+    }, petPose === 'sit' ? 300 : 200)
+    return () => window.clearInterval(interval)
+  }, [petPose, crawlRunning])
 
   useEffect(() => {
     let timer: number | undefined
@@ -180,7 +331,11 @@ export function TraceOverlay() {
         const selectedIndex = reminderTemplates.indexOf(template)
         lastReminderIndexRef.current = selectedIndex
         const observation = traceSessionStore.observations.find((item) => item.id === template.observationId) ?? traceSessionStore.observations[0]
-        if (observation) setReminder({ observationId: observation.id, text: `上次那条「${observation.text}」${template.suffix}` })
+        if (observation) {
+          setPetPose('sit')
+          setPetFrame(0)
+          setReminder({ observationId: observation.id, text: `上次那条「${observation.text}」${template.suffix}` })
+        }
         scheduleReminder()
       }, delay)
     }
@@ -211,6 +366,11 @@ export function TraceOverlay() {
   }, [])
 
   const currentPetPosition = petPosition ?? getDefaultPetPosition(viewport)
+  useEffect(() => {
+    const nextFacing: PetFacing = currentPetPosition.x + petSize.width / 2 < viewport.width / 2 ? 'right' : 'left'
+    setPetFacing(nextFacing)
+  }, [currentPetPosition.x, viewport.width])
+  const reminderPlacement = getReminderPlacement(currentPetPosition, viewport)
   const defaultPanelPosition = getDefaultPanelPosition(currentPetPosition, viewport)
   const currentPanelPosition = panelPosition ?? defaultPanelPosition
   const panelIsDetached = showPanel && Boolean(panelPosition) && distanceBetween(currentPanelPosition, defaultPanelPosition) > 170
@@ -231,6 +391,9 @@ export function TraceOverlay() {
   ]
   const orbitItems = [...guideItems, ...observationItems, ...captureItems].slice(0, 8)
   const orbitPositions = getOrbitPositions(currentPetPosition, viewport, orbitItems)
+  const petImage = petPose === 'sit'
+    ? petFrame === 0 ? sitAImage : sitBImage
+    : petFrame === 0 ? crawlAImage : crawlBImage
   const overlayStyle: CSSProperties | undefined = petPosition
     ? { left: `${petPosition.x}px`, top: `${petPosition.y}px`, right: 'auto', bottom: 'auto' }
     : undefined
@@ -282,6 +445,9 @@ export function TraceOverlay() {
   const openTrace = () => {
     setCollapsing(false)
     setHugging(false)
+    setCrawlRunning(false)
+    setPetPose('sit')
+    setPetFrame(0)
     setOpen(true)
   }
 
@@ -293,6 +459,8 @@ export function TraceOverlay() {
     window.setTimeout(() => {
       setOpen(false)
       setCollapsing(false)
+      setPetPose('crawl')
+      setPetFrame(0)
     }, 500)
   }
 
@@ -300,6 +468,7 @@ export function TraceOverlay() {
     if (event.button !== 0) return
     const rect = event.currentTarget.getBoundingClientRect()
     const origin = { x: rect.left, y: rect.top }
+    petClickSideRef.current = event.clientX < rect.left + rect.width / 2 ? 'left' : 'right'
     setPetPosition(origin)
     dragRef.current = {
       pointerId: event.pointerId,
@@ -338,8 +507,24 @@ export function TraceOverlay() {
     }
     if (petClickTimerRef.current !== undefined) window.clearTimeout(petClickTimerRef.current)
     petClickTimerRef.current = window.setTimeout(() => {
-      if (open) collapseTrace()
-      else openTrace()
+      if (open) {
+        collapseTrace()
+      } else {
+        const direction = petClickSideRef.current
+        setPetPose('crawl')
+        setCrawlRunning(true)
+        setPetFacing(direction)
+        setPetPosition((current) => {
+          const origin = current ?? getDefaultPetPosition(viewport)
+          return clampPetPosition({ x: origin.x + (direction === 'left' ? -70 : 70), y: origin.y }, viewport)
+        })
+        if (crawlTimerRef.current !== undefined) window.clearTimeout(crawlTimerRef.current)
+        crawlTimerRef.current = window.setTimeout(() => {
+          setCrawlRunning(false)
+          openTrace()
+          crawlTimerRef.current = undefined
+        }, 440)
+      }
       petClickTimerRef.current = undefined
     }, 240)
   }
@@ -347,8 +532,13 @@ export function TraceOverlay() {
   const handlePetDoubleClick = () => {
     if (petClickTimerRef.current !== undefined) window.clearTimeout(petClickTimerRef.current)
     petClickTimerRef.current = undefined
+    if (crawlTimerRef.current !== undefined) window.clearTimeout(crawlTimerRef.current)
+    crawlTimerRef.current = undefined
     setCollapsing(false)
     setHugging(false)
+    setCrawlRunning(false)
+    setPetPose('sit')
+    setPetFrame(0)
     setOpen(true)
     setFocusedObservationId(undefined)
     setShowPanel(true)
@@ -358,6 +548,9 @@ export function TraceOverlay() {
   const openCapturePanel = () => {
     setCollapsing(false)
     setHugging(false)
+    setCrawlRunning(false)
+    setPetPose('sit')
+    setPetFrame(0)
     setOpen(true)
     setShowPanel(true)
     setFocusedObservationId(undefined)
@@ -427,6 +620,8 @@ export function TraceOverlay() {
     setFocusedObservationId(reminder.observationId)
     setCollapsing(false)
     setOpen(true)
+    setPetPose('sit')
+    setPetFrame(0)
     setShowPanel(true)
     setPanelPosition(null)
     setReminder(null)
@@ -435,7 +630,13 @@ export function TraceOverlay() {
   return (
     <div className={`trace-overlay ${open ? 'trace-overlay-open' : ''} ${collapsing ? 'trace-overlay-collapsing' : ''}`} style={overlayStyle}>
       {reminder && !open && (
-        <div className="trace-reminder-bubble" role="status">
+        <div className={`trace-reminder-bubble trace-reminder-bubble-${reminderPlacement.side}`} style={reminderPlacement.style} role="status">
+          <span className="trace-reminder-cloud-bump" aria-hidden="true" />
+          <span className="trace-reminder-bubbles" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
           <button className="trace-reminder-open" type="button" onClick={openReminder} aria-label="打开被提醒的观察">
             <span className="trace-reminder-kicker">Trace 提醒</span>
             <strong>{reminder.text}</strong>
@@ -462,13 +663,16 @@ export function TraceOverlay() {
               : `trace-orbit-item-${item.tone}`
             return (
               <button
-                className={`trace-orbit-item ${brightnessClass} ${toneClass}`}
+                className={`trace-orbit-item ${brightnessClass} ${toneClass} ${position.stacked ? 'trace-orbit-item-stacked' : ''}`}
                 key={item.id}
                 type="button"
                 style={{
                   '--trace-orbit-x': `${position.x}px`,
                   '--trace-orbit-y': `${position.y}px`,
                   '--trace-orbit-rotate': `${position.rotate}deg`,
+                  '--trace-orbit-origin-x': `${position.originX}px`,
+                  '--trace-orbit-origin-y': `${position.originY}px`,
+                  '--trace-orbit-origin-rotate': `${position.originRotate}deg`,
                   '--trace-orbit-delay': `${index * 40}ms`,
                   '--trace-collapse-delay': `${(orbitItems.length - index - 1) * 40}ms`,
                 }}
@@ -476,6 +680,11 @@ export function TraceOverlay() {
                 aria-label={observation ? `打开观察：${observation.text}` : item.title}
               >
                 {observation?.isNew && <span className="trace-new-orb-label">新想法</span>}
+                {position.stackTop && (
+                  <span className="trace-stack-summary" title={observation ? observation.text : item.title}>
+                    {observation ? observation.text : item.title}
+                  </span>
+                )}
                 <span className="trace-memory-card-body">
                   <span className="trace-memory-card-status">{observation ? observation.status : item.kicker}</span>
                   <strong>{observation ? observation.text : item.title}</strong>
@@ -507,7 +716,7 @@ export function TraceOverlay() {
       )}
 
       <button
-        className={`trace-pet-button ${open ? 'trace-pet-button-active' : ''} ${panelIsDetached ? 'trace-pet-button-thinking' : ''} ${hugging ? 'trace-pet-button-hugging' : ''}`}
+        className={`trace-pet-button trace-pet-button-${petPose} trace-pet-button-frame-${petFrame} trace-pet-button-facing-${petFacing} ${crawlRunning ? 'trace-pet-button-crawling' : ''} ${open ? 'trace-pet-button-active' : ''} ${panelIsDetached ? 'trace-pet-button-thinking' : ''} ${hugging ? 'trace-pet-button-hugging' : ''}`}
         type="button"
         onPointerDown={handlePetPointerDown}
         onPointerMove={handlePetPointerMove}
@@ -518,7 +727,10 @@ export function TraceOverlay() {
         aria-expanded={open}
         aria-label={open ? '收回 Trace' : '打开 Trace'}
       >
-        <img className="trace-pet-image" src={liukanshanImage} alt="刘看山" />
+        <span className="trace-pet-shadow" aria-hidden="true" />
+        <span className="trace-pet-visual" data-pose={petPose} data-frame={petFrame}>
+          <img className="trace-pet-image" src={petImage} alt="刘看山" />
+        </span>
       </button>
     </div>
   )

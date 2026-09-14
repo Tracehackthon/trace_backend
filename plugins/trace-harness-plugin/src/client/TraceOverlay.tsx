@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState, type CSSProperties, type PointerEve
 import crawlAImage from './assets/pet/crawl_A.png'
 import crawlBImage from './assets/pet/crawl_B.png'
 import sitAImage from './assets/pet/sit_A.png'
+import transitionAImage from './assets/pet/transition_A.png'
+import transitionBImage from './assets/pet/transition_B.png'
 import { candidateJudgement, seedObservations, type CandidateStatus, type Observation, type ObservationStatus } from './mock-data'
 import { TracePanel } from './TracePanel'
 
@@ -30,6 +32,8 @@ type TraceReminder = { observationId: string; text: string }
 type ReminderPlacement = { side: 'top' | 'bottom' | 'inside'; style: CSSProperties }
 type PetPose = 'crawl' | 'sit'
 type PetFacing = 'left' | 'right'
+type PoseTransition = 'to-crawl' | 'to-sit'
+type PoseTransitionPhase = 0 | 1 | 2
 type OrbitPosition = {
   x: number
   y: number
@@ -285,12 +289,16 @@ export function TraceOverlay() {
   const [petFrame, setPetFrame] = useState<0 | 1>(0)
   const [petFacing, setPetFacing] = useState<PetFacing>('left')
   const [crawlRunning, setCrawlRunning] = useState(false)
+  const [poseTransition, setPoseTransition] = useState<PoseTransition | null>(null)
+  const [poseTransitionPhase, setPoseTransitionPhase] = useState<PoseTransitionPhase>(0)
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; origin: PetPosition; moved: boolean } | null>(null)
   const panelDragRef = useRef<{ pointerId: number; startX: number; startY: number; origin: PetPosition } | null>(null)
   const suppressClickRef = useRef(false)
   const petClickTimerRef = useRef<number | undefined>()
   const hugTimerRef = useRef<number | undefined>()
   const crawlTimerRef = useRef<number | undefined>()
+  const poseTransitionTimersRef = useRef<number[]>([])
+  const poseTransitionLockRef = useRef(false)
   const petClickSideRef = useRef<'left' | 'right'>('left')
   const lastReminderIndexRef = useRef(-1)
   const openRef = useRef(open)
@@ -310,6 +318,9 @@ export function TraceOverlay() {
     if (petClickTimerRef.current !== undefined) window.clearTimeout(petClickTimerRef.current)
     if (hugTimerRef.current !== undefined) window.clearTimeout(hugTimerRef.current)
     if (crawlTimerRef.current !== undefined) window.clearTimeout(crawlTimerRef.current)
+    poseTransitionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    poseTransitionTimersRef.current = []
+    poseTransitionLockRef.current = false
   }, [])
 
   useEffect(() => {
@@ -401,9 +412,17 @@ export function TraceOverlay() {
   ]
   const orbitItems = [...guideItems, ...observationItems, ...captureItems].slice(0, 8)
   const orbitPositions = getOrbitPositions(currentPetPosition, viewport, orbitItems)
-  const petImage = petPose === 'sit'
-    ? sitAImage
-    : petFrame === 0 ? crawlAImage : crawlBImage
+  const petImage = poseTransition === 'to-crawl'
+    ? poseTransitionPhase === 0 ? sitAImage
+      : poseTransitionPhase === 1 ? transitionAImage
+        : transitionBImage
+    : poseTransition === 'to-sit'
+      ? poseTransitionPhase === 0 ? crawlAImage
+        : poseTransitionPhase === 1 ? transitionBImage
+          : transitionAImage
+      : petPose === 'sit'
+        ? sitAImage
+        : petFrame === 0 ? crawlAImage : crawlBImage
   const overlayStyle: CSSProperties | undefined = petPosition
     ? { left: `${petPosition.x}px`, top: `${petPosition.y}px`, right: 'auto', bottom: 'auto' }
     : undefined
@@ -452,7 +471,40 @@ export function TraceOverlay() {
     setDiscussionNotice(`候选判断已${status}，对应历史观察卡片已同步更新。`)
   }
 
-  const openTrace = () => {
+  const clearPoseTransitionTimers = () => {
+    poseTransitionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    poseTransitionTimersRef.current = []
+  }
+
+  const startPoseTransition = (direction: PoseTransition, onComplete?: () => void) => {
+    if (poseTransitionLockRef.current) return false
+    poseTransitionLockRef.current = true
+    clearPoseTransitionTimers()
+    if (crawlTimerRef.current !== undefined) {
+      window.clearTimeout(crawlTimerRef.current)
+      crawlTimerRef.current = undefined
+    }
+    setCrawlRunning(false)
+    setPetFrame(0)
+    setPoseTransition(direction)
+    setPoseTransitionPhase(0)
+
+    const transitionA = window.setTimeout(() => setPoseTransitionPhase(1), 140)
+    const transitionB = window.setTimeout(() => setPoseTransitionPhase(2), 280)
+    const complete = window.setTimeout(() => {
+      setPetPose(direction === 'to-crawl' ? 'crawl' : 'sit')
+      setPetFrame(0)
+      setPoseTransition(null)
+      setPoseTransitionPhase(0)
+      poseTransitionTimersRef.current = []
+      poseTransitionLockRef.current = false
+      onComplete?.()
+    }, 420)
+    poseTransitionTimersRef.current = [transitionA, transitionB, complete]
+    return true
+  }
+
+  const showFan = () => {
     setCollapsing(false)
     setHugging(false)
     setCrawlRunning(false)
@@ -461,21 +513,51 @@ export function TraceOverlay() {
     setOpen(true)
   }
 
+  const settleToSit = (onComplete: () => void) => {
+    if (poseTransitionLockRef.current) return false
+    if (petPose === 'sit') {
+      setCrawlRunning(false)
+      setPetFrame(0)
+      onComplete()
+      return true
+    }
+    return startPoseTransition('to-sit', onComplete)
+  }
+
   const collapseTrace = () => {
-    if (!open || collapsing) return
+    if (!open || collapsing || poseTransitionLockRef.current) return
     setShowPanel(false)
     setPanelPosition(null)
     setCollapsing(true)
-    window.setTimeout(() => {
+    const finishCollapse = () => {
       setOpen(false)
       setCollapsing(false)
       setPetPose('sit')
       setPetFrame(0)
-    }, 500)
+    }
+    if (petPose === 'crawl') {
+      startPoseTransition('to-sit', finishCollapse)
+      return
+    }
+    window.setTimeout(finishCollapse, 230)
+  }
+
+  const closePanelToFan = () => {
+    if (poseTransitionLockRef.current) return
+    const revealFan = () => {
+      setShowPanel(false)
+      setPanelPosition(null)
+      showFan()
+    }
+    if (petPose === 'crawl') {
+      revealFan()
+      return
+    }
+    startPoseTransition('to-crawl', revealFan)
   }
 
   const handlePetPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return
+    if (event.button !== 0 || poseTransitionLockRef.current) return
     const rect = event.currentTarget.getBoundingClientRect()
     const origin = { x: rect.left, y: rect.top }
     petClickSideRef.current = event.clientX < rect.left + rect.width / 2 ? 'left' : 'right'
@@ -511,78 +593,77 @@ export function TraceOverlay() {
   }
 
   const handlePetClick = () => {
+    if (poseTransitionLockRef.current) return
     if (suppressClickRef.current) {
       suppressClickRef.current = false
       return
     }
     if (petClickTimerRef.current !== undefined) window.clearTimeout(petClickTimerRef.current)
     petClickTimerRef.current = window.setTimeout(() => {
+      if (poseTransitionLockRef.current) return
       if (open) {
         collapseTrace()
       } else {
         const direction = petClickSideRef.current
-        setPetPose('crawl')
-        setCrawlRunning(true)
+        const beginCrawlStep = () => {
+          showFan()
+          setCrawlRunning(true)
+          setPetPosition((current) => {
+            const origin = current ?? getDefaultPetPosition(viewport)
+            return clampPetPosition({ x: origin.x + (direction === 'left' ? -70 : 70), y: origin.y }, viewport)
+          })
+          if (crawlTimerRef.current !== undefined) window.clearTimeout(crawlTimerRef.current)
+          crawlTimerRef.current = window.setTimeout(() => {
+            setCrawlRunning(false)
+            crawlTimerRef.current = undefined
+          }, 440)
+        }
+        // Turn before the intermediate frames begin, so scaleX consistently
+        // applies to the complete sit → crawl bitmap sequence.
         setPetFacing(direction)
-        setPetPosition((current) => {
-          const origin = current ?? getDefaultPetPosition(viewport)
-          return clampPetPosition({ x: origin.x + (direction === 'left' ? -70 : 70), y: origin.y }, viewport)
-        })
-        if (crawlTimerRef.current !== undefined) window.clearTimeout(crawlTimerRef.current)
-        crawlTimerRef.current = window.setTimeout(() => {
-          setCrawlRunning(false)
-          openTrace()
-          crawlTimerRef.current = undefined
-        }, 440)
+        if (petPose === 'sit') startPoseTransition('to-crawl', beginCrawlStep)
+        else beginCrawlStep()
       }
       petClickTimerRef.current = undefined
     }, 240)
   }
 
   const handlePetDoubleClick = () => {
+    if (poseTransitionLockRef.current) return
     if (petClickTimerRef.current !== undefined) window.clearTimeout(petClickTimerRef.current)
     petClickTimerRef.current = undefined
     if (crawlTimerRef.current !== undefined) window.clearTimeout(crawlTimerRef.current)
     crawlTimerRef.current = undefined
-    setCollapsing(false)
-    setHugging(false)
-    setCrawlRunning(false)
-    setPetPose('sit')
-    setPetFrame(0)
-    setOpen(true)
-    setFocusedObservationId(undefined)
-    setShowPanel(true)
-    setPanelPosition(null)
+    openCapturePanel()
+  }
+
+  const openPanel = (observationId?: string) => {
+    if (poseTransitionLockRef.current) return
+    const showPanel = () => {
+      setCollapsing(false)
+      setHugging(false)
+      setCrawlRunning(false)
+      setPetPose('sit')
+      setPetFrame(0)
+      setOpen(true)
+      setFocusedObservationId(observationId)
+      setShowPanel(true)
+      setPanelPosition(null)
+    }
+    settleToSit(showPanel)
   }
 
   const openCapturePanel = () => {
-    setCollapsing(false)
-    setHugging(false)
-    setCrawlRunning(false)
-    setPetPose('sit')
-    setPetFrame(0)
-    setOpen(true)
-    setShowPanel(true)
-    setFocusedObservationId(undefined)
-    setPanelPosition(null)
+    openPanel()
   }
 
   const handleOrbitItem = (item: OrbitItem) => {
-    // Once the fan gives way to a focused panel, return to the calmer sit
-    // posture so only the orbit itself carries the crawling affordance.
-    setCrawlRunning(false)
-    setPetPose('sit')
-    setPetFrame(0)
     if (item.kind === 'observation') {
-      setFocusedObservationId(item.observation.id)
-      setShowPanel(true)
-      setPanelPosition(null)
+      openPanel(item.observation.id)
       return
     }
     if (item.action === 'focus-first' && observations[0]) {
-      setFocusedObservationId(observations[0].id)
-      setShowPanel(true)
-      setPanelPosition(null)
+      openPanel(observations[0].id)
       return
     }
     openCapturePanel()
@@ -632,18 +713,12 @@ export function TraceOverlay() {
 
   const openReminder = () => {
     if (!reminder) return
-    setFocusedObservationId(reminder.observationId)
-    setCollapsing(false)
-    setOpen(true)
-    setPetPose('sit')
-    setPetFrame(0)
-    setShowPanel(true)
-    setPanelPosition(null)
+    openPanel(reminder.observationId)
     setReminder(null)
   }
 
   return (
-    <div className={`trace-overlay ${open ? 'trace-overlay-open' : ''} ${collapsing ? 'trace-overlay-collapsing' : ''}`} style={overlayStyle}>
+    <div className={`trace-overlay ${open ? 'trace-overlay-open' : ''} ${collapsing ? 'trace-overlay-collapsing' : ''} ${poseTransition ? 'trace-overlay-transitioning' : ''}`} style={overlayStyle}>
       {reminder && !open && (
         <div className={`trace-reminder-bubble trace-reminder-bubble-${reminderPlacement.side}`} style={reminderPlacement.style} role="status">
           <span className="trace-reminder-cloud-bump" aria-hidden="true" />
@@ -720,7 +795,7 @@ export function TraceOverlay() {
             onAccept={acceptObservation}
             onCandidateAction={updateCandidate}
             onContinue={continueDiscussion}
-            onClose={() => { setShowPanel(false); setPanelPosition(null) }}
+            onClose={closePanelToFan}
             discussionNotice={discussionNotice}
             onHeaderPointerDown={handlePanelPointerDown}
             onHeaderPointerMove={handlePanelPointerMove}
@@ -731,8 +806,9 @@ export function TraceOverlay() {
       )}
 
       <button
-        className={`trace-pet-button trace-pet-button-${petPose} trace-pet-button-frame-${petFrame} trace-pet-button-facing-${petFacing} ${crawlRunning ? 'trace-pet-button-crawling' : ''} ${open ? 'trace-pet-button-active' : ''} ${panelIsDetached ? 'trace-pet-button-thinking' : ''} ${hugging ? 'trace-pet-button-hugging' : ''}`}
+        className={`trace-pet-button trace-pet-button-${petPose} trace-pet-button-frame-${petFrame} trace-pet-button-facing-${petFacing} ${poseTransition ? `trace-pet-button-transition-${poseTransition}` : ''} ${crawlRunning ? 'trace-pet-button-crawling' : ''} ${open ? 'trace-pet-button-active' : ''} ${panelIsDetached ? 'trace-pet-button-thinking' : ''} ${hugging ? 'trace-pet-button-hugging' : ''}`}
         type="button"
+        disabled={Boolean(poseTransition)}
         onPointerDown={handlePetPointerDown}
         onPointerMove={handlePetPointerMove}
         onPointerUp={handlePetPointerUp}
@@ -743,7 +819,7 @@ export function TraceOverlay() {
         aria-label={open ? '收回 Trace' : '打开 Trace'}
       >
         <span className="trace-pet-shadow" aria-hidden="true" />
-        <span className="trace-pet-visual" data-pose={petPose} data-frame={petFrame}>
+        <span className="trace-pet-visual" data-pose={petPose} data-frame={petFrame} data-transition={poseTransition ?? 'none'}>
           <img className="trace-pet-image" src={petImage} alt="刘看山" />
         </span>
       </button>

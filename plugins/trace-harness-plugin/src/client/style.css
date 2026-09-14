@@ -23,6 +23,7 @@
 }
 
 .trace-overlay > * { pointer-events: auto; }
+.trace-overlay-transitioning > * { pointer-events: none; }
 
 .trace-pet-button {
   position: relative;
@@ -99,6 +100,21 @@
   animation: trace-pet-sit-sway 2.8s cubic-bezier(.45, 0, .55, 1) infinite alternate;
 }
 
+/* The bitmap changes at 0 / 140 / 280 / 420ms. Freeze idle motion while the
+   frames swap, and interpolate the ground shadow through the same interval. */
+.trace-pet-button-transition-to-crawl .trace-pet-image,
+.trace-pet-button-transition-to-sit .trace-pet-image {
+  animation: none;
+}
+
+.trace-pet-button-transition-to-crawl .trace-pet-shadow {
+  animation: trace-pet-shadow-to-crawl 420ms linear both;
+}
+
+.trace-pet-button-transition-to-sit .trace-pet-shadow {
+  animation: trace-pet-shadow-to-sit 420ms linear both;
+}
+
 .trace-pet-button-crawling .trace-pet-image {
   animation: trace-pet-crawl 440ms cubic-bezier(.34, 1.56, .64, 1) both;
 }
@@ -119,6 +135,16 @@
 @keyframes trace-pet-sit-shadow {
   from { transform: translateX(-50%) scale(.67, .91); }
   to { transform: translateX(-50%) scale(.73, 1); }
+}
+
+@keyframes trace-pet-shadow-to-crawl {
+  from { opacity: .47; transform: translateX(-50%) scale(.70, .95); }
+  to { opacity: .60; transform: translateX(-50%) scale(.88, 1); }
+}
+
+@keyframes trace-pet-shadow-to-sit {
+  from { opacity: .60; transform: translateX(-50%) scale(.88, 1); }
+  to { opacity: .47; transform: translateX(-50%) scale(.70, .95); }
 }
 
 @keyframes trace-pet-crawl {

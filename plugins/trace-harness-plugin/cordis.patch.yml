@@ -1,0 +1,5 @@
+# Trace V1 adds one host row. Its dsh.client declaration supplies the browser
+# bundle, which registers the additive shell.overlay UI entry.
+- insert:
+    - id: trace-ui
+      name: dsh-trace

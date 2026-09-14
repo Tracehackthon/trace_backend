@@ -87,6 +87,7 @@
 .trace-pet-button-sit .trace-pet-shadow {
   opacity: .47;
   transform: translateX(-50%) scale(.7);
+  animation: trace-pet-sit-shadow 2.8s cubic-bezier(.45, 0, .55, 1) infinite alternate;
 }
 
 .trace-pet-button-crawling .trace-pet-shadow {
@@ -95,15 +96,11 @@
 }
 
 .trace-pet-button-sit .trace-pet-image {
-  animation: trace-pet-sit 1.2s cubic-bezier(.34, 1.1, .64, 1) infinite;
+  animation: trace-pet-sit-sway 2.8s cubic-bezier(.45, 0, .55, 1) infinite alternate;
 }
 
 .trace-pet-button-crawling .trace-pet-image {
   animation: trace-pet-crawl 440ms cubic-bezier(.34, 1.56, .64, 1) both;
-}
-
-.trace-pet-button-active .trace-pet-image {
-  animation: trace-pet-sit 1.2s cubic-bezier(.34, 1.1, .64, 1) infinite;
 }
 
 .trace-pet-button-hugging .trace-pet-image {
@@ -114,9 +111,14 @@
   animation: trace-pet-think 2.3s cubic-bezier(.34, 1.12, .64, 1) infinite;
 }
 
-@keyframes trace-pet-sit {
-  0%, 100% { transform: translateY(0) rotateY(0deg) rotate(0deg); }
-  50% { transform: translateY(-2px) rotateY(-3deg) rotate(-1deg); }
+@keyframes trace-pet-sit-sway {
+  from { transform: translateY(0) rotateY(-2deg) rotate(-1.5deg); }
+  to { transform: translateY(-1px) rotateY(2deg) rotate(1.5deg); }
+}
+
+@keyframes trace-pet-sit-shadow {
+  from { transform: translateX(-50%) scale(.67, .91); }
+  to { transform: translateX(-50%) scale(.73, 1); }
 }
 
 @keyframes trace-pet-crawl {

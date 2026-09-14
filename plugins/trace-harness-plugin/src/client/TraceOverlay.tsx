@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState, type CSSProperties, type PointerEve
 import crawlAImage from './assets/pet/crawl_A.png'
 import crawlBImage from './assets/pet/crawl_B.png'
 import sitAImage from './assets/pet/sit_A.png'
-import sitBImage from './assets/pet/sit_B.png'
 import { candidateJudgement, seedObservations, type CandidateStatus, type Observation, type ObservationStatus } from './mock-data'
 import { TracePanel } from './TracePanel'
 
@@ -280,7 +279,9 @@ export function TraceOverlay() {
   const [reminder, setReminder] = useState<TraceReminder | null>(null)
   const [panelPosition, setPanelPosition] = useState<PetPosition | null>(null)
   const [hugging, setHugging] = useState(false)
-  const [petPose, setPetPose] = useState<PetPose>('crawl')
+  // Idle and reminder states are calm, fixed-frame sitting. The low crawling
+  // posture belongs specifically to the expanded memory fan.
+  const [petPose, setPetPose] = useState<PetPose>('sit')
   const [petFrame, setPetFrame] = useState<0 | 1>(0)
   const [petFacing, setPetFacing] = useState<PetFacing>('left')
   const [crawlRunning, setCrawlRunning] = useState(false)
@@ -292,6 +293,7 @@ export function TraceOverlay() {
   const crawlTimerRef = useRef<number | undefined>()
   const petClickSideRef = useRef<'left' | 'right'>('left')
   const lastReminderIndexRef = useRef(-1)
+  const openRef = useRef(open)
 
   useEffect(() => {
     const handleResize = () => {
@@ -311,13 +313,19 @@ export function TraceOverlay() {
   }, [])
 
   useEffect(() => {
-    if (petPose === 'crawl' && !crawlRunning) {
+    openRef.current = open
+  }, [open])
+
+  useEffect(() => {
+    // Only the intentional crawl step cycles bitmap frames. Sitting stays on
+    // sit_A; its sense of life comes from CSS sway, not image-frame flicker.
+    if (petPose !== 'crawl' || !crawlRunning) {
       setPetFrame(0)
       return
     }
     const interval = window.setInterval(() => {
       setPetFrame((frame) => frame === 0 ? 1 : 0)
-    }, petPose === 'sit' ? 300 : 200)
+    }, 200)
     return () => window.clearInterval(interval)
   }, [petPose, crawlRunning])
 
@@ -332,7 +340,9 @@ export function TraceOverlay() {
         lastReminderIndexRef.current = selectedIndex
         const observation = traceSessionStore.observations.find((item) => item.id === template.observationId) ?? traceSessionStore.observations[0]
         if (observation) {
-          setPetPose('sit')
+          // A reminder may arrive while the fan is already open. In that case
+          // retain its crawl posture; closed/idle reminder states sit calmly.
+          setPetPose(openRef.current ? 'crawl' : 'sit')
           setPetFrame(0)
           setReminder({ observationId: observation.id, text: `上次那条「${observation.text}」${template.suffix}` })
         }
@@ -392,7 +402,7 @@ export function TraceOverlay() {
   const orbitItems = [...guideItems, ...observationItems, ...captureItems].slice(0, 8)
   const orbitPositions = getOrbitPositions(currentPetPosition, viewport, orbitItems)
   const petImage = petPose === 'sit'
-    ? petFrame === 0 ? sitAImage : sitBImage
+    ? sitAImage
     : petFrame === 0 ? crawlAImage : crawlBImage
   const overlayStyle: CSSProperties | undefined = petPosition
     ? { left: `${petPosition.x}px`, top: `${petPosition.y}px`, right: 'auto', bottom: 'auto' }
@@ -446,7 +456,7 @@ export function TraceOverlay() {
     setCollapsing(false)
     setHugging(false)
     setCrawlRunning(false)
-    setPetPose('sit')
+    setPetPose('crawl')
     setPetFrame(0)
     setOpen(true)
   }
@@ -459,7 +469,7 @@ export function TraceOverlay() {
     window.setTimeout(() => {
       setOpen(false)
       setCollapsing(false)
-      setPetPose('crawl')
+      setPetPose('sit')
       setPetFrame(0)
     }, 500)
   }
@@ -558,6 +568,11 @@ export function TraceOverlay() {
   }
 
   const handleOrbitItem = (item: OrbitItem) => {
+    // Once the fan gives way to a focused panel, return to the calmer sit
+    // posture so only the orbit itself carries the crawling affordance.
+    setCrawlRunning(false)
+    setPetPose('sit')
+    setPetFrame(0)
     if (item.kind === 'observation') {
       setFocusedObservationId(item.observation.id)
       setShowPanel(true)

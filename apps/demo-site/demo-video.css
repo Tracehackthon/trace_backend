@@ -1,0 +1,18 @@
+.video-placeholder { position: relative; }
+
+.video-frame video {
+  display: none;
+  position: relative;
+  z-index: 1;
+  width: min(100%, 620px);
+  max-height: 360px;
+  border-radius: 22px;
+  background: #102019;
+}
+
+.video-frame.has-video { padding: 16px; }
+
+.video-frame.has-video::before,
+.video-frame.has-video .video-placeholder { display: none; }
+
+.video-frame.has-video video { display: block; }

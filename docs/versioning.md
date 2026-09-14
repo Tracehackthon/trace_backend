@@ -12,7 +12,7 @@ Trace 不是只有一个版本号的单体。为了让用户知道一次更新�
 
 - 发布分支是 `main`；Changesets 也以 `main` 计算发布差异。
 - 包发布的唯一计划来源是 `.changeset/`。在没有明确发布决策前，不能执行 `pnpm version-packages`。
-- `trace.data-envelope` 当前为 `0.3.0`，通过 `0.1.0 → 0.2.0 → 0.3.0` in-memory upcaster 引入闭合的 `host_retrieval_evidence` kind；`trace.continuity`、`trace.context-record` 与 `trace.project-instance` 当前各自处于 `0.2.0`。`trace.collaboration-model@0.1.0` 与 `trace.source-activation@0.1.0` 是独立的本地配置协议；`trace.source-profile@0.3.0` 仅用于 import。未知版本继续 fail-closed。
+- `trace.data-envelope` 当前为 `0.3.0`，通过 `0.1.0 → 0.2.0 → 0.3.0` in-memory upcaster 引入闭合的 `host_retrieval_evidence` kind；`trace.continuity` 当前为 `0.3.0`（新增 `decision_point` kind，0.1.0/0.2.0 记录经 upcaster 升级）；`trace.context-record` 与 `trace.project-instance` 当前各自处于 `0.2.0`。`trace.collaboration-model@0.1.0` 与 `trace.source-activation@0.1.0` 是独立的本地配置协议；`trace.source-profile@0.3.0` 仅用于 import。未知版本继续 fail-closed。
 - 产品 `trace-runtime` 当前是 `0.7.1`，Codex bundle 为 `trace.codex@0.4.1`，Codex starter/team/empty template 为 `0.4.0`。它们不表示每个 workspace 包或每个协议都等于相同版本。`trace-codex` Plugin/MCP 已由 Changeset 列入下一次发行计划；在产品 runtime、bundle 与 profile 得到同一次明确发布决策前，不把源码 checkout 误称为用户已安装版本。
 - 发布前必须运行 `corepack pnpm audit:versions`、`corepack pnpm audit:release-plan`、`corepack pnpm changeset status`、`corepack pnpm check:all`。
 

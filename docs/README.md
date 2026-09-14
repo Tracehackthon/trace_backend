@@ -7,6 +7,7 @@
 1. [Trace for Codex](codex-plugin.md)：一次性连接 Codex，之后用 `$trace`、`$trace-adapt`、`$trace-review` 工作。
 2. [第一次使用](getting-started.md)：建立项目 `.trace/`，选择 local / external / team / empty 来源边界。
 3. [日常协作、候选与沉淀](daily-workflow.md)：理解讨论、候选、采用、案例、前例和能力之间的关系。
+4. [对话引擎与决策路径](dialogue-engine.md)： scripted 对话如何推进、每个岔路如何被记录与回放、拒绝理由如何反哺后续提案。
 4. [适配使用者](personalization.md)：让通用 starter 逐步变成个人、项目或团队明确拥有的协作方式。
 
 ## 我想知道 Trace 会不会记住或泄露什么

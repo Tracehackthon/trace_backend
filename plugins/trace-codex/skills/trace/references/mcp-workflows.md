@@ -10,6 +10,9 @@
 | Lock an old project’s compatibility profile | `trace_profile_migrate_propose` | `trace_profile_migrate_apply` | profile/map/lock + backup only |
 | Adapt collaboration | `trace_profile_update_propose` | `trace_profile_update_apply` | private profile/map/lock + backup only |
 | Enable Codex hooks | `trace_codex_hook_enable_propose` | `trace_codex_hook_enable_apply` | user hooks config + rollback backup |
+| Scripted dialogues (onboard / adapt / review) | `trace_dialogue_begin`, `trace_dialogue_state` | `trace_dialogue_step` | continuity thread + turns + decision forks only |
+| Replay a decision path | `trace_path_view` | none | read-only |
+| Review one candidate | `trace_candidate_review_view` | `trace_candidate_review_apply` | save → private source_snapshot; reject → rationale in decision trail |
 
 All apply tools require `approval: adopt:<proposal_id>`. The agent derives that token after the user explicitly adopts the displayed proposal; the user never has to see or type it.
 

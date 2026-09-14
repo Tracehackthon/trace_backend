@@ -14,7 +14,13 @@ const incomingObservation = {
   source: params.get('source') || defaultObservation.source,
 }
 
-const handoffPhrase = '让思想不断蜕变，让认知不再局限'
+const handoffPhrases = [
+  '让思想不断蜕变，让认知不再局限',
+  '上一个判断，正在等你复核',
+  '这条想法，值得一条证据',
+  '想清楚的事，才留得下来',
+  '别让好想法，只活三秒钟',
+]
 
 const escapeHtml = (value) => String(value)
   .replaceAll('&', '&amp;')
@@ -196,7 +202,15 @@ function appTemplate() {
       </aside>
     </div>
 
-    <div class="handoff-transition" id="handoff-transition" aria-live="polite"><p id="handoff-phrase"></p></div>
+    <div class="handoff-transition" id="handoff-transition" aria-live="polite">
+      <div class="handoff-content">
+        <div class="handoff-fox" aria-hidden="true">${foxSvg('handoff-fox-svg')}</div>
+        <div class="handoff-brand"><strong>Trace</strong><span>·</span> 让想法继续生长</div>
+        <p id="handoff-phrase"></p>
+        <p class="handoff-context" id="handoff-context" hidden></p>
+        <div class="handoff-progress" aria-hidden="true"><span></span></div>
+      </div>
+    </div>
     <div class="toast" id="toast" role="status"></div>`
 }
 
@@ -251,9 +265,14 @@ function showToast(message) {
 function runHandoffTransition() {
   if (params.get('from') !== 'deepseek-harness') return
   const transition = document.querySelector('#handoff-transition')
-  document.querySelector('#handoff-phrase').textContent = handoffPhrase
+  const phrase = handoffPhrases[Math.floor(Math.random() * handoffPhrases.length)]
+  document.querySelector('#handoff-phrase').textContent = phrase
+  const continuation = Array.from(params.get('text')?.trim() ?? '').slice(0, 20).join('')
+  const context = document.querySelector('#handoff-context')
+  context.textContent = continuation ? `正在接续：${continuation}` : ''
+  context.hidden = !continuation
   transition.classList.add('handoff-transition-visible')
-  window.setTimeout(() => transition.classList.remove('handoff-transition-visible'), 1500)
+  window.setTimeout(() => transition.classList.remove('handoff-transition-visible'), 2500)
 }
 
 function appendMessage(message) {

@@ -1,0 +1,12 @@
+{
+  "name": "@trace/app-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Trace desktop Agent workspace prototype",
+  "scripts": {
+    "build": "node --check server.mjs && node --check src/workspace.js && node --check src/data.js",
+    "dev": "node server.mjs",
+    "start": "node server.mjs"
+  }
+}

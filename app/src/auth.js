@@ -13,7 +13,7 @@ function loginTemplate() {
       <img class="river-backdrop" src="./public/scenes/river.png" alt="" fetchpriority="high" />
       <canvas class="river-scene" aria-hidden="true"></canvas>
       <header class="auth-header">
-          <a class="auth-brand" href="/" aria-label="Trace 首页"><span class="auth-brand-mark">${traceMark()}</span><h1>Trace</h1></a>
+          <a class="auth-brand" href="../" aria-label="Trace 产品介绍"><span class="auth-brand-mark">${traceMark()}</span><h1>Trace</h1></a>
       </header>
       <section class="auth-welcome" aria-labelledby="auth-title">
         <h2 id="auth-title"><span>让思想蜕变，</span><span>认知不再局限</span></h2>
@@ -28,7 +28,7 @@ function loginTemplate() {
       <div class="auth-journey-wrap" aria-hidden="true">
         <ol class="auth-journey"><li><span class="journey-marker"></span><span>留下一点</span></li><li><span class="journey-marker marker-warm"></span><span>接着想</span></li><li><span class="journey-marker"></span><span>带去用</span></li><li><span class="journey-marker"></span><span>让结果回来</span></li></ol>
       </div>
-      <footer class="auth-footer"><span>Trace · 思考的下一程</span><strong class="footer-emergence">认知涌现，点亮Trace飞鸟效应</strong><span>${icon('lock-keyhole')}知乎安全授权</span></footer>
+      <footer class="auth-footer"><a href="../">← 返回产品介绍</a><strong class="footer-emergence">认知涌现，点亮Trace飞鸟效应</strong><span>${icon('lock-keyhole')}知乎安全授权</span></footer>
     </div>
   </main>`
 }
@@ -99,4 +99,3 @@ async function bootGuest() {
   riverScene?.destroy()
   await import('./workspace.js')
 }
-bootGuest()

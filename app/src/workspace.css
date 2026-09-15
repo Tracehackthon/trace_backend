@@ -79,6 +79,10 @@ h1, h2, h3, p { overflow-wrap: anywhere; }
 .member-stack > span:first-child { margin-left: 0; }
 .member-stack small { margin-left: 7px; color: #809387; font-size: 10px; white-space: nowrap; }
 .sidebar-footer { display: flex; align-items: center; gap: 8px; padding: 15px 7px; border-top: 1px solid var(--line); color: #6f8177; font-size: 11px; flex: none; }
+.workspace-journey { display: grid; gap: 5px; margin: 4px 0 20px; padding: 11px 12px; border: 1px solid #dcebe1; border-radius: 10px; background: #f6fbf7; }
+.workspace-journey .journey-label { color: var(--green); font-size: 9px; font-weight: 750; letter-spacing: .08em; }
+.workspace-journey a { color: #738279; font-size: 10px; line-height: 1.45; text-decoration: none; }
+.workspace-journey a:hover { color: var(--green); }
 .sidebar-footer small { margin-left: auto; font-size: 10px; color: #9aa79f; }
 .runtime-dot { width: 7px; height: 7px; background: #30a482; border-radius: 50%; }
 .profile { display: flex; align-items: center; gap: 10px; padding: 2px 7px; }

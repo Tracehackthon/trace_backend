@@ -65,6 +65,13 @@ function sidebar() {
       <a href="#memory" class="${ui.view === 'memory' ? 'active' : ''}">${icon('list-tree')}<span>记忆列表</span><span class="nav-count">${data.threads.length}</span></a>
       <a href="#factory" class="${ui.view === 'factory' ? 'active' : ''}">${icon('layers-3')}<span>认知工厂</span>${pending ? `<span class="nav-count count-green">${pending}</span>` : ''}</a>
     </nav>
+    <div class="workspace-journey" aria-label="Trace 完整链路">
+      <span class="journey-label">TRACE 完整链路</span>
+      <a href="../#demo">1 · Harness 接住想法</a>
+      <a href="#memory">2 · 记忆列表沉淀</a>
+      <a href="#discussion/${encodeURIComponent(ui.threadId)}">3 · 深度讨论</a>
+      <a href="#factory">4 · 认知工厂确认</a>
+    </div>
     <div class="sidebar-label">来源平台</div><div class="platform-nav">${Object.entries(platforms).map(([key,p]) => `<button data-action="platform" data-platform="${key}" title="查看 ${p.name} 对话">${logo(key)}<span>${data.threads.filter(t => t.platform === key).length}</span></button>`).join('')}</div>
     <div class="pet-dock"><aside class="fox-desk-pet" aria-label="Trace 白狐轻接收入口"><span class="pet-count" title="记下的想法">${data.foxCount || ''}</span><button class="fox-button" id="fox-button" data-action="fox" aria-expanded="${ui.foxOpen}" aria-label="打开白狐想法气泡" title="记下一个想法">${foxSvg('fox-pet-svg')}</button><div class="fox-bubble" ${ui.foxOpen ? '' : 'hidden'}><label for="fox-input">随手记下一个想法</label><textarea id="fox-input" rows="4" placeholder="此刻在想什么？">${esc(ui.foxDraft)}</textarea><div class="fox-actions"><button class="quiet-button" data-action="fox-capture">记下它</button><button class="primary-button" data-action="fox-deepen">深度思考${icon('arrow-up-right')}</button></div></div></aside></div>
     <div class="sidebar-footer"><span class="runtime-dot"></span><span>${ui.workspace === 'team' ? '团队工作区' : '本地工作区'}</span><small>${ui.workspace === 'team' ? '多人共创 · 3 位成员' : '示例数据'}</small></div><div class="profile"><span class="profile-avatar">${esc(traceUser.fullname?.slice(0, 1) || '我')}</span><div><strong>${esc(traceUser.fullname || 'Trace 用户')}</strong><small>${esc(traceUser.headline || '知乎账号 · 个人空间')}</small></div><button class="profile-menu-button" data-action="logout" type="button" aria-label="退出登录" title="退出登录">${icon('log-out')}</button></div>

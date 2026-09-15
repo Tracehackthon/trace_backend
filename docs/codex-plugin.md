@@ -56,6 +56,8 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 讨论 / 检查 → 提案（无写入）→ 用户明确采用 → apply → 可见 receipt
 ```
 
+讨论本身现在是 scripted 的：`$trace`、`$trace-adapt`、`$trace-review` 都由对话引擎（`trace_dialogue_*` 工具）驱动——引擎拥有步骤与推进条件，Codex 负责语言。每次呈给你的岔路（选择来源模式、确认边界、采纳或修订草案、保存或拒绝候选）都会带着你的理由记入项目自己的**决策路径**，可用 `trace path` 或 `trace_path_view` 回放；被拒绝的方向会成为以后提案必须绕开的负例。详见[对话引擎与决策路径](dialogue-engine.md)。
+
 MCP 的 `approval: adopt:<proposal_id>` 是 Agent 在用户明确采用后传递的完整性令牌；用户无需记忆或输入它。proposal 含有当时的状态指纹，项目/profile/hook 在提案后被其他进程改动时会变成 stale，必须重新展示提案。
 
 `$trace-context` 是只读编译加 activation receipt，不需要 adoption token，因为它不会改变 profile；但只接受已经有 activation lock 的项目。`legacy_unlocked` 项目会失败关闭，先展示 profile migration proposal，用户明确采用后才能领取。包协议为 `trace.context-skill-package@0.1.0`：`content_sha256` 绑定 Codex session、project、`SKILL.md`、lock provenance 与固定边界；重复领取同一份内容复用同一个 receipt。`generated_at` 不进入内容身份，避免丢失响应后的重试制造第二份语义包。

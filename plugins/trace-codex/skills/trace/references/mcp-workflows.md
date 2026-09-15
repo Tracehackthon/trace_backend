@@ -13,6 +13,9 @@
 | Receive the current context Skill package | `trace_context_skill_receive` | none | task/project-bound virtual `SKILL.md` + privacy-safe activation receipt; no global install |
 | Receive a prepared work handoff | `trace_product_context_receive` | none | server-issued delivery receipt bound to Codex session + project + context hash |
 | Return actual Codex work | none | `trace_product_result_return` | immutable external return + review draft; no automatic understanding change |
+| Scripted dialogues (onboard / adapt / review) | `trace_dialogue_begin`, `trace_dialogue_state` | `trace_dialogue_step` | continuity thread + turns + decision forks only |
+| Replay a decision path | `trace_path_view` | none | read-only |
+| Review one candidate | `trace_candidate_review_view` | `trace_candidate_review_apply` | save → private source_snapshot; reject → rationale in decision trail |
 
 All apply tools require `approval: adopt:<proposal_id>`. The agent derives that token after the user explicitly adopts the displayed proposal; the user never has to see or type it.
 

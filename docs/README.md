@@ -5,7 +5,6 @@
 ## 使用产品
 
 - [产品介绍、六项功能与知乎材料用途](product-guide.md)：为什么用、第一次怎么用、浏览器数据边界。
-- [知乎与全网](zhihu-native.md)：本机 Web、原生 Codex 工具、用户授权与 HTTPS 回调部署。
 - [本机运行](local-runtime.md)：一个服务、三个命令、数据位置与故障处理。
 - [在 Codex 中使用 Trace](codex-plugin.md)：Plugin 安装、工作领取与回流；不是生成后端的必装依赖。
 
@@ -14,8 +13,7 @@
 | 任务 | 读这一份 |
 | --- | --- |
 | 分清产品状态、Agent 执行与原生协作 | [底层架构](architecture.md) |
-| 从 Web 调用 Agent | [Agent Runtime](../apps/agent/README.md) → [HTTP 契约](../apps/agent/docs/protocol.md) |
-| 接自己的模型或完整 Agent | [Agent profile 与执行器协议](../apps/agent/docs/profiles.md) |
+| 从 Web 调用 Codex | [Agent 后端](../apps/agent/README.md) → [HTTP 契约](../apps/agent/docs/protocol.md) |
 | 保存事项、理解、工作和结果 | [产品命令与回流协议](../apps/desktop/README.md) |
 | 维护原生认知运行时 | [Packages](../packages/README.md) · [MCP](../apps/mcp/README.md) |
 | 查知乎 transport / provider 代码 | [HTTP transport](../packages/integration/zhihu-transport/README.md) · [前例 adapter](../packages/integration/zhihu-precedent/README.md) |
@@ -28,6 +26,8 @@
 - [版本和兼容](versioning.md) · [Native 发行](../native/README.md)：现有 native 包不是新的 Web/Agent 包。
 
 ## 按需深入原生协作
+
+[对话引擎与决策路径](dialogue-engine.md)：原生协作的 scripted onboard/adapt/review、决策记录与回放；与 Web 自由生成 API 分开。
 
 [项目初始化](getting-started.md) · [日常候选与沉淀](daily-workflow.md) · [个性化](personalization.md) · [来源授权与实际访问](host-native-retrieval.md) · [评估 fixtures](../tests/evals/README.md)
 

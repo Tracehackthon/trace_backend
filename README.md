@@ -6,11 +6,20 @@
 
 它不把收藏、聊天、任务和 AI 回答堆成更多孤立记录；它把一条还没有想清楚的线索，沿着 **原始表达 → 真实材料 → 用户确认的理解 → 一次实践 → 结果回流**，保留为同一件仍然可以变化的事。
 
+> **产品入口说明：** 本 GitHub 仓库是 Trace 的源码与技术文档入口，不是产品演示页面。请通过下方正式地址体验产品或观看演示视频。
+
+<p align="center">
+  <a href="https://trace.neutronm.store/"><strong>打开 Trace 在线演示</strong></a> ·
+  <a href="https://trace.neutronm.store/video"><strong>观看 Trace 视频展示</strong></a>
+</p>
+
 <p align="center">
   <strong>知乎黑客松作品方向</strong> · local-first · 来源可回看 · 理解须确认 · 行动有边界
 </p>
 
 <p align="center">
+  <a href="https://trace.neutronm.store/">在线演示</a> ·
+  <a href="https://trace.neutronm.store/video">视频展示</a> ·
   <a href="#judge-demo">3 分钟评委演示</a> ·
   <a href="#what-is-trace">30 秒看懂</a> ·
   <a href="#run-locally">本机运行</a> ·
@@ -72,7 +81,8 @@ Trace 的核心对象不是笔记、聊天或待办，而是：
 
 | 入口 | 适合什么 | 当前能验证什么 | 数据边界 |
 | --- | --- | --- | --- |
-| [在线产品预览](https://trace-portal.vercel.app) | 快速体验“留下一点 → 理解 → 行动 → 结果”的手工闭环 | 浏览器中的手工产品流程 | 当前浏览器 IndexedDB；**不**自动连接本机 SQLite、知乎、Agent 或 Codex |
+| [Trace 在线演示](https://trace.neutronm.store/) | 快速体验“留下一点 → 理解 → 行动 → 结果”的手工闭环 | 浏览器中的手工产品流程 | 当前浏览器 IndexedDB；**不**自动连接本机 SQLite、知乎、Agent 或 Codex |
+| [Trace 视频展示](https://trace.neutronm.store/video) | 快速了解产品叙事、关键交互和完整体验路径 | 视频形式的产品演示 | 用于展示产品，不代替本机接口与持久化验收 |
 | 本仓库的本机 Web | 评委演示来源、产品状态、Codex 工作回流及可选 Agent API | SQLite、知乎／全网 provider、受控 Agent Runtime | 单用户、loopback、same-origin；详见下方运行方式 |
 
 <a id="zhihu"></a>

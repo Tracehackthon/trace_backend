@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="430" viewBox="0 0 1600 430" role="img" aria-labelledby="title desc">
+  <title id="title">Trace 的连续判断闭环</title>
+  <desc id="desc">一件仍在变化的事从原始表达出发，经过真实材料、用户确认的理解、受限工作快照和待复核结果，再回到下一轮判断。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f8fcfa"/><stop offset=".55" stop-color="#edf7f4"/><stop offset="1" stop-color="#f7f5ed"/></linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#0f6a54"/><stop offset=".45" stop-color="#198c70"/><stop offset=".72" stop-color="#d49a36"/><stop offset="1" stop-color="#0f6a54"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="180%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#1d5b4c" flood-opacity=".12"/></filter>
+    <style>
+      .step { fill:#fff; stroke:#cde3dc; stroke-width:2; }
+      .num { fill:#0c7058; }
+      .head { font: 700 25px "Noto Sans SC", "Microsoft YaHei", sans-serif; fill:#123c33; }
+      .body { font: 400 16px "Noto Sans SC", "Microsoft YaHei", sans-serif; fill:#587069; }
+      .tag { font: 600 14px "Noto Sans SC", "Microsoft YaHei", sans-serif; fill:#0e7158; }
+      .tag-warm { font: 600 14px "Noto Sans SC", "Microsoft YaHei", sans-serif; fill:#9a6719; }
+    </style>
+  </defs>
+  <rect width="1600" height="430" rx="32" fill="url(#bg)"/>
+  <path d="M 170 290 C 265 368, 315 364, 405 280 S 560 108, 690 202 S 810 350, 960 270 S 1120 102, 1260 194 S 1390 358, 1470 244" fill="none" stroke="url(#line)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 1470 244 C 1535 155, 1515 71, 1410 70 C 1230 68, 292 58, 178 169" fill="none" stroke="#0f6a54" stroke-width="3" stroke-linecap="round" stroke-dasharray="9 11" opacity=".7"/>
+  <path d="M 174 154 l 18 14 -22 8" fill="none" stroke="#0f6a54" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g filter="url(#shadow)">
+    <g transform="translate(46 72)"><rect class="step" width="250" height="148" rx="26"/><circle class="num" cx="30" cy="32" r="17"/><text x="30" y="38" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="700">1</text><text class="head" x="58" y="40">留下一点</text><text class="body" x="28" y="79">保留当时为什么在意，</text><text class="body" x="28" y="106">不逼迫自己立刻整理。</text></g>
+    <g transform="translate(334 210)"><rect class="step" width="250" height="148" rx="26"/><circle class="num" cx="30" cy="32" r="17"/><text x="30" y="38" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="700">2</text><text class="head" x="58" y="40">找个对照</text><text class="body" x="28" y="79">让知乎、全网或手工材料</text><text class="body" x="28" y="106">带来经验、反例与条件。</text></g>
+    <g transform="translate(646 62)"><rect class="step" width="270" height="164" rx="26"/><circle class="num" cx="30" cy="32" r="17"/><text x="30" y="38" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="700">3</text><text class="head" x="58" y="40">我的理解</text><text class="body" x="28" y="79">材料和建议不等于结论；</text><text class="body" x="28" y="106">由用户明确保存或保留未决。</text><rect x="28" y="122" width="86" height="25" rx="12.5" fill="#e3f3eb"/><text class="tag" x="71" y="140" text-anchor="middle">用户确认</text></g>
+    <g transform="translate(970 210)"><rect class="step" width="250" height="148" rx="26"/><circle class="num" cx="30" cy="32" r="17"/><text x="30" y="38" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="700">4</text><text class="head" x="58" y="40">带去用</text><text class="body" x="28" y="79">把本次明确确认的内容</text><text class="body" x="28" y="106">带入有限的工作快照。</text></g>
+    <g transform="translate(1290 72)"><rect class="step" width="264" height="164" rx="26"/><circle cx="30" cy="32" r="17" fill="#b87516"/><text x="30" y="38" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="700">5</text><text class="head" x="58" y="40">结果回来</text><text class="body" x="28" y="79">区分事实、解释与未确认，</text><text class="body" x="28" y="106">再决定是否修订理解。</text><rect x="28" y="122" width="86" height="25" rx="12.5" fill="#fbefd8"/><text class="tag-warm" x="71" y="140" text-anchor="middle">待复核</text></g>
+  </g>
+  <text x="800" y="405" text-anchor="middle" class="body">同一件仍在变化的事：结果回到原判断，下一次可以从真实停点继续。</text>
+</svg>

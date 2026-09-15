@@ -1,0 +1,14 @@
+{
+  "name": "@trace/product-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Authoritative Trace Product Workspace state, commands, persistence and handoff records",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./node": "./src/workspace.mjs"
+  },
+  "scripts": {
+    "build": "node --check src/index.mjs && node --check src/bridge.mjs && node --check src/commands.mjs && node --check src/workspace.mjs && node --check src/codex-bridge.mjs"
+  }
+}

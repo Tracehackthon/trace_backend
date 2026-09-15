@@ -2,18 +2,21 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createWebStore } from './web-store.mjs'
+import { createProductWorkspace } from '../../packages/product/workspace/src/workspace.mjs'
 import { createAgentBackend } from '../agent/backend.mjs'
 import { createZhihuBackend } from '../agent/zhihu.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
-const workspace = path.resolve(root, '../../..')
-const webStore = createWebStore({ file: path.resolve(process.env.TRACE_WEB_STATE_FILE || path.join(workspace, '.trace/state/web.sqlite')) })
+const repositoryRoot = path.resolve(root, '../..')
+const defaultStateRoot = path.resolve(root, '../../..')
+const productModuleRoot = path.join(repositoryRoot, 'packages/product/workspace/src')
+const productBrowserAssets = new Set(['index.mjs', 'bridge.mjs', 'commands.mjs', 'demo-workspace.mjs', 'chain-model.mjs', 'comparison-model.mjs', 'worksite-model.mjs'])
+const productWorkspace = createProductWorkspace({ file: path.resolve(process.env.TRACE_WEB_STATE_FILE || path.join(defaultStateRoot, '.trace/state/web.sqlite')) })
 // Four explicit Web API domains: product state, public source search, Zhihu
 // account connection, and Agent runs. The Zhihu middleware owns `/api/search/*`
 // and `/api/zhihu/*`; the Agent receives its provider in-process only.
 const zhihu = createZhihuBackend()
-const agent = createAgentBackend({ webStore, retrievalProvider: zhihu.provider })
+const agent = createAgentBackend({ productWorkspace, retrievalProvider: zhihu.provider })
 const requestedPort = Number(process.env.TRACE_DESKTOP_PORT ?? '4173')
 const port = Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 4173
 const mimeTypes = new Map([
@@ -34,6 +37,10 @@ const mimeTypes = new Map([
 
 function resolveAsset(url = '/') {
   const pathname = decodeURIComponent(new URL(url, 'http://127.0.0.1').pathname)
+  if (pathname.startsWith('/runtime/product-workspace/')) {
+    const moduleName = pathname.slice('/runtime/product-workspace/'.length)
+    return productBrowserAssets.has(moduleName) ? path.join(productModuleRoot, moduleName) : null
+  }
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
   const absolute = path.resolve(root, relative)
   return absolute === root || absolute.startsWith(`${root}${path.sep}`) ? absolute : null
@@ -41,12 +48,13 @@ function resolveAsset(url = '/') {
 
 const server = http.createServer(async (request, response) => {
   try {
-  if (await webStore.handle(request, response)) return
+  if (await productWorkspace.handle(request, response)) return
   if (await zhihu.handle(request, response)) return
   if (await agent.handle(request, response)) return
   const asset = resolveAsset(request.url)
   const rootFile = asset && ['index.html','legacy.html','sw.js'].includes(path.basename(asset)) && path.dirname(asset) === root
-  const allowedAsset = rootFile || (asset && (asset.startsWith(path.join(root,'src') + path.sep) || asset.startsWith(path.join(root,'public') + path.sep)))
+  const allowedAsset = rootFile || (asset && (asset.startsWith(path.join(root,'src') + path.sep) || asset.startsWith(path.join(root,'public') + path.sep)
+    || asset.startsWith(productModuleRoot + path.sep)))
   if (!allowedAsset || !fs.existsSync(asset) || !fs.statSync(asset).isFile()) {
     response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
     response.end('Not found')
@@ -78,7 +86,7 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`Trace Web: http://127.0.0.1:${port}/`)
-  console.log(`Local Web data: ${webStore.file}`)
+  console.log(`Local Web data: ${productWorkspace.file}`)
   console.log('Product writes: command protocol v1; legacy snapshot/reset writes disabled')
 })
 
@@ -89,6 +97,6 @@ async function close() {
   const stopped = new Promise(resolve => server.close(resolve))
   try { await agent.close() } finally { zhihu.close() }
   await stopped
-  webStore.close()
+  productWorkspace.close()
 }
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, close)

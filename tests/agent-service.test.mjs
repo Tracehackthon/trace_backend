@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
+import { randomUUID } from 'node:crypto';
 import { fixture, answer, output, chain } from './fixtures/agent-harness.mjs';
 import { createAgentStore } from '../apps/agent/store.mjs';
 import { assembleContext, callContextTool } from '../apps/agent/context.mjs';
@@ -60,6 +61,48 @@ test('selection validation and revision candidates bind to exact original; never
   const run = await a.request('/api/agent/runs', a.envelope({ purpose: 'revise', selection })); const done = await a.wait(run.json.run.runId);
   assert.equal(done.status, 'succeeded'); assert.deepEqual(done.result.target.selection, selection);
   assert.equal(done.result.kind, 'revision_candidate'); assert.deepEqual(a.webStore.read(), before);
+});
+
+test('explicit Agent candidate adoption is transactional, replayable and undoable without hiding later edits', async t => {
+  const a = await fixture(t, { adapter: { execute: async () => output(answer('仅建议改这一处', { replacement: '我的新说法' })) } });
+  const selection = { field: 'understandingDraft', start: 0, end: 2, text: '我自' };
+  const created = await a.request('/api/agent/runs', a.envelope({ purpose: 'revise', selection }));
+  const done = await a.wait(created.json.run.runId), commandId = randomUUID();
+  const before = a.webStore.read();
+  assert.equal(before.host.chain.matters.find(m => m.id === 'm').understandingDraft, '我自己的理解🙂');
+  const accepted = await a.request(`/api/agent/runs/${done.runId}/adoption`, { action: 'accept', commandId, expectedRevision: done.baseRevision });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.json));
+  assert.equal(accepted.json.run.result.adoption, 'applied');
+  assert.equal(accepted.json.run.adoptionAvailable, false);
+  assert.equal(accepted.json.run.canonicalStateChanged, true);
+  assert.equal(accepted.json.product.host.chain.matters.find(m => m.id === 'm').understandingDraft, '我的新说法己的理解🙂');
+  assert.equal(accepted.json.product.host.chain.matters.find(m => m.id === 'm').understanding, '我自己的理解🙂');
+  assert.equal(accepted.json.product.receipt.effect, 'understanding-draft-only');
+  assert.equal(accepted.json.product.receipt.agentRunId, done.runId);
+  const replay = await a.request(`/api/agent/runs/${done.runId}/adoption`, { action: 'accept', commandId, expectedRevision: done.baseRevision });
+  assert.equal(replay.status, 200); assert.equal(replay.json.product.revision, accepted.json.product.revision);
+  const undoId = randomUUID(), head = a.webStore.read().revision;
+  const undone = await a.request(`/api/agent/runs/${done.runId}/adoption`, { action: 'undo', commandId: undoId, expectedRevision: head });
+  assert.equal(undone.status, 200); assert.equal(undone.json.run.result.adoption, 'undone');
+  assert.equal(undone.json.run.adoptionAvailable, false);
+  assert.equal(undone.json.product.host.chain.matters.find(m => m.id === 'm').understandingDraft, '我自己的理解🙂');
+});
+
+test('Agent candidate dismiss and stale adoption never mutate the Product Workspace', async t => {
+  const a = await fixture(t, { adapter: { execute: async () => output(answer('候选', { replacement: '替换' })) } });
+  const selection = { field: 'understandingDraft', start: 0, end: 2, text: '我自' };
+  const first = await a.request('/api/agent/runs', a.envelope({ purpose: 'revise', selection }));
+  const done = await a.wait(first.json.run.runId), beforeDismiss = a.webStore.read();
+  const dismissed = await a.request(`/api/agent/runs/${done.runId}/adoption`, { action: 'dismiss' });
+  assert.equal(dismissed.status, 200); assert.equal(dismissed.json.run.result.adoption, 'dismissed');
+  assert.equal(dismissed.json.run.adoptionAvailable, false);
+  assert.deepEqual(a.webStore.read(), beforeDismiss);
+  const second = await a.request('/api/agent/runs', a.envelope({ purpose: 'revise', selection }));
+  const stale = await a.wait(second.json.run.runId);
+  await a.command(chain('UNDERSTANDING_DRAFT', { text: '后来自己的编辑' }));
+  const rejected = await a.request(`/api/agent/runs/${stale.runId}/adoption`, { action: 'accept', commandId: randomUUID(), expectedRevision: stale.baseRevision });
+  assert.equal(rejected.status, 409); assert.equal(rejected.json.error.code, 'REVISION_CONFLICT');
+  assert.equal(a.webStore.read().host.chain.matters.find(m => m.id === 'm').understandingDraft, '后来自己的编辑');
 });
 
 test('invalid outputs / fabricated citations fail closed without changing original', async t => {

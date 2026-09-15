@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Provider-neutral Trace Agent HTTP runtime with Codex, model, and external Agent adapters",
+  "dependencies": {
+    "@trace/product-workspace": "workspace:*"
+  },
   "scripts": {
     "start": "node server.mjs",
     "build": "node --check protocol.mjs && node --check context.mjs && node --check runtime.mjs && node --check remote-http.mjs && node --check model.mjs && node --check external-agent.mjs && node --check profiles.mjs && node --check codex.mjs && node --check store.mjs && node --check service.mjs && node --check http.mjs && node --check backend.mjs && node --check server.mjs",

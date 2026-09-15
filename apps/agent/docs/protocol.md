@@ -1,7 +1,7 @@
 # Web Agent Runtime 调用协议
 
 - 日期：2026-09-15；读者：Trace 后端、Web 接入与宿主适配开发者。
-- 状态：**本机底层 v1 与 provider-neutral executor 接缝已实现；Agent 回答 UI 尚未接入，默认运行开关未替用户开启。** Codex CLI 0.153.4 的真实闭环，以及无 Codex 的模型/外部 Agent 合成 HTTP 闭环已有验证；验收边界见[生产计划](../../../docs/production-plan.md)。
+- 状态：**本机底层 v1、provider-neutral executor 接缝、Web 回答与候选采纳闭环已实现；默认运行开关未替用户开启。** Codex CLI 0.153.4 的真实闭环，以及无 Codex 的模型/外部 Agent 合成 HTTP 闭环已有验证；验收边界见[生产计划](../../../docs/production-plan.md)。
 - 权威实现：[Agent 后端](../README.md)。本文说明设计和调用方责任，不把静态站点部署、多租户运行或真实知乎联调写成已完成。原 manunl 入口保留导航，不维护两份协议。
 
 ## 1. 接入方向与执行器不能混为一谈
@@ -20,7 +20,7 @@ Executor：CodexAdapter / ModelAdapter / ExternalAgentAdapter
   ↓
 持久化 SSE 事件 → 结构/引用/版本校验 → answer / revision_candidate
   ↓
-Web 展示候选；用户采纳是另一个产品领域动作
+Web 展示候选；用户明确接受后由 Product Workspace 做独立 CAS 事务
 ```
 
 ## 2. 职责、已有能力与本轮不做
@@ -29,7 +29,7 @@ Web 展示候选；用户采纳是另一个产品领域动作
 | --- | --- | --- |
 | 产品库 `web.sqlite` | 事项、理解、草稿版本、来源、contextMode/epoch 的权威状态 | 模型运行记录 |
 | ContextAssembler | 显式目标、准确选区、当前版本、来源范围、预算、fresh 排除规则 | 全历史检索、来源联网核验 |
-| AgentService | 生命周期、去重、并发、超时、旧请求失效、候选校验 | 用户采纳、正文保存 |
+| AgentService | 生命周期、去重、并发、超时、旧请求失效、候选校验及受信任采纳编排 | 绕过 Product Workspace 直接保存正文 |
 | ExecutorRegistry | 只允许服务端配置的 profile，固定 owner/version/revision，不静默回退 | 浏览器自带 endpoint/model/token |
 | Codex / Model / External Agent adapter | 真实执行、受限工具、能力声明和执行身份 | 产品事实/权限的最终裁决 |
 | 独立 `agent.sqlite` | 请求、快照身份、实际工具事件、候选、错误、重放游标 | 第二份 canonical matter |
@@ -126,7 +126,7 @@ queued → running → succeeded（仅回答或候选）
 
 默认一次运行；并发超限 429，不排一个没有容量界限的队列。默认总超时 180 秒，含启动握手；过期/取消先尝试 `turn/interrupt` 并关闭本次拥有的子进程。迟到事件不能从 terminal 回到 succeeded。
 
-SSE 类型：`run.queued/run.running/runtime.connected/runtime.started/tool.completed/output.delta/run.<terminal>`。
+SSE 类型：`run.queued/run.running/runtime.connected/runtime.started/tool.completed/output.delta/run.<terminal>/run.adoption.changed`。
 每条事件包含 `runId/sequence/matterId/contextEpoch/contextHash` 以及安全的 profile identity（id/kind/owner/version/revision，不含连接与凭据）。`output.delta` 是**待验证的结构化 JSON 片段**，不是可直接写入正文的文本 patch；最终 `run.succeeded.data.result` 才是解析后的结果。若页面需要逐字展示 answer，可在后续 UI 接入时做受限增量 JSON 解析；本轮不伪装成已改好页面。
 
 游标用 SSE `id`；重连带 `Last-Event-ID` 或 `?after=N`。服务保存事件并从下一条补发；终态后自动关闭。断开 SSE 不取消模型，页面要停止执行必须调用 cancel。慢消费者超过缓冲预算被断开，但仍可按游标恢复。
@@ -145,7 +145,7 @@ Web 还应按当前选中的 `runId + matterId + contextEpoch` 接收流。后�
 - `target.matterId/baseRevision/contextEpoch`；有选区时带准确选区和草稿版本；
 - `canonicalStateChanged=false`。
 
-**没有 `apply` Agent 接口。** 领域采纳仍由用户明确发起，并在现有产品命令层校验目标/版本。这一版也没有把候选自动伪装成原型里的 `example-suggestion`。后续接 UI 时应新增专用的“采用真实 Agent 候选”领域命令，绑定 runId 和版本，再实现撤销；在此之前结果可展示、复制和由用户手工编辑，不能宣称已经完成自动采纳。
+修订候选通过 `POST /api/agent/runs/:runId/adoption` 处理：`accept` 与 `undo` 需要新的 `commandId` 和当前 `expectedRevision`，`dismiss` 不改产品状态。接受绑定 runId、resultHash、事项、context epoch、基础 revision、草稿版本和 UTF-16 精确选区；Product Workspace 在单一事务中应用现有局部建议逻辑，只改变 `understandingDraft`，不保存为正式 `understanding`。同一采纳命令可安全重放；撤销只在当前草稿仍保留这次 Agent 来源身份时成立，后来编辑不会被旧撤销覆盖。`autoApply` 始终为 `false`。
 
 ## 8. 本机调用示例（不改 Web）
 

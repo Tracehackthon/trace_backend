@@ -175,7 +175,7 @@ Mode: **Operate**。本文供维护桌面 Web 的工程师与 Agent 使用，记
 
 ### 同文档入口与共享对象
 
-[路由入口](src/web-main.js) 切换各模块并隔离样式；首页“全部”进入真实痕迹目录，搜索进入实际检索，品牌返回首页。对象与版本由 [宿主 bridge](src/product/bridge.mjs) 统一持有并事务保存；首页只读取同一份数据投影，不建立第二份事项事实。
+[路由入口](src/web-main.js) 切换各页面 Adapter 并隔离样式；首页“全部”进入真实痕迹目录，搜索进入实际检索，品牌返回首页。对象、版本与命令由 [Product Workspace](../../packages/product/workspace/README.md) 统一维护并事务保存；首页只读取同一份数据投影，不建立第二份事项事实。
 
 导航与刷新保留已写入本机的对象、草稿、来源和版本；URL 只标识对象和位置，不承载输入正文。返回保存 query / filter / anchor / scroll 信息，失效对象有明确空态，不替换成示例。模型与外部 Agent 仍未连接，手工材料和结果按用户输入标识；本地保存、关联、采用理解和外部送达不可混称。旧 observation query 与 Mock 讨论留在 legacy。
 

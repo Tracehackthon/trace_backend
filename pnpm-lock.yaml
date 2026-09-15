@@ -40,7 +40,11 @@ importers:
         specifier: catalog:devTools
         version: 7.0.2
 
-  apps/agent: {}
+  apps/agent:
+    dependencies:
+      '@trace/product-workspace':
+        specifier: workspace:*
+        version: link:../../packages/product/workspace
 
   apps/cli:
     dependencies:
@@ -96,7 +100,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core/runtime
 
-  apps/desktop: {}
+  apps/desktop:
+    dependencies:
+      '@trace/product-workspace':
+        specifier: workspace:*
+        version: link:../../packages/product/workspace
 
   apps/mcp:
     dependencies:
@@ -338,6 +346,8 @@ importers:
       '@trace/template-contract':
         specifier: workspace:*
         version: link:../../template/contract
+
+  packages/product/workspace: {}
 
   packages/sdk/protocol:
     dependencies:

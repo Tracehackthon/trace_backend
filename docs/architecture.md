@@ -40,7 +40,7 @@ Web → Trace 产品后端 → AgentService（内容范围、版本、运行与�
 
 ```text
 本机 Web / 同源 API 调用方
-  ├─ `/api/product/*` 产品命令 ── apps/desktop/web-store + src/product ── web.sqlite
+  ├─ `/api/product/*` 产品命令 ── packages/product/workspace ── web.sqlite
   ├─ `/api/search/{zhihu,global}` 公共来源搜索 ── ZhihuProvider
   ├─ `/api/zhihu/*` OAuth／账号状态／授权后用户读取 ── ZhihuProvider
   └─ `/api/agent/*` 生成请求 ── apps/agent ── ExecutorRegistry
@@ -62,16 +62,18 @@ Codex 原生任务
 | 层 | 当前代码 | 负责 | 不负责 / 待整理 |
 | --- | --- | --- | --- |
 | HTTP 宿主 | `apps/desktop/server.mjs` | 同源页面及四个明确 API 域：`product`、`search`、`zhihu`、`agent`；向 Agent 进程内注入只读 source provider | 不是 Electron 安装包，也没有公网租户认证 |
-| 产品领域 | `apps/desktop/src/product/*model.mjs`、`commands.mjs`、`codex-bridge.mjs` | 事项/理解/对照/工作状态机、版本化动作与回执 | 仍在 desktop 路径中；并非全部已迁入 packages |
-| 产品存储 | `apps/desktop/web-store.mjs` | SQLite 事务、工作区 CAS、命令重放 | 不调用模型，不接受默认整份 host 覆盖 |
-| Agent 执行 | `apps/agent` | profile、通用工具桥、运行/SSE/取消、Codex/模型/外部 Agent adapter、候选校验 | 不自动采纳；远程 adapter 不代表公网服务已有租户隔离 |
+| Product Workspace | `packages/product/workspace` | 事项／理解／来源关系／对照／工作状态机，以及 SQLite 事务、工作区 CAS、命令回放和 Codex 交接记录 | 不负责页面渲染、Agent 生成或项目协作账本 |
+| Web 页面 Adapter | `apps/desktop/src/product/*screen.mjs`、`web-main.js` | 渲染 Product Workspace 投影、把明确用户动作提交给产品命令 | 不拥有产品规则，不建立第二份事项状态 |
+| Agent 执行 | `apps/agent` | profile、通用工具桥、运行/SSE/取消、Codex/模型/外部 Agent adapter、候选校验与受信任采纳编排 | 不自动采纳；产品写入仍由 Product Workspace 裁决；远程 adapter 不代表公网服务已有租户隔离 |
 | 知乎内容来源 | `packages/integration/zhihu-transport`、`apps/agent/retrieval.mjs` | 知乎／全网接口、用户授权、摘要规范化、实际来源注册与引用校验 | source provider，不是模型 provider；本机单用户，不自动保存／采纳；[接入与回调](zhihu-native.md) |
 | Codex 桥接 | `plugins/trace-codex`、`apps/mcp` | 用户意图入口、上下文包、工作快照领取与结果送回复核 | 安装不会启用生成 API，不等于部署 Web 服务 |
 | 原生协作底座 | `packages/product/application`、`packages/core`、`apps/codex` | profile、来源授权、认知接续、提案/采用、hooks evidence | 不是六项 Web 功能已经统一抽出的领域包 |
 | 维护与集成 | `apps/cli`、`packages/sdk`、`native` | CLI、RPC、安装更新和认知账本维护 | 现有发行不覆盖新 Web/Agent；backup 不覆盖其两库 |
 | 探索形态 | `legacy.html`、`plugins/trace-harness-plugin`、`artifacts` | 旧原型、宿主实验与历史验证材料 | 不作为当前产品入口或生产发行依据 |
 
-**先明确归属，不立即搬动目录。** 当前领域逻辑确实混在 desktop 下；后续抽包需保持 API 和数据库行为不变，用既有事务/回放测试证明。仅改名或多包一层 wrapper 不能解决状态边界。
+Product Workspace 已从 desktop 页面目录迁入独立 Module，并由浏览器安全 Interface 与 Node 持久化 Interface 共同维护同一套规则。当前仍待深化的是 Agent Runtime：`apps/desktop` 仍导入 `apps/agent` 的组装入口，下一步应让两个可执行宿主共同依赖独立 Agent Runtime Module，而不是让一个 app 依赖另一个 app。
+
+接口级纵向验收由 `tests/backend-api-flow.test.mjs` 提供：不加载前端，从空库依次经过产品命令、知乎／全网来源、Agent 工具循环、SSE、运行读取、进程重启和两库恢复，并明确验证生成结果不自动采纳。外部模型与知乎上游使用受控 fixture，因此该测试验证执行链和状态权威性，不代替真实供应方质量或额度验收。
 
 ## 数据不要混用
 
@@ -82,7 +84,7 @@ Codex 原生任务
 | 项目 `trace.sqlite` | 协作配置相关状态、接续、候选/采用与 evidence | 现有 CLI backup/restore 的范围 |
 | trace-portal 的 IndexedDB | 当前浏览器站点内的独立产品内容 | 另一个前端仓库的实现；无自动同步或本机配对 |
 
-生成采用整工作区 revision 校验：别的事项写入也可能让运行过期。已有回答只能作为历史，真实候选的采纳命令、细粒度版本和归档仍需实现，不能靠前端绕过。
+生成采用整工作区 revision 校验：别的事项写入也可能让运行过期。已有回答仍可作为历史；真实修订候选已有绑定运行与结果哈希的采纳／撤销命令，但细粒度事项 revision 和运行归档仍需实现，不能靠前端绕过。
 
 ## 原生认知 runtime 的内部机制
 

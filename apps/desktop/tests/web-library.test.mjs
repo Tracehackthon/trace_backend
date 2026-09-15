@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import {createBridge,captureInput,dispatchChain,openComparison,selectComparisonAnchor,dispatchComparison,commitComparison} from '../src/product/bridge.mjs';
+import {createBridge,captureInput,dispatchChain,openComparison,selectComparisonAnchor,dispatchComparison,commitComparison} from '../../../packages/product/workspace/src/index.mjs';
 import {recordsOf,queryRecords,homeEntries,mattersView,h} from '../src/product/library.mjs';
 
 function fixture(){let host=createBridge();host=captureInput(host,{matterId:'my-matter',text:'必要条件不能被隐藏 🧪'});host=dispatchChain(host,{matterId:'my-matter',action:{type:'UNDERSTANDING_DRAFT',text:'先保留必要条件'}});return dispatchChain(host,{matterId:'my-matter',action:{type:'SAVE_UNDERSTANDING'}});}

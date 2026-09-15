@@ -100,6 +100,18 @@ export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
         Object.assign(run, patch); return { run, event: event(run, type, data) };
       });
     },
+    setAdoption(id, status, receipt = null) {
+      return transaction(() => {
+        const run = get(id); demand(run && run.status === 'succeeded' && run.result, 'RUN_NOT_ADOPTABLE', '只有已完成的 Agent 结果可以处理。', 409);
+        demand(['applied', 'dismissed', 'undone'].includes(status), 'INVALID_ADOPTION', '不支持这个候选处理状态。', 422);
+        const before = run.result.adoption;
+        if (before === status) return {run, event:null};
+        demand((before === 'not_applied' && ['applied','dismissed'].includes(status)) || before === 'applied' && status === 'undone',
+          'ADOPTION_CONFLICT', '这个候选已经以另一种方式处理。', 409);
+        run.result.adoption = status; run.adoptionReceipt = receipt; run.adoptedAt = new Date().toISOString();
+        return {run, event:event(run, 'run.adoption.changed', {before, status, receipt})};
+      });
+    },
     events(id, after = 0, limit = 512) {
       return db.prepare('SELECT payload,payload_hash FROM agent_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(decode);
     },

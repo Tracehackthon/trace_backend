@@ -25,6 +25,15 @@ import {
   type ProjectInitializeInput,
 } from '../../../packages/product/application/src/index.js';
 import type {ProjectActivationConfigurationInput, ProjectSourceProfileInput} from '../../../packages/core/instance/src/index.js';
+import {
+  beginDialogue,
+  candidateReviewApply,
+  candidateReviewView,
+  decisionPathView,
+  dialogueState,
+  stepDialogue,
+} from '../../../packages/product/application/src/dialogue.js';
+import type {BeginDialogueInput, CandidateReviewApplyInput, StepDialogueInput} from '../../../packages/product/application/src/dialogue.js';
 import {currentCodexSessionId, TraceProductClient, type TraceProductArtifact} from './product-client.js';
 import {TraceZhihuClient} from './zhihu-client.js';
 
@@ -88,6 +97,64 @@ export function createTraceMcpServer(): McpServer {
     description: 'List visible capability candidates in the current project. It never calls a candidate published or silently replaces a user Skill.',
     inputSchema: projectDirectory,
   }, async ({project_dir}) => invoke(() => listAbilities(project_dir)));
+
+  server.registerTool('trace_dialogue_begin', {
+    title: 'Begin or resume a Trace dialogue',
+    description: 'Begin or resume the project-owned onboarding, collaboration-adaptation, or candidate-review dialogue. The engine returns the current scripted step and visible decision forks; it never stores a raw transcript.',
+    inputSchema: {...projectDirectory, intent: z.enum(['onboard', 'adapt', 'review'])},
+  }, async input => invoke(() => beginDialogue(input as unknown as BeginDialogueInput)));
+
+  server.registerTool('trace_dialogue_step', {
+    title: 'Advance a Trace dialogue',
+    description: 'Advance one visible dialogue step using a host-authored summary and, when required, an explicit decision. Decision revisions remain visible in the project decision path.',
+    inputSchema: {
+      ...projectDirectory,
+      thread_id: z.string().min(1),
+      move: z.object({
+        action: z.enum(['answer', 'decide', 'revise', 'confirm', 'abort']),
+        summary: z.string(),
+        decision_id: z.string().min(1).optional(),
+        expected_revision: z.number().int().min(1).optional(),
+        chosen: z.string().optional(),
+        rationale: z.string().optional(),
+        revised_prompt: z.string().optional(),
+        revised_options: z.array(z.string()).optional(),
+      }).strict(),
+    },
+  }, async input => invoke(() => stepDialogue(input as unknown as StepDialogueInput)));
+
+  server.registerTool('trace_dialogue_state', {
+    title: 'Read Trace dialogue state',
+    description: 'Read active project dialogue metadata and pending decision forks without raw conversation content.',
+    inputSchema: {...projectDirectory, thread_id: z.string().min(1).optional()},
+  }, async ({project_dir, thread_id}) => invoke(() => dialogueState(project_dir, thread_id)));
+
+  server.registerTool('trace_path_view', {
+    title: 'Read a Trace decision path',
+    description: 'Read the visible forks, selected branches, rationales, superseded rounds, and revisions for one project dialogue.',
+    inputSchema: {...projectDirectory, thread_id: z.string().min(1)},
+  }, async ({project_dir, thread_id}) => invoke(() => decisionPathView(project_dir, thread_id)));
+
+  server.registerTool('trace_candidate_review_view', {
+    title: 'Inspect a Trace candidate',
+    description: 'Inspect one pending candidate and its available user decisions. A candidate is not a published capability.',
+    inputSchema: {...projectDirectory, record_id: z.string().min(1)},
+  }, async ({project_dir, record_id}) => invoke(() => candidateReviewView(project_dir, record_id)));
+
+  server.registerTool('trace_candidate_review_apply', {
+    title: 'Apply a Trace candidate review decision',
+    description: 'Save or reject one candidate only after the user explicitly chooses. Saving requires a user-selected local content file and exact approval; rejection requires a rationale that remains visible as a negative example.',
+    inputSchema: {
+      ...projectDirectory,
+      record_id: z.string().min(1),
+      action: z.enum(['save', 'reject']),
+      approval: z.string().min(1),
+      save_mode: z.enum(['summary', 'redacted_excerpt', 'full_private']).optional(),
+      content_file: z.string().min(1).optional(),
+      title: z.string().optional(),
+      rationale: z.string().optional(),
+    },
+  }, async input => invoke(() => candidateReviewApply(input as unknown as CandidateReviewApplyInput)));
 
   server.registerTool('trace_upgrade_inspect', {
     title: 'Trace upgrade inspection',

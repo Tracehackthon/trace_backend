@@ -88,15 +88,19 @@ function demoMatter() {
 }
 function normalizedCandidate(candidate, focus, fallbackId, defaultFixture = false) {
   if (!candidate || !nonempty(candidate.title) || !nonempty(candidate.excerpt)) return null;
-  const kind = ['demo', 'hypothetical', 'user'].includes(candidate.kind) ? candidate.kind : 'demo';
+  const kind = ['demo', 'hypothetical', 'user', 'external'].includes(candidate.kind) ? candidate.kind : 'demo';
   const relation = candidate.relationship || {};
+  const external = kind === 'external';
   return {
     id: nonempty(candidate.id) ? candidate.id : fallbackId,
-    title: candidate.title, kind, sourceType: string(candidate.sourceType) || (kind === 'user' ? '粘贴摘录' : '本地示例'),
+    title: candidate.title, kind, sourceType: string(candidate.sourceType) || (external ? '联网来源' : kind === 'user' ? '粘贴摘录' : '本地示例'),
     excerpt: candidate.excerpt, summary: string(candidate.summary) || candidate.excerpt,
-    context: string(candidate.context) || (kind === 'user' ? '这是你主动粘贴的摘录；未读取外部原文。' : '本地演示内容，不对应真实作者或搜索结果。'),
-    url: null,
-    scopes: Array.isArray(candidate.scopes) ? candidate.scopes.filter((scope) => member(SCOPE_OPTIONS, scope)) : (kind === 'user' ? ['imported'] : ['prior', 'public']),
+    context: string(candidate.context) || (external ? '这是本次明确选择的联网结果摘要；可沿原文地址核验，不冒充全文。' : kind === 'user' ? '这是你主动粘贴的摘录；未读取外部原文。' : '本地演示内容，不对应真实作者或搜索结果。'),
+    url: external && typeof candidate.url === 'string' ? candidate.url : null,
+    ...(external ? {provider: string(candidate.provider), source: string(candidate.source), author: string(candidate.author),
+      contentType: string(candidate.contentType), contentMode: string(candidate.contentMode) || 'summary', fetchedAt: string(candidate.fetchedAt)} : {}),
+    scopes: Array.isArray(candidate.scopes) ? candidate.scopes.filter((scope) => member(SCOPE_OPTIONS, scope))
+      : (external ? [candidate.source === 'authorized' ? 'authorized' : 'public'] : kind === 'user' ? ['imported'] : ['prior', 'public']),
     relationship: { type: member(RELATION_OPTIONS, relation.type) ? relation.type : 'possibility', target: string(relation.target) || focus.text,
       ...(defaultFixture && nonempty(relation.summary) ? { summary: relation.summary } : {}),
       reason: string(relation.reason) || '关系尚待你判断，不因文字相似而自动接入。', uncertain: string(relation.uncertain) || '材料是否适用于这处理解，尚不能说明。' },
@@ -150,7 +154,9 @@ function hash(text) {
 }
 function sourceOf(candidate) {
   return { id: candidate.id, title: candidate.title, kind: candidate.kind, sourceType: candidate.sourceType,
-    excerpt: candidate.excerpt, context: candidate.context, url: null };
+    excerpt: candidate.excerpt, context: candidate.context, url: candidate.url,
+    ...(candidate.kind === 'external' ? {provider: candidate.provider, source: candidate.source, author: candidate.author,
+      contentType: candidate.contentType, contentMode: candidate.contentMode, fetchedAt: candidate.fetchedAt} : {}) };
 }
 function requestFor(state, kind, extra = {}) {
   const candidate = selected(state);
@@ -212,13 +218,20 @@ export function reduceComparison(previous, action = {}) {
     case 'IMPORT_MATERIAL': {
       const material = action.material || {};
       if (!nonempty(material.excerpt)) return inform(state, '请粘贴一段实际摘录；仅填链接不会读取外部内容。');
-      if (material.url != null) return inform(state, '本原型不读取链接。请保留实际摘录，来源链接留空。');
-      const imported = normalizedCandidate({ ...material, id: `${state.sessionId}:user-${state.nextId++}`,
-        title: nonempty(material.title) ? material.title : '我带入的一段材料', kind: 'user', scopes: ['imported'],
+      const external = nonempty(material.provider) || nonempty(material.source) || material.url != null;
+      const imported = normalizedCandidate({ ...material, id: nonempty(material.id) ? material.id : `${state.sessionId}:${external ? 'external' : 'user'}-${state.nextId++}`,
+        title: nonempty(material.title) ? material.title : external ? '联网来源' : '我带入的一段材料', kind: external ? 'external' : 'user',
+        scopes: external ? [material.source === 'authorized' ? 'authorized' : 'public'] : ['imported'],
         relationship: undefined, comparison: undefined }, basisOf(state.matter).focus);
+      const existing = state.catalog.find(item => item.id === imported.id);
+      if (existing) {
+        if (JSON.stringify(sourceOf(existing)) !== JSON.stringify(sourceOf(imported))) return inform(state, '同一来源身份对应了不同内容；没有覆盖已打开的材料。');
+        state.candidateIds = [...new Set([...state.candidateIds, existing.id])]; state.selectedId = existing.id; state.screen = 'compare';
+        return inform(state, '这份来源已经在本次对照中；没有重复保存。');
+      }
       state.catalog.push(imported); state.candidateIds = [...new Set([...state.candidateIds, imported.id])];
       state.selectedId = imported.id; state.screen = 'compare'; state.search.status = 'ready'; state.revision.open = false;
-      return inform(state, '已带入你粘贴的材料；未读取外网，尚未接到原事项。');
+      return inform(state, external ? '已带入本次选择的联网摘要；尚未接到原事项。' : '已带入你粘贴的材料；未读取外网，尚未接到原事项。');
     }
     case 'OPEN_CANDIDATE':
       if (!state.candidateIds.includes(action.id)) return inform(state, '未找到这份当前候选，原草稿保留。');
@@ -341,7 +354,7 @@ function validReceipt(receipt, request, matter) {
 export function selectComparisonView(state) {
   const candidate = selected(state);
   const candidates = state.candidateIds.map((id) => state.catalog.find((item) => item.id === id)).filter(Boolean).map((item) => ({ ...clone(item),
-    sourceLabel: `${item.kind === 'user' ? '你带入的材料' : item.kind === 'hypothetical' ? '假设情形' : '演示材料'} · ${item.sourceType}`,
+    sourceLabel: `${item.kind === 'user' ? '你带入的材料' : item.kind === 'external' ? '联网来源' : item.kind === 'hypothetical' ? '假设情形' : '演示材料'} · ${item.sourceType}`,
     relationLabel: RELATION_OPTIONS.find(({ value }) => value === item.relationship.type)?.label || '另一种可能' }));
   const selectedCandidate = candidates.find((item) => item.id === state.selectedId) || null;
   const basis = basisOf(state.matter);
@@ -372,7 +385,8 @@ function fingerprint(request) {
 function fail(matter, code, message) { return { ok: false, matter: clone(matter), receipt: null, error: { code, message } }; }
 function validSource(source) {
   return !!source && nonempty(source.id) && nonempty(source.title) && nonempty(source.excerpt) &&
-    ['demo', 'hypothetical', 'user'].includes(source.kind) && source.url === null;
+    ['demo', 'hypothetical', 'user', 'external'].includes(source.kind) &&
+    (source.kind === 'external' ? source.url === null || typeof source.url === 'string' : source.url === null);
 }
 function linkFor(matter, request) {
   const target = request.basis || request.target;

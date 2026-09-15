@@ -1,13 +1,13 @@
 # Agent 高级配置、接口索引与验证
 
-供 Web 后端维护者使用。实现 **Trace → Agent Runtime** 的执行通道；默认可用 Codex，也可使用服务端配置的模型或完整外部 Agent。不替代已有 **Codex → Trace** MCP 工作快照领取/回流，也不修改 Web 页面。
+供 Web 后端维护者使用。实现 **Trace → Agent Runtime** 的执行通道；默认可用 Codex，也可使用服务端配置的模型或完整外部 Agent。不替代已有 **Codex → Trace** MCP 工作快照领取/回流。当前本机 Web 已通过这一协议展示回答并处理修订候选。
 
 ## 现在能做什么
 
 - `discuss / explain / compare / revise`：讨论、解释、比较用户明确选择的材料、生成精确选区的修订候选。
 - 通用 executor 契约、服务端 profile、按需上下文工具、结构化结果、SSE 事件、取消/超时、请求去重与重启恢复。
 - 三个明确适配器：本机 `codex app-server`、Trace 驱动的 OpenAI-compatible 模型循环、`trace-external-agent-v1` 完整 Agent 服务。
-- 从当前产品 SQLite 固定上下文；独立 `agent.sqlite` 保存请求、候选和事件；**不会写入事项正文、理解、来源关系或工作结果**。
+- 从当前产品 SQLite 固定上下文；独立 `agent.sqlite` 保存请求、候选和事件。生成本身不写产品状态；用户明确接受修订候选时，由 Product Workspace 事务只改准确草稿选区。
 - 本轮支持单用户、loopback、同源调用。**默认不联网；可[显式开启知乎／全网来源](../../../docs/zhihu-native.md)，不提供任意文件执行、公网多租户认证或自动采纳。**
 
 日常只需在 runtime 根目录运行 `npm start -- --agent`，见[本机运行](../../../docs/local-runtime.md)。以下为高级维护路径，不是新用户必读命令清单。完整[调用契约](protocol.md)在本仓库内，独立 checkout 也可读取。
@@ -60,6 +60,7 @@ pnpm --filter @trace/app-agent start
 | `GET /api/agent/runs/:runId` | 状态、候选、上下文目录、`usableAsCurrent` |
 | `GET /api/agent/runs/:runId/events` | SSE；支持 `Last-Event-ID` 或 `?after=N` |
 | `POST /api/agent/runs/:runId/cancel`，body `{}` | 幂等取消；不影响其他服务、会话或 canonical 数据 |
+| `POST /api/agent/runs/:runId/adoption` | `accept`／`dismiss`／`undo`；接受和撤销需 `commandId`、`expectedRevision`，并由 Product Workspace 做 CAS、目标和选区校验 |
 
 POST 需要与目标 URL 一致的 `Origin` 和 `Content-Type: application/json`。本机脚本也需要传 Origin；Origin 校验不等于防御同用户下恶意进程的认证。
 

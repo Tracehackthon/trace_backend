@@ -178,7 +178,10 @@ export function dispatchComparison(host, { sessionId, action } = {}) {
     const candidate = selectComparisonView(local.model).selectedCandidate;
     if (candidate && !next.chain.sources.some(source => source.id === candidate.id))
       next.chain.sources.push({ id: candidate.id, title: candidate.title, kind: candidate.kind, excerpt: candidate.excerpt,
-        context: candidate.context, sourceType: candidate.sourceType, url: null, ownerMatterId: local.matterId, origin: 'user-pasted' });
+        context: candidate.context, sourceType: candidate.sourceType, url: candidate.url,
+        ...(candidate.kind === 'external' ? { provider: candidate.provider, source: candidate.source, author: candidate.author,
+          contentType: candidate.contentType, contentMode: candidate.contentMode, fetchedAt: candidate.fetchedAt } : {}),
+        ownerMatterId: local.matterId, origin: candidate.kind === 'external' ? 'provider-result' : 'user-pasted' });
   }
   next.error = null;
   return next;

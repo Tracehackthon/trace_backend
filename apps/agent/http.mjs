@@ -1,4 +1,4 @@
-import { AgentError, demand, identity, keys, TERMINAL, PURPOSES } from './protocol.mjs';
+import { AgentError, demand, identity, integer, keys, TERMINAL, PURPOSES } from './protocol.mjs';
 
 const MAX_BODY = 96 * 1024;
 function reply(res, status, value, extra = {}) {
@@ -48,12 +48,13 @@ export function createAgentHttp({ service = null, maxStreams = 16 } = {}) {
             purposes: PURPOSES, contextTools: ['trace_context_read', 'trace_context_search'], streaming: 'sse',
             cancellation: true, externalRetrieval: (service?.searchSources.length ?? 0) > 0, searchSources: service?.searchSources ?? [],
             retrievalDefault: 'disabled', fileExecution: false, autoApply: false, authenticationChecked: false,
+            candidateAdoption: !!service?.candidateAdoption,
             boundary: 'single-user-loopback-same-origin' }); return true;
         }
         demand(service, 'AGENT_DISABLED', 'Agent 后端未启用；请设置 TRACE_AGENT_ENABLED=1 后启动后端。', 503);
-        const runMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)(?:\/(events|cancel))?$/.exec(pathname);
+        const runMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)(?:\/(events|cancel|adoption))?$/.exec(pathname);
         const requestMatch = /^\/api\/agent\/requests\/([^/]+)$/.exec(pathname);
-        const allowed = pathname === '/api/agent/runs' || pathname === '/api/agent/check' || runMatch?.[2] === 'cancel' ? 'POST' : runMatch || requestMatch ? 'GET' : null;
+        const allowed = pathname === '/api/agent/runs' || pathname === '/api/agent/check' || ['cancel', 'adoption'].includes(runMatch?.[2]) ? 'POST' : runMatch || requestMatch ? 'GET' : null;
         demand(allowed, 'NOT_FOUND', '没有这个 Agent 接口。', 404);
         if (req.method !== allowed) { reply(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: '不支持这个方法。' } }, { allow: allowed }); return true; }
         if (pathname === '/api/agent/check') {
@@ -72,6 +73,18 @@ export function createAgentHttp({ service = null, maxStreams = 16 } = {}) {
           demand(identity(id), 'INVALID_REQUEST_ID', '请求 ID 无效。', 400); reply(res, 200, service.byRequest(id));
         } else if (runMatch[2] === 'cancel') {
           demand(keys(await readBody(req), []), 'INVALID_REQUEST', '取消接口只接受空对象。', 400); reply(res, 200, service.cancel(runMatch[1]));
+        } else if (runMatch[2] === 'adoption') {
+          const body = await readBody(req);
+          demand(keys(body, ['action', 'commandId', 'expectedRevision']) && ['accept', 'dismiss', 'undo'].includes(body.action),
+            'INVALID_REQUEST', '候选处理需要 accept、dismiss 或 undo。', 400);
+          if (body.action === 'dismiss') {
+            demand(Object.keys(body).length === 1, 'INVALID_REQUEST', '忽略候选不接受额外字段。', 400);
+            reply(res, 200, service.dismiss(runMatch[1]));
+          } else {
+            demand(identity(body.commandId) && body.commandId.length <= 200 && integer(body.expectedRevision),
+              'INVALID_REQUEST', '采纳或撤销需要有效的 commandId 与 expectedRevision。', 400);
+            reply(res, 200, body.action === 'accept' ? service.adopt(runMatch[1], body) : service.undoAdoption(runMatch[1], body));
+          }
         } else if (runMatch[2] !== 'events') reply(res, 200, service.get(runMatch[1]));
         else {
           const runId = runMatch[1], run = service.get(runId), url = new URL(req.url, 'http://127.0.0.1');

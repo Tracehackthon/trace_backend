@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
-import { createWebStore } from '../apps/desktop/web-store.mjs';
+import { createProductWorkspace } from '../packages/product/workspace/src/workspace.mjs';
 
 function sample(text = '今天的理解：先核验，再修改 🙂') {
   return {
@@ -41,7 +41,7 @@ function temporary(t) {
 async function serve(t, file) {
   // Explicit legacy import path for storage-format regression only. The real
   // server defaults to commands-only and never enables snapshot HTTP writes.
-  const store = createWebStore({ file, allowSnapshotWrites: true });
+  const store = createProductWorkspace({ file, allowSnapshotWrites: true });
   const server = http.createServer(async (req, res) => { if (!await store.handle(req, res)) { res.writeHead(404); res.end('outside store'); } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   let stopped = false;
@@ -191,18 +191,18 @@ test('corrupt payload reads and writes fail visibly; reopening never resets corr
   const db = new DatabaseSync(file); db.prepare("UPDATE web_entities SET payload='{' WHERE kind='matter'").run(); db.close();
   const corruptRead = await a.request('/api/web/workspace'); assert.equal(corruptRead.status, 503); assert.equal(corruptRead.json.error.code, 'STORAGE_CORRUPT');
   assert.equal((await a.put(sample('不得覆盖损坏'), 1, 'later')).status, 503);
-  await a.close(); assert.throws(() => createWebStore({ file }), error => error.code === 'STORAGE_CORRUPT');
+  await a.close(); assert.throws(() => createProductWorkspace({ file }), error => error.code === 'STORAGE_CORRUPT');
   const verify = new DatabaseSync(file, { readOnly: true }); try { assert.equal(verify.prepare('SELECT revision FROM web_workspace').get().revision, 1); } finally { verify.close(); }
 });
 
 test('rejects wrong/ledger database before changing bytes or creating web tables', t => {
   const file = temporary(t); const db = new DatabaseSync(file); db.exec('CREATE TABLE adopted(identity TEXT PRIMARY KEY,payload TEXT); INSERT INTO adopted VALUES(\'keep\',\'original\')'); db.close();
   const before = fs.readFileSync(file);
-  assert.throws(() => createWebStore({ file }), error => error.code === 'WRONG_DATABASE');
+  assert.throws(() => createProductWorkspace({ file }), error => error.code === 'WRONG_DATABASE');
   assert.deepEqual(fs.readFileSync(file), before);
   const verify = new DatabaseSync(file, { readOnly: true }); try { assert.deepEqual(verify.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => row.name), ['adopted']); } finally { verify.close(); }
-  assert.throws(() => createWebStore({ file: path.join(path.dirname(file), 'trace.sqlite') }), error => error.code === 'WRONG_DATABASE');
-  assert.throws(() => createWebStore({ file: 'relative.sqlite' }), error => error.code === 'INVALID_PATH');
+  assert.throws(() => createProductWorkspace({ file: path.join(path.dirname(file), 'trace.sqlite') }), error => error.code === 'WRONG_DATABASE');
+  assert.throws(() => createProductWorkspace({ file: 'relative.sqlite' }), error => error.code === 'INVALID_PATH');
   assert.equal(fs.existsSync(path.join(path.dirname(file), 'trace.sqlite')), false);
 });
 
@@ -211,5 +211,5 @@ test('damaged revision head cannot silently turn saved entities into an empty wo
   const db = new DatabaseSync(file); db.exec('UPDATE web_workspace SET revision=0 WHERE singleton=1'); db.close();
   const result = await a.request('/api/web/workspace');
   assert.equal(result.status, 503); assert.equal(result.json.error.code, 'STORAGE_CORRUPT');
-  await a.close(); assert.throws(() => createWebStore({ file }), error => error.code === 'STORAGE_CORRUPT');
+  await a.close(); assert.throws(() => createProductWorkspace({ file }), error => error.code === 'STORAGE_CORRUPT');
 });

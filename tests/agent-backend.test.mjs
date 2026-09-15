@@ -11,7 +11,7 @@ import { createAgentBackend } from '../apps/agent/backend.mjs';
 
 test('disabled backend does not access product storage or launch Codex', async () => {
   const webStore = new Proxy({}, { get() { throw new Error('must not read storage while disabled'); } });
-  const backend = createAgentBackend({ webStore, env: {} }); await backend.close();
+  const backend = createAgentBackend({ productWorkspace: webStore, env: {} }); await backend.close();
 });
 
 test('real Web server mounts backend without changing page; missing CLI fails safely in separate run ledger', async t => {
@@ -38,6 +38,8 @@ test('real Web server mounts backend without changing page; missing CLI fails sa
   assert.equal(ready, true, diagnostic);
   const page = await (await fetch(origin)).text();
   assert.equal(page, fs.readFileSync(fileURLToPath(new URL('../apps/desktop/index.html', import.meta.url)), 'utf8'));
+  assert.equal((await fetch(origin + '/runtime/product-workspace/index.mjs')).status, 200);
+  assert.equal((await fetch(origin + '/runtime/product-workspace/workspace.mjs')).status, 404);
   assert.equal((await fetch(origin + '/agent/codex.mjs')).status, 404);
   const post = async (url, data) => { const r = await fetch(origin + url, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(data) }); return { status: r.status, body: await r.json() }; };
   const check = await post('/api/agent/check', {}); assert.equal(check.status, 503); assert.equal(check.body.error.code, 'CODEX_UNAVAILABLE');

@@ -1,6 +1,6 @@
 # `@trace/product-application`
 
-`@trace/product-application` 是 Trace 的应用服务层。它将项目实例、协作 profile、runtime、Codex hook 安装器和版本检查组合为面向产品入口的安全操作，供 `apps/mcp`、CLI 与未来桌面端调用。
+`@trace/product-application` 当前实现的是 **Project Collaboration Runtime**，不是 Web 的 Product Workspace。它将项目实例、协作 profile、runtime、Codex hook 安装器和版本检查组合为项目协作入口，供 `apps/mcp` 与 CLI 调用。事项、理解、对照和工作状态由相邻的 [`@trace/product-workspace`](../workspace/README.md) 维护。
 
 ## 关键约束
 

@@ -7,7 +7,7 @@ import path from 'node:path';
 import {once} from 'node:events';
 import {Client} from '../apps/mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js';
 import {StdioClientTransport} from '../apps/mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js';
-import {createWebStore} from '../apps/desktop/web-store.mjs';
+import {createProductWorkspace} from '../packages/product/workspace/src/workspace.mjs';
 
 const root = path.resolve(process.cwd());
 const mcpEntry = path.join(root, 'dist', 'apps', 'mcp', 'src', 'main.js');
@@ -111,7 +111,7 @@ test('Trace MCP uses proposal/adoption, protects source state, and migrates lega
 test('Trace MCP binds a product handoff to the real Codex environment and returns a reviewable result', async t => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mcp-product-'));
   const stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mcp-product-state-'));
-  const store = createWebStore({file: path.join(stateDirectory, 'web.sqlite')});
+  const store = createProductWorkspace({file: path.join(stateDirectory, 'web.sqlite')});
   const server = http.createServer(async (req, res) => { if (!await store.handle(req, res)) { res.writeHead(404); res.end('{}'); } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const origin = `http://127.0.0.1:${server.address().port}`;

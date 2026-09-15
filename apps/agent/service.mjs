@@ -19,7 +19,7 @@ const fixedRegistry = adapter => ({
   check: async (profileId, signal) => ({ profile: fixedRegistry(adapter).bind(profileId).binding, ...(await adapter.check({ signal })) }),
 });
 
-export function createAgentService({ store, readWorkspace, executorRegistry, adapter, retrievalProvider = null, timeoutMs = 180000, maxConcurrent = 1, pollMs = 250 }) {
+export function createAgentService({ store, readWorkspace, executeProduct = null, adoptCandidate = null, executorRegistry, adapter, retrievalProvider = null, timeoutMs = 180000, maxConcurrent = 1, pollMs = 250 }) {
   demand(executorRegistry || adapter, 'INVALID_EXECUTOR', '缺少 Agent executor registry。', 500);
   executorRegistry ??= fixedRegistry(adapter);
   const bus = new EventEmitter(), jobs = new Map(); let closed = false, storageFailed = false;
@@ -32,6 +32,13 @@ export function createAgentService({ store, readWorkspace, executorRegistry, ada
     return snapshot.revision === run.context.baseRevision && session?.contextMode === run.request.contextMode
       && session.contextEpoch === run.request.contextEpoch;
   };
+  const productCall = fn => {
+    try { return fn(); }
+    catch (error) {
+      if (typeof error?.code === 'string' && Number.isInteger(error?.status)) throw new AgentError(error.code, error.message, error.status);
+      throw error;
+    }
+  };
   function publicRun(run) {
     let current = false;
     try { current = isWorkspaceCurrent(run) && executorRegistry.isCurrent(run.profile); } catch { /* unavailable store never grants usability */ }
@@ -40,8 +47,11 @@ export function createAgentService({ store, readWorkspace, executorRegistry, ada
       baseRevision: run.context.baseRevision, contextHash: run.context.contextHash, status: run.status,
       createdAt: run.createdAt, startedAt: run.startedAt, finishedAt: run.finishedAt, lastEventId: run.lastEventId,
       contextManifest: run.context.fragments.map(({ id, role, revision }) => ({ id, role, revision })), omitted: run.context.omitted,
-      profile: run.profile, result: run.result, error: run.error, runtime: run.runtime, usableAsCurrent: run.status === 'succeeded' && current,
-      canonicalStateChanged: false };
+      profile: run.profile, result: run.result, resultHash: run.resultHash ?? null, adoptionReceipt: run.adoptionReceipt ?? null,
+      error: run.error, runtime: run.runtime, usableAsCurrent: run.status === 'succeeded' && current,
+      adoptionAvailable: !!adoptCandidate && run.status === 'succeeded' && run.result?.kind === 'revision_candidate'
+        && run.result?.adoption === 'not_applied',
+      canonicalStateChanged: run.result?.adoption === 'applied' };
   }
   function update(id, patch, type, data) {
     let outcome;
@@ -93,7 +103,7 @@ export function createAgentService({ store, readWorkspace, executorRegistry, ada
         ...sources.map(s => ({id: s.id, text: s.excerpt}))] };
       const result = validateOutput(output.raw, deliveredContext, run.request);
       if (run.request.retrieval) result.sources = sources;
-      update(id, { status: 'succeeded', finishedAt: new Date().toISOString(), result, runtime: { ...(get(id).runtime ?? {}),
+      update(id, { status: 'succeeded', finishedAt: new Date().toISOString(), result, resultHash: hash(result), runtime: { ...(get(id).runtime ?? {}),
         threadId: output.threadId, turnId: output.turnId, runtimeVersion: output.runtimeVersion } }, 'run.succeeded', { status: 'succeeded', result });
     } catch (cause) {
       try { if (!TERMINAL.has(get(id).status)) {
@@ -104,6 +114,7 @@ export function createAgentService({ store, readWorkspace, executorRegistry, ada
   }
   return {
     get searchSources() {return retrievalProvider?.status().search_configured ? ['zhihu', 'global'] : [];},
+    get candidateAdoption() { return !!adoptCandidate && !!executeProduct; },
     get executorCapabilities() { return executorRegistry.describe(); },
     get: id => { demand(!storageFailed, 'AGENT_STORAGE_UNAVAILABLE', '运行记录写入失败；执行已停止，请恢复存储后重启服务。', 503); return publicRun(get(id)); },
     byRequest(requestId) { const run = store.find(requestId); demand(run, 'RUN_NOT_FOUND', '没有该请求的运行记录。', 404); return publicRun(run); },
@@ -135,6 +146,39 @@ export function createAgentService({ store, readWorkspace, executorRegistry, ada
       return { run: publicRun(run), replay: false };
     },
     cancel(id) { return stop(id, 'cancelled', 'USER_CANCELLED', '用户取消了本次执行。'); },
+    adopt(id, body) {
+      demand(adoptCandidate && executeProduct, 'ADOPTION_UNAVAILABLE', '当前产品宿主没有启用候选采纳。', 503);
+      const run = get(id);
+      demand(run.status === 'succeeded' && run.result?.kind === 'revision_candidate'
+        && (run.result.adoption === 'not_applied' || run.result.adoption === 'applied' && run.adoptionReceipt?.commandId === body.commandId),
+        'RUN_NOT_ADOPTABLE', '这不是一个尚未处理的修订候选，或重放身份不匹配。', 409);
+      const target = run.result.target, selection = target.selection;
+      const product = productCall(() => adoptCandidate({commandId:body.commandId, expectedRevision:body.expectedRevision, runId:run.id,
+        matterId:run.request.matterId, baseRevision:target.baseRevision, contextEpoch:target.contextEpoch,
+        understandingDraftVersion:target.understandingDraftVersion, selection, replacement:run.result.replacement, resultHash:run.resultHash}));
+      const adoption = store.setAdoption(id, 'applied', product.receipt);
+      if (adoption.event) bus.emit(id, adoption.event);
+      return {protocolVersion:1, action:'accept', product, run:publicRun(adoption.run)};
+    },
+    dismiss(id) {
+      const run = get(id);
+      demand(run.status === 'succeeded' && run.result?.adoption === 'not_applied', 'RUN_NOT_ADOPTABLE', '这个结果已经处理。', 409);
+      const adoption = store.setAdoption(id, 'dismissed', {effect:'none'});
+      if (adoption.event) bus.emit(id, adoption.event);
+      return {protocolVersion:1, action:'dismiss', run:publicRun(adoption.run)};
+    },
+    undoAdoption(id, body) {
+      demand(executeProduct, 'ADOPTION_UNAVAILABLE', '当前产品宿主没有启用候选撤销。', 503);
+      const run = get(id); demand(run.result?.adoption === 'applied', 'ADOPTION_CONFLICT', '这个候选当前没有可撤销的应用。', 409);
+      const snapshot = readWorkspace(), session = snapshot.host?.chain.sessions[run.request.matterId], origin = session?.suggestion?.origin;
+      demand(origin?.type === 'agent-run' && origin.runId === run.id && origin.resultHash === run.resultHash,
+        'ADOPTION_STALE', '草稿中的这处建议已经变化；旧撤销没有覆盖后来编辑。', 409);
+      const product = productCall(() => executeProduct({protocolVersion:1,commandId:body.commandId,expectedRevision:body.expectedRevision,
+        operations:[{type:'chain.action',matterId:run.request.matterId,action:{type:'UNDO_SUGGESTION'}}]}));
+      const adoption = store.setAdoption(id, 'undone', product.receipt);
+      if (adoption.event) bus.emit(id, adoption.event);
+      return {protocolVersion:1, action:'undo', product, run:publicRun(adoption.run)};
+    },
     events: (id, after) => { get(id); return store.events(id, after); },
     subscribe(id, listener) { get(id); bus.on(id, listener); return () => bus.off(id, listener); },
     async check(profileId, signal) { demand(!closed, 'AGENT_CLOSED', 'Agent 服务已关闭。', 503); return executorRegistry.check(profileId, signal); },

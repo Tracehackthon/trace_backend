@@ -5,13 +5,13 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import {once} from 'node:events';
-import {createWebStore} from '../apps/desktop/web-store.mjs';
+import {createProductWorkspace} from '../packages/product/workspace/src/workspace.mjs';
 
 const projectDir = path.resolve(process.cwd());
 
 async function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-product-'));
-  const store = createWebStore({file: path.join(directory, 'web.sqlite')});
+  const store = createProductWorkspace({file: path.join(directory, 'web.sqlite')});
   const server = http.createServer(async (req, res) => { if (!await store.handle(req, res)) { res.writeHead(404); res.end('{}'); } });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');

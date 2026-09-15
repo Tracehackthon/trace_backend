@@ -5,9 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
 import { once } from 'node:events';
-import { createWebStore } from '../apps/desktop/web-store.mjs';
-import { selectComparisonAnchor } from '../apps/desktop/src/product/bridge.mjs';
-import { applyProductOperations } from '../apps/desktop/src/product/commands.mjs';
+import { createProductWorkspace } from '../packages/product/workspace/src/workspace.mjs';
+import { selectComparisonAnchor, applyProductOperations } from '../packages/product/workspace/src/index.mjs';
 
 async function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-product-command-'));
@@ -20,7 +19,7 @@ async function fixture(t) {
     fs.rmSync(absolute, {recursive:true,force:true});
   });
   async function open(allowSnapshotWrites = false) {
-    const store = createWebStore({file, allowSnapshotWrites});
+    const store = createProductWorkspace({file, allowSnapshotWrites});
     const server = http.createServer(async (req,res) => {if (!await store.handle(req,res)){res.writeHead(404);res.end('{}');}});
     server.listen(0, '127.0.0.1'); await once(server,'listening');
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -137,6 +136,26 @@ test('comparison LINK creates only a relationship and server-issued receipt, per
   assert.equal(state.host.chain.matters[0].links.length,1);assert.equal(state.host.chain.matters[0].understandingVersion,0);
   assert.equal(state.host.comparisons.c.model.request,null);assert.ok(state.host.comparisons.c.model.receipt);
   const returned=await a.ok({type:'comparison.return',sessionId:'c'});assert.equal(returned.host.chain.selectedId,'m');
+});
+
+test('a selected Zhihu result keeps provider provenance and URL through import, link and restart',async t=>{
+  const a=await fixture(t);const initial=await a.ok(capture());
+  const anchor=selectComparisonAnchor(initial.host,'m',{field:'originalText'});
+  await a.ok({type:'comparison.open',matterId:'m',sessionId:'external-c',anchor});
+  const material={id:'external:zhihu-1',provider:'zhihu',source:'zhihu',title:'真实经验摘要',author:'知乎作者',
+    url:'https://www.zhihu.com/question/1/answer/2',excerpt:'这段是接口返回的摘要，不是全文。',sourceType:'知乎公开内容',
+    contentType:'answer',contentMode:'summary',fetchedAt:'2026-09-15T00:00:00.000Z'};
+  await a.ok(compare('IMPORT_MATERIAL',{material},'external-c'));
+  let state=await a.ok(compare('LINK',{},'external-c'));
+  const source=state.host.chain.sources.find(item=>item.id===material.id);
+  assert.deepEqual({provider:source.provider,source:source.source,author:source.author,url:source.url,contentMode:source.contentMode},
+    {provider:'zhihu',source:'zhihu',author:'知乎作者',url:material.url,contentMode:'summary'});
+  assert.equal(state.host.chain.matters[0].links[0].source.url,material.url);
+  await a.close();const reopened=await a.open();state=await reopened.read();
+  assert.equal(state.host.chain.sources.find(item=>item.id===material.id).fetchedAt,material.fetchedAt);
+  const bad=await reopened.execute([{type:'comparison.open',matterId:'m',sessionId:'bad-url',anchor},
+    compare('IMPORT_MATERIAL',{material:{...material,id:'external:bad',url:'javascript:alert(1)'}},'bad-url')]);
+  assert.equal(bad.status,422);
 });
 
 test('comparison revision is server-evaluated and an old comparison cannot overwrite later understanding',async t=>{

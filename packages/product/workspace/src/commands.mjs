@@ -18,6 +18,10 @@ const version = x => Number.isSafeInteger(x) && x >= 0;
 const optional = f => x => x === undefined || f(x);
 const oneOf = (...xs) => x => xs.includes(x);
 const strings = x => Array.isArray(x) && x.length <= 32 && x.every(text);
+const webUrl = x => x === null || typeof x === 'string' && x.length <= 4096 && (() => {
+  try { const value = new URL(x); return ['http:', 'https:'].includes(value.protocol) && !value.username && !value.password; }
+  catch { return false; }
+})();
 function shape(value, spec) {
   return plain(value) && Object.keys(value).every(key => Object.hasOwn(spec, key)) && Object.entries(spec).every(([key, check]) => check(value[key]));
 }
@@ -44,7 +48,11 @@ const CHAIN = {
 };
 const COMPARISON = {
   QUERY_PATCH: {patch: x => shape(x, {question: optional(text), instructions: optional(text), direction: optional(oneOf(...DIRECTION_OPTIONS.map(x=>x.value))), scopes: optional(x=>strings(x)&&x.every(oneOf(...SCOPE_OPTIONS.map(x=>x.value))))})},
-  ADJUST_SEARCH: noArgs, IMPORT_MATERIAL: {material: x => shape(x, {title: optional(text), excerpt: text, context: optional(text), sourceType: optional(text), url: optional(x => x === null)})},
+  ADJUST_SEARCH: noArgs, IMPORT_MATERIAL: {material: x => shape(x, {
+    id: optional(id), title: optional(text), excerpt: text, context: optional(text), sourceType: optional(text), url: optional(webUrl),
+    provider: optional(text), source: optional(oneOf('zhihu', 'global', 'authorized')), author: optional(text),
+    contentType: optional(text), contentMode: optional(oneOf('summary', 'metadata', 'excerpt')), fetchedAt: optional(text),
+  })},
   OPEN_CANDIDATE: {id}, BACK_TO_CANDIDATES: noArgs, COMPARISON_DRAFT: {text}, SAVE_COMPARISON_NOTE: noArgs,
   RELATION_PATCH: {patch: x => shape(x, {type: optional(oneOf(...RELATION_OPTIONS.map(x=>x.value))), target: optional(text)})},
   LINK: noArgs, REJECT: noArgs, OPEN_REVISION: {target: optional(target)}, REVISION_DRAFT: {text}, CANCEL_REVISION: noArgs,

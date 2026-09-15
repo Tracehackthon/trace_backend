@@ -5,7 +5,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { createWebStore } from '../../apps/desktop/web-store.mjs';
+import { createProductWorkspace } from '../../packages/product/workspace/src/workspace.mjs';
 import { createAgentStore } from '../../apps/agent/store.mjs';
 import { createAgentService } from '../../apps/agent/service.mjs';
 import { createAgentHttp } from '../../apps/agent/http.mjs';
@@ -16,13 +16,14 @@ export const output = raw => ({ raw, threadId: 'fixture-thread', turnId: 'fixtur
 export const chain = (type, fields = {}, matterId = 'm') => ({ type: 'chain.action', matterId, action: { type, ...fields } });
 export async function fixture(t, { adapter, executorRegistry, timeoutMs = 1000, retrievalProvider } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-agent-test-'));
-  const webStore = createWebStore({ file: path.join(root, 'web.sqlite') });
+  const webStore = createProductWorkspace({ file: path.join(root, 'web.sqlite') });
   const agentStore = createAgentStore({ file: path.join(root, 'agent.sqlite'), workspaceKey: 'fixture-workspace' });
   const calls = [];
   adapter ??= { check: async () => ({ authenticated: true, modelTurnTested: false }), execute: async args => {
     calls.push(args); args.onEvent('output.delta', { delta: '{"answer":', format: 'json-fragment', itemId: 'fixture-message' }); return output(answer());
   } };
-  const service = createAgentService({ store: agentStore, readWorkspace: webStore.read, adapter, executorRegistry, timeoutMs, pollMs: 10, retrievalProvider });
+  const service = createAgentService({ store: agentStore, readWorkspace: webStore.read, executeProduct: webStore.execute,
+    adoptCandidate: webStore.adoptAgentCandidate, adapter, executorRegistry, timeoutMs, pollMs: 10, retrievalProvider });
   const agent = createAgentHttp({ service });
   const server = http.createServer(async (req, res) => {
     if (await agent.handle(req, res)) return;

@@ -1,6 +1,6 @@
 // Trace local-first web workspace — minimal offline asset cache.
 // API requests (/api/web/*) and dynamic ES module fetches always go to the network.
-const CACHE = 'trace-web-v1';
+const CACHE = 'trace-web-v3';
 const PRECACHE = [
   './',
   './index.html',
@@ -16,18 +16,23 @@ const PRECACHE = [
   './src/matters/matters-screen.mjs',
   './src/matters/matters-model.mjs',
   './src/matters/matters.css',
-  './src/product/bridge.mjs',
+  './runtime/product-workspace/index.mjs',
+  './runtime/product-workspace/bridge.mjs',
+  './runtime/product-workspace/commands.mjs',
+  './runtime/product-workspace/demo-workspace.mjs',
+  './runtime/product-workspace/chain-model.mjs',
+  './runtime/product-workspace/comparison-model.mjs',
+  './runtime/product-workspace/worksite-model.mjs',
   './src/product/library.mjs',
   './src/product/assets.mjs',
+  './src/product/agent-panel.mjs',
+  './src/product/zhihu-panel.mjs',
   './src/product/chain-screen.mjs',
-  './src/product/chain-model.mjs',
   './src/product/chain-helpers.mjs',
   './src/product/chain.css',
   './src/product/comparison-screen.mjs',
-  './src/product/comparison-model.mjs',
   './src/product/comparison.css',
   './src/product/worksite-screen.mjs',
-  './src/product/worksite-model.mjs',
   './src/product/worksite-icons.mjs',
   './src/product/worksite.css',
   './src/product/web.css',

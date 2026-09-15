@@ -17,7 +17,7 @@ const url = value => {
 
 /** Live HTTP results only. No demo fallback, HTML rendering, implicit search,
  * automatic private-data read or writes to the user's Trace understanding. */
-export function mountZhihuPanel(root) {
+export function mountZhihuPanel(root, {onSelect} = {}) {
   let connection, active = null, closed = false;
   root.classList.add('web-zhihu-dialog');
   root.insertAdjacentHTML('beforeend', `<p>从知乎的真实经验出发，也看看全网的证据。搜到的摘要先留在这里，不会自动改变你的理解。</p>
@@ -29,8 +29,9 @@ export function mountZhihuPanel(root) {
     <details><summary>连接我的知乎</summary><p>在知乎页面由你亲自授权。授权用于读取你自己的公开内容，不是 Trace 账号登录。Token 仅保留在本机后端内存，重启后需重新授权。</p>
       <p data-account-status></p><div data-login-link></div><footer>
       <button type="button" data-login disabled>去知乎授权</button><button type="button" data-check disabled>我已授权，检查连接</button>
-      <button type="button" data-favorites disabled>读取近期收藏 3 条</button><button type="button" data-disconnect disabled>断开本机连接</button></footer>
-      <small>断开只清除本机连接，不撤销知乎平台上的授权。不自动读取、翻页或保存收藏。</small></details>`);
+      <label>读取范围 <select data-user-kind><option value="favorites">近期收藏</option><option value="contents">我的创作</option><option value="favorite_lists">我的收藏夹</option><option value="followees">我的关注</option></select></label>
+      <button type="button" data-user-read disabled>读取 3 条</button><button type="button" data-disconnect disabled>断开本机连接</button></footer>
+      <small>只在你点击后读取这 3 条；不自动翻页或保存。断开只清除本机连接，不撤销知乎平台上的授权。</small></details>`);
   const find = selector => root.querySelector(selector), notice = find('[data-search-status]');
   const configured = () => connection?.enabled && connection?.search_configured;
   function buttons() {
@@ -38,7 +39,8 @@ export function mountZhihuPanel(root) {
     find('[data-login]').disabled = !!active || !connection?.oauth?.configured || connection?.oauth?.status === 'authorized';
     find('[data-check]').disabled = !!active || connection?.oauth?.status !== 'pending_user_authorization';
     find('[data-disconnect]').disabled = !!active || !['authorized', 'pending_user_authorization'].includes(connection?.oauth?.status);
-    find('[data-favorites]').disabled = !!active || !configured() || connection?.oauth?.status !== 'authorized';
+    find('[data-user-read]').disabled = !!active || !configured() || connection?.oauth?.status !== 'authorized';
+    find('[data-user-kind]').disabled = !!active || connection?.oauth?.status !== 'authorized';
   }
   /** The panel deliberately maps each user action to one bounded API domain:
    * search sources use /api/search; OAuth and private reads use /api/zhihu. */
@@ -64,14 +66,33 @@ export function mountZhihuPanel(root) {
       : value.oauth?.status === 'pending_user_authorization' ? '等待你在知乎页面授权，完成后点击「检查连接」。' : '当前没有有效的知乎授权连接。';
   }
   function showResults(value, personal = false) {
-    find('[data-results]').innerHTML = value.items.map(item => {
+    const selectedSource = personal ? 'authorized' : value.source === 'global' ? 'global' : 'zhihu';
+    const resourceLabels = {favorites:'我的近期收藏',contents:'我的创作',favorite_lists:'我的收藏夹',favorite_items:'收藏夹内容',followees:'我的关注'};
+    const heading = personal ? resourceLabels[value.resource] || '我的知乎内容' : value.source === 'global' ? '全网来源' : '知乎来源';
+    find('[data-results]').innerHTML = value.items.map((item, index) => {
       const sourceUrl = url(item.url);
-      return `<article class="web-linked-item"><small>${personal ? '我的近期收藏' : value.source === 'global' ? '全网来源' : '知乎来源'} · ${h(item.author || '未提供作者')} · 摘要</small>
+      const excerpt = item.excerpt || '';
+      return `<article class="web-linked-item"><small>${h(heading)} · ${h(item.author || '未提供作者')} · ${excerpt ? '摘要' : '元数据'}</small>
         <h3>${h(item.title || '未提供标题')}</h3><p>${h((item.excerpt || '').slice(0, 260))}${item.excerpt?.length > 260 ? '…' : ''}</p>
         ${item.excerpt?.length > 260 ? `<details class="web-zhihu-excerpt"><summary>展开完整接口摘要</summary><p>${h(item.excerpt)}</p></details>` : ''}
-        ${sourceUrl ? `<a href="${h(sourceUrl)}" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>` : '<small>接口未提供有效链接，不补造原文地址。</small>'}</article>`;
+        <footer>${sourceUrl ? `<a href="${h(sourceUrl)}" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>` : '<small>接口未提供有效链接，不补造原文地址。</small>'}
+        ${personal && value.resource === 'favorite_lists' && item.id ? `<button type="button" data-open-favorite="${index}">打开这个收藏夹</button>` : ''}
+        ${excerpt && typeof onSelect === 'function' ? `<button type="button" class="web-primary" data-use-source="${index}">用作这件事的对照</button>` : ''}</footer></article>`;
     }).join('');
-    notice.textContent = value.items.length ? `收到 ${value.items.length} 条${personal ? '近期收藏' : '来源'}。这些是接口摘要，不是全文；尚未保存到 Trace。`
+    if (typeof onSelect === 'function') for (const button of root.querySelectorAll('[data-use-source]')) button.onclick = async () => {
+      const item = value.items[Number(button.dataset.useSource)]; if (!item || active) return;
+      button.disabled = true; notice.textContent = '正在把这份来源接到当前对照…';
+      const accepted = await onSelect({id: item.id, provider: item.provider || 'zhihu', source: selectedSource,
+        title: item.title || '联网来源', author: item.author || '', url: url(item.url), excerpt: item.excerpt || '',
+        sourceType: personal ? '知乎授权资料' : selectedSource === 'global' ? '全网来源' : '知乎公开内容',
+        contentType: item.content_type || 'unknown', contentMode: item.content_mode || 'summary', fetchedAt: item.fetched_at || ''});
+      if (root.isConnected) {button.disabled = false; notice.textContent = accepted === false ? '这份来源没有接入；原事项未改变。' : '已进入对照。关联与是否修改理解仍由你确认。';}
+    };
+    for (const button of root.querySelectorAll('[data-open-favorite]')) button.onclick = async () => {
+      const item=value.items[Number(button.dataset.openFavorite)];if(!item?.id||active)return;
+      notice.textContent='正在读取这个收藏夹的 3 条内容…';const detail=await request('/api/zhihu/user/read',{kind:'favorite_items',favorite_id:String(item.id),offset:'0',limit:3});if(detail)showResults(detail,true);
+    };
+    notice.textContent = value.items.length ? `收到 ${value.items.length} 条${personal ? heading : '来源'}。${value.items.some(item=>item.excerpt)?'这些是接口摘要，不是全文；':''}尚未保存到 Trace。`
       : '这次没有返回内容。可以换个具体的关键词，不会自动扩大搜索或翻页。';
   }
   find('[data-search-form]').onsubmit = async e => {
@@ -97,9 +118,9 @@ export function mountZhihuPanel(root) {
       showStatus({...connection, oauth: {...connection.oauth, status: 'not_authorized'}}); find('[data-login-link]').replaceChildren(); find('[data-results]').replaceChildren(); notice.textContent = '已清除本机连接。未撤销知乎平台上的授权。';
     }
   };
-  find('[data-favorites]').onclick = async () => {
-    notice.textContent = '正在读取你授权的近期收藏…'; find('[data-results]').replaceChildren();
-    const value = await request('/api/zhihu/user/read', {kind: 'favorites', limit: 3}); if (value) showResults(value, true);
+  find('[data-user-read]').onclick = async () => {
+    const kind=find('[data-user-kind]').value;notice.textContent = '正在读取你刚刚选择的知乎内容…'; find('[data-results]').replaceChildren();
+    const value = await request('/api/zhihu/user/read', {kind, limit: 3, ...(kind==='contents'||kind==='followees'?{offset:'0'}:{})}); if (value) showResults(value, true);
     else {const status = await request('/api/zhihu/status'); if (status) showStatus(status);}
   };
   void request('/api/zhihu/status').then(value => {if (value) showStatus(value); else if (!closed) find('[data-provider-status]').textContent = '尚未连接知乎后端。';});

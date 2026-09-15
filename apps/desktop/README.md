@@ -25,13 +25,13 @@
 - 同一 commandId 同一请求返回原回执，不执行第二次；同 ID 换内容、旧 workspace revision 均冲突。返回 `headRevision` 区分旧回执与当前状态。页面保留失败后继续编辑的草稿，重试原命令后依次保存后续动作。
 - GET `/api/web/export` 导出真实已保存内容。手工保存链路不外发；显式使用 Agent 时，允许的上下文会交给 Codex。
 - Node 的 `node:sqlite` 有 ExperimentalWarning；它不代表测试失败。数据库历史快照目前未自动压缩。
-- 默认入口 `src/web-main.js`，统一 bridge 在 `src/product/bridge.mjs`。原 `src/main.js` 与旧讨论保留在 `legacy.html`，不作为当前产品状态源。
+- 默认入口 `src/web-main.js`。事项、理解、对照、工作与产品命令由 [`@trace/product-workspace`](../../packages/product/workspace/README.md) 统一维护；desktop 下只保留页面 Adapter。原 `src/main.js` 与旧讨论保留在 `legacy.html`，不作为当前产品状态源。
 - 背景 / 两姿态鸟 / 完整字体 / 现用 vendor 的固定字节在 `approved-assets.lock.json` 中，测试校验，不得通过重新生成资源或刷新 lock 掩盖漂移。
 - 原图、原组件和字体许可仍在原 artifacts；runtime 是隔离派生副本。
 
 ### P0 命令协议
 
-入口实现见 [commands.mjs](src/product/commands.mjs) 与 [web-store.mjs](web-store.mjs)。下面是**空库**创建事项的请求示例；真实调用先读取当前 revision，并为一次逻辑提交使用唯一 commandId：
+入口实现见 Product Workspace 的 [浏览器 Interface](../../packages/product/workspace/src/index.mjs) 与 [Node 持久化 Interface](../../packages/product/workspace/src/workspace.mjs)。下面是**空库**创建事项的请求示例；真实调用先读取当前 revision，并为一次逻辑提交使用唯一 commandId：
 
 ```json
 {
@@ -49,8 +49,8 @@
 - 成功响应含 `host / revision / headRevision / storage / receipt`。`receipt.status=committed` 仅表示本机已持久化，`hostDelivery=not_requested` 不代表已发送原生 Agent。
 - 重置只能独立提交 `workspace.reset`，指定 `mode=empty|demo` 和 `confirm=replace-current-workspace`，同样受 expectedRevision 保护。示例由服务端固定 fixture 生成并标记；客户端不能以重置提交任意对象。
 - 继续使用既有 schema v1 四表和历史快照，不做用户库迁移。command 指纹在原账本中以 `product-v1:` 命名空间区分；查询回执不把旧快照导入记录伪装成产品命令。
-- `createWebStore({allowSnapshotWrites:true})` 仅用于显式的旧格式测试/受控导入。默认服务器从不启用；不要对真实用户库同时运行这样的导入服务。
-- 这是本机单用户、同源访问协议，不是公网鉴权系统。块级文稿/完整来源修复、宿主失效通知尚未实现；当前仍使用字符串理解和局部选区模型。真实生成由 [Agent 后端](../agent/README.md)另行提供，不等于页面已经接通。
+- `createProductWorkspace({allowSnapshotWrites:true})` 仅用于显式的旧格式测试/受控导入。默认服务器从不启用；不要对真实用户库同时运行这样的导入宿主。
+- 这是本机单用户、同源访问协议，不是公网鉴权系统。块级文稿/完整来源修复、宿主失效通知尚未实现；当前仍使用字符串理解和局部选区模型。真实生成由 [Agent 后端](../agent/README.md)另行提供；使用 `--agent` 启动时，页面会连接它并以显式确认方式处理修订候选。
 
 ## Codex 上下文带入与结果回流
 
@@ -74,6 +74,6 @@ Codex plugin 暴露对应的 `trace_product_context_receive` 和 `trace_product_
 
 更新后的浏览器脚本在工作区 `artifacts/trace-product-domain-p0-20260915/integration/product-e2e.cjs`，创建独立数据库与 4182 服务，不写用户 4173 数据。用 `TRACE_PLAYWRIGHT_MODULE`、`TRACE_BROWSER_EXECUTABLE` 配置本机浏览器运行依赖；测试 TEMP/TMP 应指向有空间的独立目录。旧 Web v1 脚本拦截的是旧 PUT，不再作为新命令协议的唯一验收。
 
-当前完成本机 Web 链路及 Codex MCP 的隔离 receive/return 往返；知乎／全网面板已显示真实 provider 摘要，但不自动保存或关联。Agent 后端见[独立说明](../agent/README.md)；页面自动模型回复、其他外部 Agent、云账号 / 同步、移动端及桌面打包不在该 Web 已验证范围。不要把旧原型的 mock 讨论当作已连接模型。
+当前完成本机 Web 链路及 Codex MCP 的隔离 receive/return 往返；知乎／全网面板可显示真实 provider 摘要，用户选择后可把来源及原始链接放入对照，并明确确认关联。启用 Agent 后，页面可发起运行、订阅 SSE、取消，并对局部修订候选执行确认、放弃或撤销；候选只改变理解草稿，不会自动保存为正式理解。其他任意外部 Agent、云账号 / 同步、移动端及桌面打包不在该 Web 已验证范围。不要把旧原型的 mock 讨论当作已连接模型。
 
 ---

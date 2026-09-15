@@ -55,7 +55,8 @@ const templates = {
   <div class="compare-trajectory"><svg viewBox="0 0 1180 95" aria-hidden="true"><path d="M90 45 C252 -34 309 99 520 45 S804 95 996 45"/><circle cx="90" cy="45" r="10"/><circle cx="520" cy="45" r="10"/><circle cx="996" cy="45" r="11"/></svg><div><section><h3>原来的理解</h3><p data-text="before"></p></section><section><h3>这次对照</h3><p data-text="sourceTitle"></p><small data-text="linkedMeta"></small></section><section><h3>当前理解</h3><p data-text="after"></p></section></div></div><img class="compare-bird compare-return-bird" data-bird="fly" alt="" aria-hidden="true"></section>`,
 };
 
-const kindLabel = candidate => candidate?.kind === 'hypothetical' ? '假设情形' : candidate?.kind === 'user' ? '用户带入材料' : '演示材料';
+const kindLabel = candidate => candidate?.kind === 'external' ? candidate.source === 'authorized' ? '我的知乎内容' : candidate.source === 'global' ? '全网来源' : '知乎来源' : candidate?.kind === 'hypothetical' ? '假设情形' : candidate?.kind === 'user' ? '用户带入材料' : '演示材料';
+const safeUrl = value => {try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url.href:null;}catch{return null;}};
 const relationLabels = {limit:'限制',limitation:'限制',supplement:'补充',support:'支持',challenge:'挑战',related:'有关',uncertain:'有关'};
 const asText = value => value == null ? '' : typeof value === 'string' ? value : Array.isArray(value) ? value.join('；') : String(value.text ?? value.label ?? '');
 
@@ -182,14 +183,17 @@ export function mountComparisonScreen({root,view,onAction=()=>{},onReturn=()=>{}
   }
   function openMaterial(type) {
     const item=candidate();if(!item)return;
+    const externalUrl=safeUrl(item.url);
     if(type==='context') {
-      modal('查看原文上下文','<p class="compare-meta" data-modal="meta"></p><h3 data-modal="title"></h3><div class="compare-source-context" data-modal="context"></div><p class="compare-dialog-help">此材料没有外网原文链接。</p>','context');
+      modal('查看原文上下文','<p class="compare-meta" data-modal="meta"></p><h3 data-modal="title"></h3><div class="compare-source-context" data-modal="context"></div><p class="compare-dialog-help" data-modal="provenance"></p>','context');
       $('[data-modal="context"]').textContent=asText(item.context) || item.excerpt;
     }else{
-      modal('材料信息','<p class="compare-meta" data-modal="meta"></p><h3 data-modal="title"></h3><dl class="compare-material-info"><dt>材料性质</dt><dd data-modal="kind"></dd><dt>来源类型</dt><dd data-modal="source"></dd><dt>关系</dt><dd data-modal="relationship"></dd></dl><p class="compare-dialog-help">此材料没有外网原文链接。</p>','material-info');
+      modal('材料信息','<p class="compare-meta" data-modal="meta"></p><h3 data-modal="title"></h3><dl class="compare-material-info"><dt>材料性质</dt><dd data-modal="kind"></dd><dt>来源类型</dt><dd data-modal="source"></dd><dt>作者</dt><dd data-modal="author"></dd><dt>关系</dt><dd data-modal="relationship"></dd></dl><p class="compare-dialog-help" data-modal="provenance"></p>','material-info');
       $('[data-modal="kind"]').textContent=kindLabel(item);$('[data-modal="source"]').textContent=item.sourceType||'自带摘录';$('[data-modal="relationship"]').textContent=`${relLabel(item.relationship?.type)} · ${item.decision==='linked'?'已接入':'待确认'}`;
+      $('[data-modal="author"]').textContent=item.author||'接口未提供';
     }
     $('[data-modal="title"]').textContent=item.title;$('[data-modal="meta"]').textContent=`${kindLabel(item)} · ${item.sourceType||'自带摘录'}`;
+    const provenance=$('[data-modal="provenance"]');if(externalUrl){const link=document.createElement('a');link.href=externalUrl;link.target='_blank';link.rel='noopener noreferrer';link.textContent='查看接口返回的原文地址 ↗';provenance.replaceChildren(link);}else provenance.textContent='接口或用户材料没有提供有效原文链接；不会补造地址。';
   }
   function openImport() {
     modal('带入自己的材料',`<form data-form="import"><p class="compare-dialog-help">仅带入你粘贴的文字，不会读取文件或外部网页。</p><label for="compare-material-title">材料标题</label><input id="compare-material-title" name="title" required maxlength="240"><label for="compare-material-excerpt">粘贴摘录</label><textarea id="compare-material-excerpt" name="excerpt" required rows="4"></textarea><label for="compare-material-context">材料上下文（可选）</label><textarea id="compare-material-context" name="context" rows="3"></textarea><div class="compare-dialog-actions"><button type="submit" class="compare-button compare-primary">带入这段材料</button></div></form>`,'import');

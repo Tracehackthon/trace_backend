@@ -8,7 +8,7 @@ import {once} from 'node:events';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 
-test('browser: actual desktop server, search and OAuth UI consume backend results without demo fallback or state writes',
+test('browser: actual desktop server renders search/OAuth and explicitly carries a selected source into Product comparison',
   {skip: process.env.TRACE_BROWSER_TESTS !== '1', timeout: 90000}, async t => {
     const {chromium} = createRequire(import.meta.url)(process.env.TRACE_PLAYWRIGHT_MODULE || 'playwright');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-zhihu-web-'));
@@ -63,7 +63,7 @@ test('browser: actual desktop server, search and OAuth UI consume backend result
     await popup.getByRole('link', {name: '确认测试授权'}).click(); await popup.waitForURL(origin + '/api/zhihu/oauth/result');
     assert.ok(!(await popup.textContent('body')).includes('fixture-code')); await popup.close();
     await dialog.getByRole('button', {name: '我已授权，检查连接'}).click(); await dialog.getByText('当前本机已授权；尚未自动读取任何收藏。').waitFor();
-    await dialog.getByRole('button', {name: '读取近期收藏 3 条'}).click(); await dialog.getByRole('heading', {name: '近期收藏 · 受控接口测试'}).waitFor();
+    await dialog.getByLabel('读取范围').selectOption('favorites'); await dialog.getByRole('button', {name: '读取 3 条'}).click(); await dialog.getByRole('heading', {name: '近期收藏 · 受控接口测试'}).waitFor();
     if (process.env.TRACE_BROWSER_ARTIFACTS) {
       fs.mkdirSync(process.env.TRACE_BROWSER_ARTIFACTS, {recursive: true});
       await page.screenshot({path: path.join(process.env.TRACE_BROWSER_ARTIFACTS, 'zhihu-fixture-desktop.png')});
@@ -72,10 +72,17 @@ test('browser: actual desktop server, search and OAuth UI consume backend result
     const bounds = await dialog.boundingBox(); assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 391);
     assert.equal(await dialog.evaluate(el => el.scrollWidth > el.clientWidth), false);
     await dialog.getByRole('button', {name: '断开本机连接'}).click(); await dialog.getByText('当前没有有效的知乎授权连接。').waitFor();
-    assert.equal(await dialog.getByRole('button', {name: '读取近期收藏 3 条'}).isDisabled(), true);
+    assert.equal(await dialog.getByRole('button', {name: '读取 3 条'}).isDisabled(), true);
     if (process.env.TRACE_BROWSER_ARTIFACTS) await page.screenshot({path: path.join(process.env.TRACE_BROWSER_ARTIFACTS, 'zhihu-fixture-mobile.png')});
-    await query.fill('限流测试'); await search.click(); await dialog.getByText('知乎暂时限流。请稍后再试，不会自动重复请求。').waitFor();
-    assert.equal(await dialog.locator('article').count(), 0); await page.keyboard.press('Escape'); assert.equal(await dialog.count(), 0);
-    const after = await (await fetch(origin + '/api/product/workspace')).json(); assert.equal(after.revision, before.revision); assert.deepEqual(after.host, before.host);
+    await page.keyboard.press('Escape'); assert.equal(await dialog.count(), 0);
+    const afterReadOnly = await (await fetch(origin + '/api/product/workspace')).json(); assert.equal(afterReadOnly.revision, before.revision); assert.deepEqual(afterReadOnly.host, before.host);
+    const created=await fetch(origin+'/api/product/commands',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({protocolVersion:1,commandId:'zhihu-web-matter',expectedRevision:before.revision,operations:[{type:'capture.create',matterId:'zhihu-web-matter',text:'想找一份真实经验作对照。'}]})});assert.equal(created.status,200);
+    await page.setViewportSize({width:1440,height:1000});await page.goto(`${origin}/?view=chain&matter=zhihu-web-matter&screen=resume`,{waitUntil:'networkidle'});
+    await page.getByRole('button',{name:'知乎与全网'}).click();const sourceDialog=page.getByRole('dialog',{name:'知乎与全网，找一份对照'});await sourceDialog.getByText(/已连接本机知乎接口/).waitFor();
+    await sourceDialog.getByLabel('想找什么').fill('第一次带团队');await sourceDialog.getByRole('button',{name:'搜索 3 条来源'}).click();await sourceDialog.getByRole('button',{name:'用作这件事的对照'}).click();
+    await page.waitForURL(/view=compare/);await page.getByRole('button',{name:'材料信息'}).click();const sourceLink=page.getByRole('link',{name:'查看接口返回的原文地址 ↗'});assert.equal(await sourceLink.getAttribute('href'),'https://www.zhihu.com/question/1/answer/2?utm_source=trace');await page.keyboard.press('Escape');
+    await page.getByRole('button',{name:'接到这件事'}).click();await page.getByRole('dialog',{name:'关联位置与关系'}).getByRole('button',{name:'接到这件事'}).click();
+    const afterSelection=await (await fetch(origin+'/api/product/workspace')).json(),matter=afterSelection.host.chain.matters.find(item=>item.id==='zhihu-web-matter'),source=afterSelection.host.chain.sources[0];
+    assert.equal(source.provider,'zhihu');assert.equal(source.author,'测试作者');assert.equal(source.url,'https://www.zhihu.com/question/1/answer/2?utm_source=trace');assert.equal(matter.links.length,1);assert.equal(matter.understanding,'');
     assert.deepEqual(errors, []); t.diagnostic('Real desktop HTTP and browser; Zhihu upstream simulated. No live credentials/API quota used.');
   });

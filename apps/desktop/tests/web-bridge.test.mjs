@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBridge, captureInput, dispatchChain, selectChain, openComparison, dispatchComparison,
   selectComparison, applyPendingComparison, deliverComparisonResult, commitComparison, returnFromComparison,
-  createWorkFromHandoff, dispatchWorksite, selectWorksite, selectComparisonAnchor, recoverPendingComparisons } from '../src/product/bridge.mjs';
+  createWorkFromHandoff, dispatchWorksite, selectWorksite, selectComparisonAnchor, recoverPendingComparisons } from '../../../packages/product/workspace/src/index.mjs';
 
 const ID = 'user:matter-42';
 const ORIGINAL = '收藏后为什么接不回当时的问题？';
@@ -386,14 +386,18 @@ test('source excerpts stay separate from user expression and demo fixtures never
   assert.ok(h.chain.sources.every(s => s.kind === 'user'));
 });
 
-test('no fake search capability or externally readable URL', () => {
+test('no fake search capability; an explicitly supplied external summary retains its provenance without pretending it was searched locally', () => {
   let h = comparison();
   h = xd(h, 'SEARCH');
   assert.equal(h.error.code, 'capability_missing');
   assert.deepEqual(selectComparison(h, 'cmp:1').candidates, []);
   assert.equal(selectComparison(h, 'cmp:1').search.capabilityAvailable, false);
-  h = xd(h, 'IMPORT_MATERIAL', { material: { excerpt: 'some text', url: 'https://example.invalid' } });
-  assert.equal(h.chain.sources.length, 0);
+  h = xd(h, 'IMPORT_MATERIAL', { material: { id: 'external:1', title: '联网摘要', excerpt: 'some text',
+    provider: 'zhihu', source: 'global', author: '作者', url: 'https://example.invalid/evidence', contentMode: 'summary' } });
+  assert.equal(h.chain.sources.length, 1);
+  assert.equal(h.chain.sources[0].url, 'https://example.invalid/evidence');
+  assert.equal(h.chain.sources[0].author, '作者');
+  assert.equal((h.chain.matters.find(m => m.id === ID).links||[]).length, 0);
 });
 
 test('return mismatch, stale anchor, invalid range and unsaved draft reject before opening', () => {

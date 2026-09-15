@@ -1,11 +1,12 @@
-import * as B from './product/bridge.mjs';
-import { applyProductOperations } from './product/commands.mjs';
+import * as B from '/runtime/product-workspace/index.mjs';
+import { applyProductOperations } from '/runtime/product-workspace/index.mjs';
 import { ASSETS } from './product/assets.mjs';
 import { h, titleOf, homeEntries, mattersView, recordsOf, mountLibrary } from './product/library.mjs';
 
 const root=document.querySelector('#app'),styles=new Map(),copy=structuredClone;
 let host,revision=0,storage,screen,route,renderId=0,dirty=0,saved=0,timer,tail=Promise.resolve(),pending=null,pendingGeneration=0,continuation=null,busy=false,dialog,queued=[];
 const uid=kind=>`${kind}-${crypto.randomUUID()}`;
+const sourceUrl=value=>{try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url.href:null;}catch{return null;}};
 const matter=()=>host?.chain.matters.find(m=>m.id===route?.matterId);
 const status=document.createElement('aside');status.className='web-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');document.body.append(status);
 const nav=document.createElement('nav');nav.className='web-continuity';nav.setAttribute('aria-label','接续导航');document.body.append(nav);
@@ -53,7 +54,28 @@ status.onclick=async e=>{
   if(e.target.matches('[data-retry]')&&pending&&!busy){busy=true;root.inert=nav.inert=menu.inert=true;try{const generation=pendingGeneration;const data=await write(pending);saved=Math.max(saved,generation);const finish=continuation;continuation=null;if(finish)finish(data);else host=queued.length?replayQueued(data.host):data.host;if(queued.length)await flush();}catch{}finally{busy=false;root.inert=nav.inert=menu.inert=!!continuation;}}
   if(e.target.matches('[data-load]'))modal('载入已保存版本','<p>不会合并或覆盖磁盘上的新版本。请先导出未保存内容，再载入。</p><footer><button data-recovery>导出当前内容</button><button class="web-primary" data-confirm>载入已保存版本</button></footer>',d=>{d.querySelector('[data-recovery]').onclick=()=>download({host,pendingPayload:pending,queuedOperations:queued,unsaved:true},'Trace-recovery.json');d.querySelector('[data-confirm]').onclick=async()=>{try{const data=await read();clearTimeout(timer);host=data.host||B.createBridge();revision=data.revision;storage=data.storage;queued=[];pending=continuation=null;dirty=saved=0;root.inert=nav.inert=menu.inert=false;close();statusText('saved','已载入本机保存的版本');void renderRoute();}catch(e){message(e.message);}};});
 };
-async function zhihuPanel(){const {mountZhihuPanel}=await import('./product/zhihu-panel.mjs');modal('知乎与全网，找一份对照','',mountZhihuPanel);}
+async function zhihuPanel(){
+  const {mountZhihuPanel}=await import('./product/zhihu-panel.mjs');
+  modal('知乎与全网，找一份对照','',d=>mountZhihuPanel(d,{onSelect:async material=>{
+    if(!matter()||!['chain','compare'].includes(route.view))return false;
+    close();
+    if(route.view==='compare')await commit({type:'comparison.action',sessionId:route.sessionId,action:{type:'IMPORT_MATERIAL',material}});
+    else openCompare(undefined,material);
+    return true;
+  }}));
+}
+async function agentPanel(){
+  try{await flush();}catch(e){message(`草稿还没有保存，暂不启动 Agent：${e.message}`);return;}
+  const m=matter();if(!m)return;
+  const focus=B.selectChain(host,m.id)?.focus;
+  const selection=focus?.field==='understanding'&&m.understandingDraft.slice(focus.start,focus.end)===focus.text
+    ?{field:'understandingDraft',start:focus.start,end:focus.end,text:focus.text}:null;
+  const {mountAgentPanel}=await import('./product/agent-panel.mjs');
+  modal('问 Agent，继续分清','',d=>mountAgentPanel(d,{workspace:{revision,host},matterId:m.id,selection,
+    sourceIds:[...new Set([...(m.sourceIds||[]),...(m.links||[]).map(link=>link.sourceId)])],onWorkspace:data=>{
+      host=data.host;revision=data.revision;storage=data.storage;saved=++dirty;preferences();statusText('saved','Agent 候选已由你确认并保存在本机草稿');update();
+    }}));
+}
 function profile(){
   const p=host.preferences||{};
   modal('个人与设置',`<p>这是你在本机的 Trace 空间。没有开通 Trace 账号或云同步；知乎连接需单独授权。</p><p><button type="button" data-zhihu>知乎与全网 · 检索和授权</button></p><form><label>怎么称呼你<input name="name" type="text" maxlength="60" value="${h(p.displayName)}" placeholder="你的称呼（可不填）"></label><label><input name="motion" type="checkbox" ${p.reduceMotion?'checked':''}> 减少界面动效</label><h3>你的内容保存在这里</h3><p>${h(storage?.location)}</p><p>${host.chain.matters.length} 件事 · ${host.chain.sources.length} 份材料 · ${Object.keys(host.worksite.works).length} 个工作记录</p><h3>重置与示例</h3><p>替换当前工作区前请导出内容。重置不等于物理清除数据库历史。</p><footer><button type="button" data-reset-demo>载入示例</button><button type="button" data-reset-clear>清空本机内容</button></footer><footer><a href="/api/web/export" download>导出全部内容</a><button class="web-primary" type="submit">保存设置</button></footer></form>`,d=>{
@@ -70,20 +92,22 @@ function resetWorkspace({demo}){
     d.querySelector('[data-confirm]').onclick=()=>{close();void commit({type:'workspace.reset',mode:demo?'demo':'empty',confirm:'replace-current-workspace'},()=>go({view:'home'}));};
   });
 }
-function sources(){const m=matter();if(!m)return;const list=host.chain.sources.filter(s=>s.ownerMatterId===m.id);modal('这件事的对照与来处',`<p>${h(titleOf(m))}</p>${list.length?list.map(s=>{const link=m.links?.find(l=>l.sourceId===s.id);return `<section class="web-linked-item"><strong>${h(s.title)}</strong><p>${h(s.excerpt)}</p><small>${link?`已接为${h(({limit:'限制',limitation:'限制',support:'支持',challenge:'挑战',supplement:'补充'})[link.relationship.type]||'有关')} · 关联本身不改变理解`:'尚未关联 · 原材料仍保留'}</small></section>`;}).join(''):'<p>还没有材料，可以先选一句原话找个对照。</p>'}<footer><button data-all>查看这件事的全部痕迹</button></footer>`,d=>d.querySelector('[data-all]').onclick=()=>{close();go({view:'all',matterId:m.id});});}
+function sources(){const m=matter();if(!m)return;const list=host.chain.sources.filter(s=>s.ownerMatterId===m.id);modal('这件事的对照与来处',`<p>${h(titleOf(m))}</p>${list.length?list.map(s=>{const link=m.links?.find(l=>l.sourceId===s.id),url=sourceUrl(s.url);return `<section class="web-linked-item"><strong>${h(s.title)}</strong><small>${h(s.kind==='external'?(s.source==='authorized'?'我的知乎内容':s.source==='global'?'全网来源':'知乎来源')+(s.author?` · ${s.author}`:''):'用户带入材料')}</small><p>${h(s.excerpt)}</p>${url?`<a href="${h(url)}" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>`:''}<small>${link?`已接为${h(({limit:'限制',limitation:'限制',support:'支持',challenge:'挑战',supplement:'补充'})[link.relationship.type]||'有关')} · 关联本身不改变理解`:'尚未关联 · 原材料仍保留'}</small></section>`;}).join(''):'<p>还没有材料，可以先选一句原话找个对照。</p>'}<footer><button data-all>查看这件事的全部痕迹</button></footer>`,d=>d.querySelector('[data-all]').onclick=()=>{close();go({view:'all',matterId:m.id});});}
 function workContext(){const v=B.selectWorksite(host,route.workId);if(!v)return;const text=[`任务：${v.work.title}`,`项目：${v.work.project}`,`工具 / Agent：${v.work.agent}`,'',...v.context.flatMap(i=>[`【${i.role} · 理解 v${i.sourceVersion}】`,i.instruction,i.text,i.note||'','']),...v.contextFindings.map(i=>i.text)].join('\n'),connection=v.work.connection;const connected=connection?.hostType==='codex';const returned=connection?.status==='returned_for_review';const state=connected?returned?`Codex 已带回结果，正在等你复核。接收任务 ${h(connection.sessionId)}，上下文 ${h(connection.contextHash.slice(0,12))}…`:`Codex 已真实接收这份上下文。接收任务 ${h(connection.sessionId)}，上下文 ${h(connection.contextHash.slice(0,12))}…`:'这份上下文正在等待 Codex 接收；也可以先复制，作为手工降级路径。';modal('本次带入的内容',`<p>${state}</p><pre>${h(text)}</pre><footer><button class="web-primary" data-copy>复制本次上下文</button></footer>`,d=>d.querySelector('[data-copy]').onclick=async()=>{try{await navigator.clipboard.writeText(text);d.querySelector('[data-copy]').textContent=connected?'已复制 · Codex 回执仍保留':'已复制 · 等待 Codex 接收';}catch{d.querySelector('[data-copy]').textContent='请手动选择文字复制';}});}
 function projection(){let v;if(route.view==='chain'){v=B.selectChain(host,route.matterId);if(v&&route.anchor?.field==='originalText')v.focus=route.anchor;}if(route.view==='compare')v=B.selectComparison(host,route.sessionId);if(route.view==='worksite')v=B.selectWorksite(host,route.workId);if(v)v.notice=(v.notice||'').replaceAll('本次会话','本机').replaceAll('本地原型','本地记录');return v;}
-function chrome(){nav.replaceChildren();menu.replaceChildren();const add=(parent,text,fn)=>{const b=document.createElement('button');b.textContent=text;b.onclick=fn;parent.append(b);};if(route.returnTarget&&route.view!=='home')add(nav,`← ${route.returnTarget.view==='search'?'返回搜索结果':route.returnTarget.view==='all'?'返回全部痕迹':route.returnTarget.view==='worksite'?'返回这次工作':route.returnTarget.view==='chain'?'返回原来的事情':'返回来处'}`,route.view==='compare'?returnComparison:back);if(['chain','compare'].includes(route.view))add(menu,'知乎与全网',zhihuPanel);const m=matter();if(m&&['chain','compare','worksite'].includes(route.view)){add(nav,m.understanding?`我的理解 v${m.understandingVersion}`:'原话已保留 · 还没有写理解',()=>go({view:'chain',matterId:m.id,screen:'understanding'}));if(m.links?.length)add(nav,`${m.links.length} 份对照已关联`,sources);}if(route.view==='chain'){add(menu,'搜索',()=>go({view:'search'}));add(menu,'全部痕迹',()=>go({view:'all',matterId:route.matterId}));add(menu,'个人与设置',profile);}}
+function chrome(){nav.replaceChildren();menu.replaceChildren();const add=(parent,text,fn)=>{const b=document.createElement('button');b.textContent=text;b.onclick=fn;parent.append(b);};if(route.returnTarget&&route.view!=='home')add(nav,`← ${route.returnTarget.view==='search'?'返回搜索结果':route.returnTarget.view==='all'?'返回全部痕迹':route.returnTarget.view==='worksite'?'返回这次工作':route.returnTarget.view==='chain'?'返回原来的事情':'返回来处'}`,route.view==='compare'?returnComparison:back);if(['chain','compare'].includes(route.view))add(menu,'知乎与全网',zhihuPanel);if(['chain','compare','worksite'].includes(route.view)&&matter())add(menu,'问 Agent',agentPanel);const m=matter();if(m&&['chain','compare','worksite'].includes(route.view)){add(nav,m.understanding?`我的理解 v${m.understandingVersion}`:'原话已保留 · 还没有写理解',()=>go({view:'chain',matterId:m.id,screen:'understanding'}));if(m.links?.length)add(nav,`${m.links.length} 份对照已关联`,sources);}if(route.view==='chain'){add(menu,'搜索',()=>go({view:'search'}));add(menu,'全部痕迹',()=>go({view:'all',matterId:route.matterId}));add(menu,'个人与设置',profile);}}
 function update(){screen?.update?.(['all','search','works'].includes(route.view)?host:route.view==='matters'?mattersView(host):projection());chrome();}
 function restore(){for(const entry of route.scroll||[]){const el=[...root.querySelectorAll('*')].find(e=>e.className===entry.className);if(el)el.scrollTop=entry.top;}const a=route.anchor;if(!a||route.view!=='chain')return;const el=root.querySelector(`[data-selection="${a.field}"]`);if(!el)return;const value=el instanceof HTMLTextAreaElement?el.value:el.textContent;if(value.slice(a.start,a.end)!==a.text)return;if(el instanceof HTMLTextAreaElement){el.focus({preventScroll:true});el.setSelectionRange(a.start,a.end);return;}const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let offset=0,n,start,end;while(n=walker.nextNode()){if(!start&&offset+n.length>=a.start)start=[n,a.start-offset];if(offset+n.length>=a.end){end=[n,a.end-offset];break;}offset+=n.length;}if(start&&end){const r=document.createRange();r.setStart(...start);r.setEnd(...end);getSelection().removeAllRanges();getSelection().addRange(r);}}
-function openCompare(focus){
+function openCompare(focus,material){
   retain();const m=matter();if(!m)return;
   const fresh=host.chain.sessions[m.id].contextMode==='fresh',selected=focus||route.anchor;
   const basis=fresh&&!selected?{field:'discussion'}:selected||{field:route.screen==='understanding'?'understanding':route.screen==='discussion'?'discussion':'originalText'};
   const anchor=B.selectComparisonAnchor(host,m.id,basis);
   if(!anchor){message('没有可比较的文字。先选一句原话、补充或已保存的理解。');return;}
   const sessionId=uid('compare');
-  void commit({type:'comparison.open',sessionId,matterId:m.id,anchor,returnTarget:{...copy(route),anchor}},()=>go({view:'compare',matterId:m.id,sessionId}));
+  const operations=[{type:'comparison.open',sessionId,matterId:m.id,anchor,returnTarget:{...copy(route),anchor}}];
+  if(material)operations.push({type:'comparison.action',sessionId,action:{type:'IMPORT_MATERIAL',material}});
+  void commit(operations,()=>go({view:'compare',matterId:m.id,sessionId}));
 }
 function returnComparison(){
   const operation={type:'comparison.return',sessionId:route.sessionId};

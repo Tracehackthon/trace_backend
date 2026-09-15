@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { applyProductOperations, validateProductCommand, ProductCommandError } from './src/product/commands.mjs';
+import { applyProductOperations, validateProductCommand, ProductCommandError } from './commands.mjs';
 import {
   CodexBridgeError,
   codexRequestFingerprint,
@@ -11,7 +11,7 @@ import {
   returnCodexResult,
   validateCodexReceiveRequest,
   validateCodexReturnRequest,
-} from './src/product/codex-bridge.mjs';
+} from './codex-bridge.mjs';
 
 // This database is deliberately independent of the cognitive/adopted ledgers.
 // The caller owns TRACE_WEB_STATE_FILE and chooses an explicit absolute path.
@@ -173,7 +173,9 @@ function readBody(req) {
  * by default; allowSnapshotWrites is an explicit library-only legacy import aid,
  * never a request field or an option enabled by the desktop server. Schema v1 is
  * retained; product command fingerprints are namespaced in the existing ledger. */
-export function createWebStore({ file, allowSnapshotWrites = false } = {}) {
+/** Authoritative local Product Workspace: product entities, command CAS,
+ * receipts and Codex delivery/return records share one transactional owner. */
+export function createProductWorkspace({ file, allowSnapshotWrites = false } = {}) {
   demand(typeof file === 'string' && path.isAbsolute(file), 'INVALID_PATH', 'Web SQLite 路径必须明确为绝对路径。');
   file = path.resolve(file);
   demand(path.basename(file).toLowerCase() !== 'trace.sqlite', 'WRONG_DATABASE', 'Web 状态不得写入认知 trace.sqlite。');
@@ -293,6 +295,50 @@ export function createWebStore({ file, allowSnapshotWrites = false } = {}) {
       return productResult(body.commandId, {request_sha256: fingerprint, committed_revision: revision + 1}, revision + 1);
     });
   }
+  function agentAdoptionResult(candidate, known, headRevision) {
+    const normalized = {...known, request_sha256:`product-v1:${known.request_sha256.slice('agent-adopt-v1:'.length)}`};
+    const result = productResult(candidate.commandId, normalized, headRevision);
+    result.receipt.agentRunId = candidate.runId; result.receipt.resultHash = candidate.resultHash;
+    result.receipt.effect = 'understanding-draft-only';
+    return result;
+  }
+  function applyAgentCandidate(candidate) {
+    demand(plain(candidate) && identity(candidate.commandId) && identity(candidate.runId) && identity(candidate.matterId)
+      && Number.isSafeInteger(candidate.expectedRevision) && candidate.expectedRevision >= 0
+      && Number.isSafeInteger(candidate.baseRevision) && candidate.baseRevision >= 0
+      && Number.isSafeInteger(candidate.contextEpoch) && candidate.contextEpoch >= 0
+      && Number.isSafeInteger(candidate.understandingDraftVersion) && candidate.understandingDraftVersion >= 0
+      && plain(candidate.selection) && candidate.selection.field === 'understandingDraft'
+      && Number.isSafeInteger(candidate.selection.start) && Number.isSafeInteger(candidate.selection.end)
+      && candidate.selection.end > candidate.selection.start && typeof candidate.selection.text === 'string'
+      && typeof candidate.replacement === 'string' && candidate.replacement.length <= 16000
+      && typeof candidate.resultHash === 'string' && /^[a-f0-9]{64}$/.test(candidate.resultHash),
+    'INVALID_AGENT_CANDIDATE', 'Agent 修订候选缺少受信任的运行、版本、选区或结果身份。', 422);
+    const fingerprint = `agent-adopt-v1:${sha(stableJson(candidate))}`;
+    return transaction(() => {
+      const revision = currentRevision(), current = readSnapshot(revision);
+      const known = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(candidate.commandId);
+      if (known) {
+        if (known.request_sha256 !== fingerprint) throw new WebStoreError(409, 'COMMAND_CONFLICT', '同一采纳命令 ID 不能对应不同候选。', revision);
+        return agentAdoptionResult(candidate, known, revision);
+      }
+      demand(candidate.expectedRevision === revision && candidate.baseRevision === revision, 'REVISION_CONFLICT', '工作区已经变化；旧 Agent 候选没有覆盖当前草稿。', 409);
+      const matter = current.host?.chain.matters.find(item => item.id === candidate.matterId);
+      const session = current.host?.chain.sessions[candidate.matterId];
+      demand(matter && session && session.contextEpoch === candidate.contextEpoch, 'AGENT_TARGET_STALE', 'Agent 候选对应的事项或上下文已经变化。', 409);
+      demand(matter.understandingDraftVersion === candidate.understandingDraftVersion
+        && candidate.selection.end <= matter.understandingDraft.length
+        && matter.understandingDraft.slice(candidate.selection.start, candidate.selection.end) === candidate.selection.text,
+      'AGENT_TARGET_STALE', '理解草稿或准确选区已经变化；旧候选没有应用。', 409);
+      const next = applyProductOperations(current.host, [
+        {type:'chain.action',matterId:candidate.matterId,action:{type:'SUGGEST',start:candidate.selection.start,end:candidate.selection.end,replacement:candidate.replacement}},
+        {type:'chain.action',matterId:candidate.matterId,action:{type:'ACCEPT_SUGGESTION'}},
+      ]);
+      next.chain.sessions[candidate.matterId].suggestion.origin = {type:'agent-run',runId:candidate.runId,resultHash:candidate.resultHash};
+      persist(normalizeHost(next), fingerprint, candidate.commandId, revision);
+      return agentAdoptionResult(candidate, {request_sha256:fingerprint, committed_revision:revision+1}, revision+1);
+    });
+  }
   function codexResult(kind, commandId, known, headRevision) {
     const snapshot = readSnapshot(known.committed_revision);
     const bridge = findCodexBridgeResponse(snapshot.host, commandId, kind);
@@ -390,5 +436,7 @@ export function createWebStore({ file, allowSnapshotWrites = false } = {}) {
   return { file, handle,
     // Read-only application seam for the Agent backend. No whole-host write API.
     read() { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return readSnapshot(currentRevision()); },
+    execute(command) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return executeProduct(command); },
+    adoptAgentCandidate(candidate) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return applyAgentCandidate(candidate); },
     close() { if (closed) return; closed = true; db.close(); } };
 }

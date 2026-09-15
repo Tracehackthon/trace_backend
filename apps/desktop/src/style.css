@@ -14,7 +14,9 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #app { width: 100%; min-width: 1080px; height: 100%; margin: 0; }
+/* Every screen (home / matters / chain / worksite) is a fixed 1672x941 canvas
+   that JS scales to fit, so no hard width floor is needed here. */
+html, body, #app { width: 100%; height: 100%; margin: 0; }
 button, textarea { font: inherit; }
 button { color: inherit; }
 body { overflow: hidden; }

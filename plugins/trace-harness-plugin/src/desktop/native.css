@@ -1,0 +1,24 @@
+html,
+body,
+#trace-native-root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trace-pet-image,
+  .trace-reminder-bubble,
+  .trace-orbit-item,
+  .trace-memory-card-body,
+  .trace-recording-wave i {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

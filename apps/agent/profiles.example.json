@@ -1,0 +1,37 @@
+{
+  "protocolVersion": 1,
+  "configVersion": 1,
+  "ownerId": "local-user",
+  "defaultProfileId": "local-codex",
+  "profiles": [
+    {
+      "id": "local-codex",
+      "label": "Local Codex",
+      "kind": "codex",
+      "enabled": true,
+      "version": 1
+    },
+    {
+      "id": "team-model",
+      "label": "Team model gateway",
+      "kind": "model",
+      "enabled": true,
+      "version": 1,
+      "endpoint": "https://model-gateway.example/v1/chat/completions",
+      "model": "configured-model-id",
+      "credentialEnv": "TRACE_TEAM_MODEL_TOKEN",
+      "authScheme": "bearer"
+    },
+    {
+      "id": "team-agent",
+      "label": "Team Agent service",
+      "kind": "agent",
+      "enabled": true,
+      "version": 1,
+      "endpoint": "https://agent.example/trace/execute",
+      "protocol": "trace-external-agent-v1",
+      "credentialEnv": "TRACE_TEAM_AGENT_TOKEN",
+      "authScheme": "bearer"
+    }
+  ]
+}

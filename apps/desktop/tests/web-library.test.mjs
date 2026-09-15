@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import {createBridge,captureInput,dispatchChain,openComparison,selectComparisonAnchor,dispatchComparison,commitComparison} from '../src/product/bridge.mjs';
+import {recordsOf,queryRecords,homeEntries,mattersView,h} from '../src/product/library.mjs';
+
+function fixture(){let host=createBridge();host=captureInput(host,{matterId:'my-matter',text:'必要条件不能被隐藏 🧪'});host=dispatchChain(host,{matterId:'my-matter',action:{type:'UNDERSTANDING_DRAFT',text:'先保留必要条件'}});return dispatchChain(host,{matterId:'my-matter',action:{type:'SAVE_UNDERSTANDING'}});}
+test('empty product surfaces contain no fixture records',()=>{const host=createBridge();assert.equal(recordsOf(host).length,0);assert.deepEqual(homeEntries(host),{});assert.equal(mattersView(host).matters.length,0);});
+test('home, scene and search address same canonical matter without title matching',()=>{const host=fixture();assert.equal(homeEntries(host).thought.matterId,'my-matter');assert.equal(mattersView(host).matters[0].id,'my-matter');assert.equal(queryRecords(host,{q:'必要条件'}).every(r=>r.matterId==='my-matter'),true);assert.equal(queryRecords(host,{kind:'understanding'})[0].text,'先保留必要条件');});
+test('query, kind and matter filters compose without mutating data',()=>{const host=fixture(),before=structuredClone(host);assert.equal(queryRecords(host,{q:'必要条件',kind:'understanding',matterId:'my-matter'}).length,1);assert.equal(queryRecords(host,{q:'不存在'}).length,0);assert.equal(queryRecords(host,{matterId:'other'}).length,0);assert.deepEqual(host,before);});
+test('unrelated pasted sources remain discoverable and not adopted',()=>{let host=fixture();host=openComparison(host,{sessionId:'cmp',matterId:'my-matter',anchor:selectComparisonAnchor(host,'my-matter',{field:'originalText'})});host=dispatchComparison(host,{sessionId:'cmp',action:{type:'IMPORT_MATERIAL',material:{title:'手工摘录',excerpt:'这里只提到按钮颜色'}}});host=dispatchComparison(host,{sessionId:'cmp',action:{type:'REJECT'}});const rows=queryRecords(host,{kind:'source',q:'按钮颜色'});assert.equal(rows.length,1);assert.match(rows[0].meta,/尚未关联/);assert.equal(host.chain.matters[0].understanding,'先保留必要条件');});
+test('HTML output escapes literal markup including attributes',()=>{assert.equal(h('<img onerror="bad">&\''),'&lt;img onerror=&quot;bad&quot;&gt;&amp;&#39;');});
+test('runtime fixed assets match locked approved bytes',()=>{const lock=JSON.parse(fs.readFileSync(new URL('../approved-assets.lock.json',import.meta.url),'utf8'));assert.equal(lock.assets.length,12);for(const a of lock.assets){const bytes=fs.readFileSync(new URL('../'+a.path,import.meta.url));assert.equal(bytes.length,a.bytes,a.key);assert.equal(crypto.createHash('sha256').update(bytes).digest('hex').toUpperCase(),a.sha256,a.key);}});

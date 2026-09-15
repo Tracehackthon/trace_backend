@@ -10,6 +10,9 @@
 | Lock an old project’s compatibility profile | `trace_profile_migrate_propose` | `trace_profile_migrate_apply` | profile/map/lock + backup only |
 | Adapt collaboration | `trace_profile_update_propose` | `trace_profile_update_apply` | private profile/map/lock + backup only |
 | Enable Codex hooks | `trace_codex_hook_enable_propose` | `trace_codex_hook_enable_apply` | user hooks config + rollback backup |
+| Receive the current context Skill package | `trace_context_skill_receive` | none | task/project-bound virtual `SKILL.md` + privacy-safe activation receipt; no global install |
+| Receive a prepared work handoff | `trace_product_context_receive` | none | server-issued delivery receipt bound to Codex session + project + context hash |
+| Return actual Codex work | none | `trace_product_result_return` | immutable external return + review draft; no automatic understanding change |
 
 All apply tools require `approval: adopt:<proposal_id>`. The agent derives that token after the user explicitly adopts the displayed proposal; the user never has to see or type it.
 

@@ -1,18 +1,20 @@
 # Trace Codex Plugin
 
-`trace-codex` 是 Trace 的日常入口。它把用户看得见的协作流程放在 Codex 对话里，而不是把 SQLite 文件、绝对路径、JSON 参数和一长串 CLI flag 留给用户。
+`trace-codex` 是 **在 Codex 中使用 Trace** 的入口。它把用户看得见的协作流程放在 Codex 对话里，而不是把 SQLite 文件、绝对路径、JSON 参数和一长串 CLI flag 留给用户。它不是 Web 调用 Codex 的必装依赖；反方向的生成接入见[Agent 后端](../apps/agent/README.md)。
 
 它由三部分组成：
 
 | 部分 | 负责什么 | 不负责什么 |
 | --- | --- | --- |
-| Skills：`$trace`、`$trace-adapt`、`$trace-review` | 理解自然语言意图、解释提案、引导下一步 | 静默替用户采用变更 |
-| 本地 MCP | 读取项目状态、生成稳定的 proposal、执行已采用的初始化/迁移/适配/hook 变更 | 读取或持久化 raw prompt、来源正文、凭证或工具参数 |
+| Skills：`$trace`、`$trace-adapt`、`$trace-review`、`$trace-context`、`$trace-work` | 理解自然语言意图、领取当前上下文或具体工作、解释提案与结果 | 静默替用户采用变更 |
+| 本地 MCP | 读取状态、生成/执行 proposal、发出任务绑定的上下文 Skill 包、领取工作并回传结果 | 读取或持久化 raw prompt、来源正文、绝对来源 root、凭证或工具参数；安装动态包到全局 Skill |
 | Trace runtime | `.trace/` 状态、协议、SQLite、回执、备份与 Codex hook 路由 | 取代 Codex 的原生搜索、读取、推理或编码能力 |
 
 因此，Trace 不是第二个 Agent，也不是“给 Codex 塞更多上下文”的插件。Codex 仍自己决定何时搜索、读哪些已授权来源、怎样推理和执行；Trace 让用户看见这些工作在哪个项目发生、哪些候选在等待决定，以及协作方式是否发生过明确变更。
 
 ## 一次性连接 Codex
+
+只有源码 checkout、还没有构建 runtime 时，在仓库根目录先运行 `corepack pnpm install --frozen-lockfile` 和 `corepack pnpm build`；这两步不是本机 Web / Agent 启动的前置条件。构建后继续以下预览与显式安装步骤，成功后在 Codex 新开任务加载插件。
 
 Trace runtime 已安装后，运行：
 
@@ -43,6 +45,8 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 | `$trace 现在是什么状态？` | 读取状态 | 当前 profile/lock、版本差异、待审阅数量、实际来源 evidence 数量 |
 | `$trace-adapt 我希望你更适配我的工作方式` | 先讨论适配含义，再形成 profile proposal | 新增/避免的协作行为、来源边界、仍保持 transient 的信息 |
 | `$trace-review 你沉淀了什么？` | 列出待审阅候选 | 候选是什么、为什么仍未采用、下一步由谁决定 |
+| `$trace-context 把我的上下文 Skill 包带进来` | 从当前 locked profile 编译并领取 task/project-bound 虚拟 `SKILL.md` | model/source map 版本、hash、来源是否可导航、activation receipt；不会全局安装 |
+| `$trace-work 接收我在 Trace 里准备的工作` | 领取用户确认的具体工作快照；完成后回传结果 | delivery/session/project/hash 回执与 Trace 复核状态 |
 | `$trace 我升级后需要做什么？` | 只读检查版本与 lock | 哪些项目没有变、哪些变化需要显式采用 |
 | `$trace 在 Codex 中启用接续` | 先预览 hooks 配置 | 用户级影响、备份、保留的无关 hooks、按 cwd 路由的范围 |
 
@@ -53,6 +57,10 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 ```
 
 MCP 的 `approval: adopt:<proposal_id>` 是 Agent 在用户明确采用后传递的完整性令牌；用户无需记忆或输入它。proposal 含有当时的状态指纹，项目/profile/hook 在提案后被其他进程改动时会变成 stale，必须重新展示提案。
+
+`$trace-context` 是只读编译加 activation receipt，不需要 adoption token，因为它不会改变 profile；但只接受已经有 activation lock 的项目。`legacy_unlocked` 项目会失败关闭，先展示 profile migration proposal，用户明确采用后才能领取。包协议为 `trace.context-skill-package@0.1.0`：`content_sha256` 绑定 Codex session、project、`SKILL.md`、lock provenance 与固定边界；重复领取同一份内容复用同一个 receipt。`generated_at` 不进入内容身份，避免丢失响应后的重试制造第二份语义包。
+
+上下文 Skill 与工作快照不是同一对象：前者描述长期但项目限定的协作方式和来源导航，后者是用户为某次具体工作确认的内容。两者都不能证明后续推理实际采用了它们；影响仍以决策、diff、测试和产物证据说明。
 
 ## 什么可见，什么不必可见
 

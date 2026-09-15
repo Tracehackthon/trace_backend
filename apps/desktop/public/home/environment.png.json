@@ -1,0 +1,6 @@
+{
+  "prompt": "Pre-existing approved Trace homepage asset, reused unchanged for the matters prototype. Origin and production/alpha repair evidence: docs/tasks/trace-home-v1-assets.md. No new generation or pixel editing in this integration.",
+  "origin": "trace-runtime/apps/desktop/public/home/environment.png; approved homepage implementation before trace-matters-v1 integration",
+  "sha256": "16BC94CF2D00D7ECFA63FCB635C90067F650B6FA15F6738560C520E0825F1A05",
+  "note": "Separate provenance metadata keeps original approved PNG and alpha bytes unchanged."
+}

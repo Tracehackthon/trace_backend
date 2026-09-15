@@ -52,7 +52,7 @@ export function TracePanel({
   const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null)
   const focusedCardRef = useRef<HTMLElement | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
-  const recordingTimerRef = useRef<number | undefined>()
+  const recordingTimerRef = useRef<number | undefined>(undefined)
   const focusedObservation = observations.find((observation) => observation.id === focusedObservationId)
 
   useEffect(() => {

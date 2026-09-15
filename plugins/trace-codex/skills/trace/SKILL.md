@@ -7,6 +7,16 @@ description: "Guides Trace use in Codex: start or inspect a project, adapt colla
 
 Trace does not replace Codex's reasoning, browsing, coding, or native source retrieval. It gives those activities a visible project lifecycle: selected context, safe evidence, reviewable candidates, explicit profile changes, and non-destructive version migration.
 
+## Bring the user's context Skill package into this task
+
+When the user asks for their context package, Skill package, current collaboration style, or cognitive-source entry map, use `$trace-context`. It compiles the project’s already locked profile into a task-bound virtual `SKILL.md`, verifies the package and writes an activation receipt. It does not install a global Skill, read source bodies, or replace the separate `$trace-work` handoff flow.
+
+## Bring a prepared Trace work item into Codex
+
+When the user asks to use, continue, or receive context they prepared in Trace, use the `$trace-work` workflow. Call `trace_product_context_receive` with the current absolute project directory; do not copy an entire Web workspace or invent a delivery receipt. Respect each returned item's `role` and `instruction`, and keep the context scoped to the current task.
+
+After real work and verification finish, call `trace_product_result_return` once with the original delivery identifiers. Separate verified `fact`, your `interpretation`, and `unconfirmed` points. Returning a result creates a review draft in Trace; it never adopts a new personal understanding on the user's behalf.
+
 ## Start with the project state
 
 Call `trace_project_status` before offering configuration advice.

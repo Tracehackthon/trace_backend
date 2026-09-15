@@ -1,0 +1,12 @@
+{
+  "name": "@trace/app-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Provider-neutral Trace Agent HTTP runtime with Codex, model, and external Agent adapters",
+  "scripts": {
+    "start": "node server.mjs",
+    "build": "node --check protocol.mjs && node --check context.mjs && node --check runtime.mjs && node --check remote-http.mjs && node --check model.mjs && node --check external-agent.mjs && node --check profiles.mjs && node --check codex.mjs && node --check store.mjs && node --check service.mjs && node --check http.mjs && node --check backend.mjs && node --check server.mjs",
+    "test": "node --test --test-concurrency=1 ../../tests/agent-*.test.mjs"
+  }
+}

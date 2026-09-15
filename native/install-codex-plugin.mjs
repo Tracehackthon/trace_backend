@@ -22,10 +22,18 @@ function absolute(value, field) {
   return path.resolve(value);
 }
 function noSymlink(value) {
+  // Check the target and its not-yet-existing ancestry; host-level symlinked
+  // ancestors above the deepest existing entry (e.g. macOS /var → /private/var)
+  // are environment, not managed state.
   let cursor = path.resolve(value);
   while (true) {
-    try { if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`Symlink is not allowed: ${value}`); }
+    let stat;
+    try { stat = fs.lstatSync(cursor); }
     catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    if (stat !== undefined) {
+      if (stat.isSymbolicLink()) throw new Error(`Symlink is not allowed: ${value}`);
+      return;
+    }
     const parent = path.dirname(cursor);
     if (parent === cursor) return;
     cursor = parent;

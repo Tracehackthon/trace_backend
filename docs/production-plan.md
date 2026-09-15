@@ -71,6 +71,8 @@
 
 ## 验证入口
 
+本次合并到 main 的范围、通过与既有失败见[2026-09-15 合并验证](validation/2026-09-15-main-integration.md)，不是生产发布声明。
+
 以下从仓库根目录执行；开发测试先安装锁定依赖 `corepack pnpm install --frozen-lockfile`。**启动服务不需要这一步。**
 
 | 检查 | 命令 / 入口 | 能证明什么 |

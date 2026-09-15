@@ -24,6 +24,16 @@ import {
   type ProfileUpdateInput,
   type ProjectInitializeInput,
 } from '../../../packages/product/application/src/index.js';
+import {
+  beginDialogue,
+  candidateReviewApply,
+  candidateReviewView,
+  decisionPathView,
+  dialogueState,
+  stepDialogue,
+  type CandidateReviewApplyInput,
+  type DialogueMove,
+} from '../../../packages/product/application/src/dialogue.js';
 import type {ProjectActivationConfigurationInput, ProjectSourceProfileInput} from '../../../packages/core/instance/src/index.js';
 import {currentCodexSessionId, TraceProductClient, type TraceProductArtifact} from './product-client.js';
 
@@ -215,6 +225,63 @@ export function createTraceMcpServer(): McpServer {
     });
     return {...value, user_notice: 'Codex 的实际结果已回到 Trace 复核区；当前个人理解没有自动改变。'};
   }));
+  server.registerTool('trace_dialogue_begin', {
+    title: 'Begin a scripted Trace dialogue',
+    description: 'Start (or resume) a deterministic Trace dialogue: onboard (project setup interview), adapt (collaboration-fit interview), or review (candidate triage). Follow the returned instruction verbatim and never skip ahead; every user decision is recorded as a visible fork.',
+    inputSchema: {...projectDirectory, intent: z.enum(['onboard', 'adapt', 'review'])},
+  }, async ({project_dir, intent}) => invoke(() => beginDialogue({...optionalProject(project_dir), intent})));
+
+  server.registerTool('trace_dialogue_step', {
+    title: 'Advance a scripted Trace dialogue',
+    description: 'Record one user exchange and advance the dialogue script. move.summary is a host-authored summary, never the raw prompt. decide requires the pending decision_id, chosen and rationale; revise requires revised_prompt, revised_options and rationale.',
+    inputSchema: {
+      ...projectDirectory,
+      thread_id: z.string().min(1),
+      move: z.object({
+        action: z.enum(['answer', 'decide', 'revise', 'confirm', 'abort']),
+        summary: z.string().min(1),
+        decision_id: z.string().min(1).optional(),
+        expected_revision: z.number().int().positive().optional(),
+        chosen: z.string().min(1).optional(),
+        rationale: z.string().min(1).optional(),
+        revised_prompt: z.string().min(1).optional(),
+        revised_options: z.array(z.string().min(1)).optional(),
+      }),
+    },
+  }, async ({project_dir, thread_id, move}) => invoke(() => stepDialogue({...optionalProject(project_dir), thread_id, move: move as DialogueMove})));
+
+  server.registerTool('trace_dialogue_state', {
+    title: 'Trace dialogue state',
+    description: 'Read active scripted dialogues and their pending decisions. Read-only.',
+    inputSchema: {...projectDirectory, thread_id: z.string().min(1).optional()},
+  }, async ({project_dir, thread_id}) => invoke(() => dialogueState(project_dir, thread_id)));
+
+  server.registerTool('trace_path_view', {
+    title: 'Trace decision path view',
+    description: 'Show one thread’s decision path: every fork presented, the chosen branch with its rationale, and the branches not taken. Read-only.',
+    inputSchema: {...projectDirectory, thread_id: z.string().min(1)},
+  }, async ({project_dir, thread_id}) => invoke(() => decisionPathView(project_dir, thread_id)));
+
+  server.registerTool('trace_candidate_review_view', {
+    title: 'Trace candidate review view',
+    description: 'Read one pending candidate’s review metadata and its available decisions. Read-only; it never returns raw prompt content.',
+    inputSchema: {...projectDirectory, record_id: z.string().min(1)},
+  }, async ({project_dir, record_id}) => invoke(() => candidateReviewView(project_dir, record_id)));
+
+  server.registerTool('trace_candidate_review_apply', {
+    title: 'Apply a candidate review decision',
+    description: 'Save (summary/redacted_excerpt/full_private with user-supplied content_file) or reject (rationale required) a pending candidate. approval must equal approve:<record_id>. Rejection rationales become negative examples for future adapt drafts.',
+    inputSchema: {
+      ...projectDirectory,
+      record_id: z.string().min(1),
+      action: z.enum(['save', 'reject']),
+      approval: z.string().min(1),
+      save_mode: z.enum(['summary', 'redacted_excerpt', 'full_private']).optional(),
+      content_file: z.string().min(1).optional(),
+      title: z.string().min(1).optional(),
+      rationale: z.string().min(1).optional(),
+    },
+  }, async input => invoke(() => candidateReviewApply(input as unknown as CandidateReviewApplyInput)));
 
   return server;
 }

@@ -503,5 +503,7 @@ export function openSqlite(file: string, options: OpenSqliteOptions = {}): OpenS
   if (driver.kind === 'sql.js') return {db: openSqlJs(file, options.readOnly ?? false), driver};
   const NodeSqlite = loadNode();
   const readOnly = options.readOnly ?? false;
-  return {db: new NodeSqliteDatabaseAdapter(new NodeSqlite.DatabaseSync(file, readOnly ? {readOnly: true} : undefined), readOnly), driver};
+  // Node ≥25 rejects an explicit `undefined` options argument; omit it instead.
+  const database = readOnly ? new NodeSqlite.DatabaseSync(file, {readOnly: true}) : new NodeSqlite.DatabaseSync(file);
+  return {db: new NodeSqliteDatabaseAdapter(database, readOnly), driver};
 }

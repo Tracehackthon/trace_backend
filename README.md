@@ -4,7 +4,7 @@
 
 [产品介绍与第一次使用](docs/product-guide.md) · [底层架构](docs/architecture.md) · [生产化计划](docs/production-plan.md) · [全部文档](docs/README.md)
 
-本页命令适用于**源码工作区**。已经拿到 native 发行包的用户请读[安装与维护](native/README.md)，不要在旧发行包中执行新服务命令。
+本页命令适用于**源码工作区**。已经拿到 native 发行包的用户请读[安装与维护](native/README.md)；Windows 可用包内 `Connect-Trace-to-Codex.cmd` 连接插件，不要在旧发行包中执行新服务命令。
 
 ## 先分清三件事
 
@@ -59,5 +59,6 @@ npm start -- --agent
 | 如何从 Web 发起生成、订阅和取消 | [Agent 协议](apps/agent/docs/protocol.md) |
 | 下一步先实现什么、何时可以交付 | [生产阶段计划](docs/production-plan.md) |
 | 产品用途与知乎内容方向 | [产品指南](docs/product-guide.md) |
+| 原生协作对话与决策记录 | [对话引擎与决策路径](docs/dialogue-engine.md) |
 
 `pnpm build` 编译 CLI/MCP runtime；Web/Agent 的 build 是语法检查。**现有 `pnpm package` 不包含 Web/Agent 服务，不能用它宣称已交付新后端。** 开发与验收命令按[生产计划的检查表](docs/production-plan.md#验证入口)选择，不要求新用户先运行整套工程命令。

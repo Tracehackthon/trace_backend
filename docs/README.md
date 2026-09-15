@@ -27,6 +27,8 @@
 
 ## 按需深入原生协作
 
+[对话引擎与决策路径](dialogue-engine.md)：原生协作的 scripted onboard/adapt/review、决策记录与回放；与 Web 自由生成 API 分开。
+
 [项目初始化](getting-started.md) · [日常候选与沉淀](daily-workflow.md) · [个性化](personalization.md) · [来源授权与实际访问](host-native-retrieval.md) · [评估 fixtures](../tests/evals/README.md)
 
 它们是 Codex 协作能力的专题，不是启动 Web 或生成 API 的前置步骤。旧界面探索见[历史原型](../apps/desktop/docs/prototype-history.md)，不再与当前使用指南混排。

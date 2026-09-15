@@ -1,0 +1,4 @@
+# These approved vendored resources are hash-locked. Windows checkouts must
+# preserve their LF bytes rather than silently rewriting them to CRLF.
+apps/desktop/src/vendor/anime.esm.js text eol=lf
+apps/desktop/src/vendor/shape-only.mjs text eol=lf

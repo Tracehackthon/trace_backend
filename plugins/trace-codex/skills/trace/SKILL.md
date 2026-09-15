@@ -5,7 +5,7 @@ description: "Guides Trace use in Codex: start or inspect a project, adapt colla
 
 # Trace
 
-Trace does not replace Codex's reasoning, browsing, coding, or native source retrieval. It gives those activities a visible project lifecycle: selected context, safe evidence, reviewable candidates, explicit profile changes, and non-destructive version migration.
+Trace does not replace Codex's reasoning, browsing, coding, or native source retrieval. It gives those activities a visible project lifecycle: scripted dialogues, recorded decision forks, safe evidence, reviewable candidates, explicit profile changes, and non-destructive version migration.
 
 ## Bring the user's context Skill package into this task
 
@@ -21,32 +21,33 @@ After real work and verification finish, call `trace_product_result_return` once
 
 Call `trace_project_status` before offering configuration advice.
 
-- If no Trace project exists, call `trace_project_initialize_propose` with `source_mode: "local"` unless the user has explicitly selected another source mode.
-- Show the proposal in ordinary language: what will be created, what will not be read or installed, and what the user can change later.
-- Apply only after the user explicitly adopts the displayed proposal. Supply the tool's exact `proposal_id` and `approval: "adopt:<proposal_id>"`; never ask the user to type an approval token.
+- If no Trace project exists, start the scripted onboarding instead of improvising: call `trace_dialogue_begin` with `intent: "onboard"`.
+- The dialogue engine owns the script. Show its `instruction` to the user in ordinary language, ask exactly what it asks (never merge questions, never skip ahead), and report the user's answer with `trace_dialogue_step`.
+- Every fork the engine returns in `pending_decisions` is a real decision the user must make. Record it with a `decide` move (`decision_id`, `chosen`, `rationale`); record a requested change with a `revise` move. The rationale is required — a decision without its reason is a dead end.
+- Configuration writes still follow `propose → explicit adopt → apply`: the engine will tell you when to call `trace_project_initialize_propose`/`_apply`. Supply the tool's exact `proposal_id` and `approval: "adopt:<proposal_id>"`; never ask the user to type an approval token.
 
 ## Adapt the collaboration, not the person to a config file
 
-When the user wants the Agent to better fit how they think or work:
+When the user wants the Agent to better fit how they think or work, call `trace_dialogue_begin` with `intent: "adapt"` (see the `$trace-adapt` skill). The engine runs the interview: elicit → reflect → draft (with past rejection rationales as negative examples) → negotiate round by round → adopt → follow-up. Your job is to carry the conversation, not to design it.
 
-1. Discuss the working preference and evidence first. Do not silently turn a conversation into a profile.
-2. Explain a concise behavioral proposal: what the Agent will prioritize, what it will avoid, which source entry points it may use, and what stays transient.
-3. Build the structured collaboration model/source map from the adopted meaning, then call `trace_profile_update_propose`.
-4. Show the returned before/after summary. Apply only after an explicit adoption with `trace_profile_update_apply`.
-
-Do not put a private source root, raw source body, raw prompt, credential, or tool parameter into a Trace profile.
+Do not put a private source root, raw source body, raw prompt, credential, or tool parameter into a Trace profile. `move.summary` is always your own summary of what the user said, never the raw prompt.
 
 ## Let the user see accumulation
 
-- Use `trace_inbox_list` for “what did Trace retain?” and explain that candidate means **not yet adopted as a capability**.
+- Use `trace_inbox_list` for “what did Trace retain?” and explain that candidate means **not yet adopted as a capability**. Review runs as a scripted dialogue: `trace_dialogue_begin` with `intent: "review"`.
+- Use `trace_path_view` to replay any thread's decision path: every fork, the branch taken with its rationale, and the branches not taken.
 - Use `trace_source_view` to show which source is connected and its activation boundaries. It intentionally does not expose source bodies or private roots.
 - Use `trace_upgrade_inspect` for updates. It is read-only: a runtime update never overwrites a user project.
+
+## Resume what previous sessions left open
+
+At session start Trace injects open threads, pending decision forks, and suggested next prompts. Mention them once and ask whether to resume — never decide for the user. `trace_dialogue_state` lists active scripted dialogues; `trace_dialogue_begin` with the same intent resumes one instead of restarting it.
 
 ## Existing projects and version changes
 
 If status says `legacy_unlocked`, explain that the project predates the local collaboration-profile lock. Use `trace_profile_migrate_propose`; its migration materializes the same compatibility model/map already being used and leaves source, SQLite history, capabilities, and hooks unchanged. Apply only after adoption.
 
-Never imply that an upgrade migrates templates, source data, or user profile automatically. Refer to [MCP workflow reference](references/mcp-workflows.md) for the operation map.
+Never imply that an upgrade migrates templates, source data, or user profile automatically. Refer to [MCP workflow reference](references/mcp-workflows.md) and [dialogue workflows](references/dialogue-workflows.md) for the operation map.
 
 ## Enable passive Codex integration only by choice
 

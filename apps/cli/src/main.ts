@@ -32,6 +32,7 @@ const PRODUCT_USAGE = [
     '日常：',
     '  trace inbox [--project-dir ABS] [--json]',
     '  trace review ID [--project-dir ABS] [--save ABS_CONTENT_FILE] [--json]',
+    '  trace path [THREAD_ID] [--project-dir ABS] [--json]  # 决策路径回放：每个岔路、已走与未走的路',
     '  trace sources [--project-dir ABS] [--json]',
     '  trace profile [--project-dir ABS] [--json]',
     '  trace profile migrate --confirm true [--project-dir ABS]  # lock an older project without changing its source/data',
@@ -439,7 +440,7 @@ export async function run(argv: string[]): Promise<void> {
   const [group, action, ...rest] = argv;
   // Product commands discover the nearest project boundary rather than asking
   // users to repeatedly pass state-file, lineage and producer internals.
-  if (['init', 'status', 'upgrade', 'inbox', 'sources', 'source', 'profile', 'abilities'].includes(group ?? '')) {
+  if (['init', 'status', 'upgrade', 'inbox', 'sources', 'source', 'profile', 'abilities', 'path'].includes(group ?? '')) {
     const parsed = args(action?.startsWith('--') ? [action, ...rest] : rest);
     if (group === 'init') {
       const projectDir = path.resolve(one(parsed, '--project-dir', false) ?? process.cwd());
@@ -650,6 +651,45 @@ export async function run(argv: string[]): Promise<void> {
       const items = productInbox(context);
       productResult(parsed, renderInbox(items), {status: 'listed', project: context.project_dir, items});
       return;
+    }
+    if (group === 'path') {
+      // Read-only decision-path replay: every fork presented, the road taken,
+      // and the roads not taken. Dialogue writes stay in the MCP surface.
+      const requestedThread = action !== undefined && !action.startsWith('--') ? action : undefined;
+      const runtime = productRuntime(context);
+      if (runtime === undefined) {
+        productResult(parsed, '尚无项目状态；完成一次协作后，决策路径会出现在这里。', {status: 'empty', project: context.project_dir, threads: []});
+        return;
+      }
+      try {
+        if (requestedThread === undefined) {
+          const threads = runtime.listContinuity()
+            .filter(record => record.kind === 'decision_point')
+            .map(record => record.thread_id)
+            .filter((value, index, all) => all.indexOf(value) === index)
+            .map(threadId => {
+              const thread = runtime.listContinuity(threadId).find(record => record.kind === 'thread');
+              const path = runtime.decisionPath(threadId);
+              return {thread_id: threadId, title: thread === undefined ? threadId : textField(thread.payload, 'title'), status: thread === undefined ? 'unknown' : textField(thread.payload, 'status'), decisions: path.nodes.length, pending: path.pending.length, taken: path.taken.length};
+            });
+          productResult(parsed, threads.length === 0
+            ? '还没有任何决策路径。$trace 对话中呈给你的每个岔路都会记录在这里。'
+            : ['决策路径（择路视图）：', ...threads.map(item => `  ${item.thread_id}｜${item.title}｜决定 ${item.decisions}（已走 ${item.taken}，待决 ${item.pending}）`), '', '查看单条：trace path <thread_id>'].join('\n'), {status: 'listed', project: context.project_dir, threads});
+          return;
+        }
+        const path = runtime.decisionPath(requestedThread);
+        const lines = [`决策路径：${requestedThread}`, ''];
+        for (const node of path.nodes) {
+          const marker = node.status === 'decided' ? '已走' : node.status === 'pending' ? '待决' : '被修订取代';
+          lines.push(`第 ${node.round} 轮｜${marker}｜${node.prompt}`);
+          lines.push(`  岔路：${node.options.join(' / ')}`);
+          if (node.chosen !== null) lines.push(`  选择：${node.chosen}`);
+          if (node.rationale !== null) lines.push(`  理由：${node.rationale}`);
+          if (node.parent_decision_id !== null) lines.push(`  修订自：${node.parent_decision_id}`);
+        }
+        productResult(parsed, lines.join('\n'), {status: 'shown', project: context.project_dir, path});
+        return;
+      } finally { runtime.close(); }
     }
     if (group === 'sources') {
       const profile = sourceProfileForContext(context) as unknown as Record<string, unknown>;

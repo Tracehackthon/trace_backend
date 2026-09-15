@@ -229,6 +229,54 @@ function recordHostEvidenceEvent(runtime: TraceRuntime, input: Parameters<TraceR
   recordActivationEvent(runtime, input);
 }
 
+interface ResumeContext {
+  open_threads: Array<{thread_id: string; title: string; summary: string; next_action: string | null; pending_decisions: number}>;
+  pending_decisions: Array<{record_id: string; thread_id: string; prompt: string; options: string[]}>;
+  suggested_next: string[];
+}
+
+/**
+ * Session continuity: unresolved threads, pending decision forks and the last
+ * suggested next prompts are surfaced at SessionStart so the chain survives
+ * across sessions. Best-effort: a resume failure must never break a turn.
+ */
+function buildResumeContext(runtime: TraceRuntime, currentSessionId: string): ResumeContext | undefined {
+  try {
+    const records = runtime.listContinuity();
+    const threads = records
+      .filter(record => record.kind === 'thread' && record.thread_id !== currentSessionId)
+      .filter(record => record.payload.status === 'open' || record.payload.status === 'watching')
+      .slice(-5);
+    const pending = runtime.pendingDecisions().slice(-5);
+    const openThreads = threads.map(thread => ({
+      thread_id: thread.thread_id,
+      title: thread.payload.title as string,
+      summary: thread.payload.current_summary as string,
+      next_action: typeof thread.payload.next_action === 'string' && !thread.payload.next_action.startsWith('trace-dialogue-step:') ? thread.payload.next_action : null,
+      pending_decisions: pending.filter(node => node.thread_id === thread.thread_id).length,
+    }));
+    const nextPrompts = records
+      .filter(record => record.kind === 'persistence_receipt' || record.kind === 'activation_receipt')
+      .flatMap(record => (record.payload.next_prompts as string[] | undefined) ?? [])
+      .slice(-3);
+    if (openThreads.length === 0 && pending.length === 0 && nextPrompts.length === 0) return undefined;
+    return {
+      open_threads: openThreads,
+      pending_decisions: pending.map(node => ({record_id: node.record_id, thread_id: node.thread_id, prompt: node.prompt, options: node.options})),
+      suggested_next: nextPrompts,
+    };
+  } catch { return undefined; }
+}
+
+function resumeDeveloperContext(resume: ResumeContext): string {
+  const lines = ['Trace session resume: previous collaboration left open items.'];
+  for (const thread of resume.open_threads) lines.push(`- Open thread "${thread.title}": ${thread.summary}${thread.next_action === null ? '' : ` (next: ${thread.next_action})`}`);
+  for (const decision of resume.pending_decisions) lines.push(`- Pending decision: ${decision.prompt} [${decision.options.join(' / ')}]`);
+  if (resume.suggested_next.length > 0) lines.push(`- Suggested next prompts: ${resume.suggested_next.join('; ')}`);
+  lines.push('Mention these once at the start of the session and ask whether to resume; do not decide for the user.');
+  return lines.join('\n');
+}
+
 function buildSourceOffer(runtime: TraceRuntime, source: ResolvedSourceAccess, sessionId: string, turnId: string | undefined, correlationId: string, causationId: string): void {
   const evidence = recordHostEvidence(runtime, {
     event_kind: 'source_access_offered',
@@ -269,6 +317,7 @@ function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRu
     max_tokens: 6000,
   });
   if (source.resolved !== undefined) buildSourceOffer(runtime, source.resolved, sessionId, turnId, activation.correlation_id, `codex-source-offer:${turnId ?? randomUUID()}`);
+  const resume = eventName === 'SessionStart' ? buildResumeContext(runtime, sessionId) : undefined;
   const sourceMode = sourceProfile?.source_mode ?? 'local';
   const collaboration = compileCollaborationContext({
     model: configuration.collaboration_model ?? defaultCollaborationModel(sourceMode === 'team' ? 'trace.codex-team' : sourceMode === 'empty' ? 'trace.codex-empty' : 'trace.codex-starter'),
@@ -295,11 +344,12 @@ function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRu
     pack_id: activation.pack.pack_id,
     correlation_id: activation.correlation_id,
     trace_event_id: activation.trace_event?.event_id ?? null,
+    ...(resume === undefined ? {} : {resume}),
     user_notice: source.resolved === undefined
       ? activation.user_notice
       : 'Trace 已提供受控的宿主原生认知源访问；Codex 自己检索和读取，Trace 只记录实际访问证据。',
   };
-  return {hookSpecificOutput: {hookEventName: eventName, additionalContext: JSON.stringify(visible) + `\n${collaboration.developer_context}` + (source.resolved === undefined ? '' : `\n${hostAccessDeveloperContext(source.resolved.source_access)}`)}};
+  return {hookSpecificOutput: {hookEventName: eventName, additionalContext: JSON.stringify(visible) + `\n${collaboration.developer_context}` + (source.resolved === undefined ? '' : `\n${hostAccessDeveloperContext(source.resolved.source_access)}`) + (resume === undefined ? '' : `\n${resumeDeveloperContext(resume)}`)}};
 }
 
 function readVersions(provider: MyWikiSourceProvider, locators: string[]): HostPageVersion[] | undefined {

@@ -1,5 +1,7 @@
 # 维护、备份与恢复
 
+> **适用范围：项目认知 runtime 的 `trace.sqlite`。** 下面的 doctor / backup / restore 不覆盖本机产品 `web.sqlite` 或 Agent 的 `agent.sqlite`；两库的启动、故障和维护边界见[本机运行手册](local-runtime.md)。不要混用 SQLite driver 或备份说明。
+
 ## 健康检查
 
 ```powershell

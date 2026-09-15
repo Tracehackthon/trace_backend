@@ -1,30 +1,39 @@
-# Trace 产品文档
+# Trace 文档导航
 
-这里不是“代码目录的说明书”，而是 Trace 的产品使用手册：帮助使用者理解 Trace 能给协作带来什么、在 Codex 中怎么开始、哪些内容会被保留、如何适配自己，以及更新后为什么不会覆盖已有项目。
+先选你要做的事，不需要按目录全部读完。源码能力、运行状态和正式发布是三个不同状态。
 
-## 我想开始使用 Trace
+## 使用产品
 
-1. [Trace for Codex](codex-plugin.md)：一次性连接 Codex，之后用 `$trace`、`$trace-adapt`、`$trace-review` 工作。
-2. [第一次使用](getting-started.md)：建立项目 `.trace/`，选择 local / external / team / empty 来源边界。
-3. [日常协作、候选与沉淀](daily-workflow.md)：理解讨论、候选、采用、案例、前例和能力之间的关系。
-4. [适配使用者](personalization.md)：让通用 starter 逐步变成个人、项目或团队明确拥有的协作方式。
+- [产品介绍、六项功能与知乎材料用途](product-guide.md)：为什么用、第一次怎么用、浏览器数据边界。
+- [本机运行](local-runtime.md)：一个服务、三个命令、数据位置与故障处理。
+- [在 Codex 中使用 Trace](codex-plugin.md)：Plugin 安装、工作领取与回流；不是生成后端的必装依赖。
 
-## 我想知道 Trace 会不会记住或泄露什么
+## 开发底层
 
-- [Codex 原生检索与来源 evidence](host-native-retrieval.md)：Codex 仍自己检索；Trace 只管理来源授权、访问 evidence 与预算。
-- [日常协作、候选与沉淀](daily-workflow.md)：哪些内容默认 transient，如何显式把 prompt / 外部材料变成私有案例或前例。
-- [维护、备份与恢复](operations.md)：项目状态、诊断、backup、restore 与安全边界。
+| 任务 | 读这一份 |
+| --- | --- |
+| 分清产品状态、Agent 执行与原生协作 | [底层架构](architecture.md) |
+| 从 Web 调用 Codex | [Agent 后端](../apps/agent/README.md) → [HTTP 契约](../apps/agent/docs/protocol.md) |
+| 保存事项、理解、工作和结果 | [产品命令与回流协议](../apps/desktop/README.md) |
+| 维护原生认知运行时 | [Packages](../packages/README.md) · [MCP](../apps/mcp/README.md) |
+| 查知乎 transport / provider 代码 | [HTTP transport](../packages/integration/zhihu-transport/README.md) · [前例 adapter](../packages/integration/zhihu-precedent/README.md) |
 
-## 我是旧用户，或刚更新了 runtime / Plugin
+## 准备交付
 
-- [版本、协议与发布](versioning.md)：区分 runtime、Plugin、profile、模板与协议版本。
-- [Trace for Codex：旧用户与版本变化](codex-plugin.md#旧用户与版本变化)：为什么更新入口不等于迁移项目，怎样处理 `legacy_unlocked`。
+- [生产阶段计划](production-plan.md)：先做什么、哪些还没实现、每一阶段怎样验收。
+- [本机服务维护](local-runtime.md)：Web / Agent 的两库边界。
+- [认知账本备份恢复](operations.md)：仅 trace.sqlite，不覆盖上述两库。
+- [版本和兼容](versioning.md) · [Native 发行](../native/README.md)：现有 native 包不是新的 Web/Agent 包。
 
-## 我在接入或开发产品
+## 按需深入原生协作
 
-- [产品架构](architecture.md)：用户体验、宿主、application service、核心协议和存储如何分工。
-- [packages 产品边界](../packages/README.md)：核心、候选、能力、adapter、SDK、模板与 bundle 的职责。
-- [apps 宿主入口](../apps/README.md)：Plugin/MCP、CLI、Codex hooks 与未来 desktop 的边界。
-- [效果评估 fixtures](../tests/evals/README.md)：访问 evidence 覆盖率的验证边界，不把 fixture 冒充模型效果。
+[项目初始化](getting-started.md) · [日常候选与沉淀](daily-workflow.md) · [个性化](personalization.md) · [来源授权与实际访问](host-native-retrieval.md) · [评估 fixtures](../tests/evals/README.md)
 
-普通用户不需要从 packages、CLI flag 或 SQLite 表开始。先进入 Codex 的 `$trace`；产品会在需要时把状态、选择和下一步显示给你。
+它们是 Codex 协作能力的专题，不是启动 Web 或生成 API 的前置步骤。旧界面探索见[历史原型](../apps/desktop/docs/prototype-history.md)，不再与当前使用指南混排。
+
+## 维护分工
+
+- README 只保留定位、入口与必要边界；不堆阶段日志和全部 CLI flags。
+- 当前职责在 architecture；当前接口在对应 apps 文档；拟实施内容在 production-plan。
+- 产品定义与探索设计在工作区 manunl；实现仓库应能独立读取当前调用协议。
+- 失败与重跑留在任务/测试记录中，不把旧通过次数复制成新版本已验收。

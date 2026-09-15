@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@trace/collaboration-context": "workspace:*",
+    "@trace/context": "workspace:*",
     "@trace/instance": "workspace:*",
     "@trace/runtime": "workspace:*",
     "@trace/template-catalog": "workspace:*",

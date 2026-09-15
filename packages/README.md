@@ -9,7 +9,7 @@
 | Core | `core/protocol`、`core/data`、`core/storage`、`core/runtime` | 协议、版本兼容、append-only 数据、CAS、生命周期与恢复 |
 | Collaboration | `core/continuity`、`core/collaboration-context`、`core/retrieval-evidence` | 用户可见连续性、协作模型、来源地图、宿主实际访问证据 |
 | Evolution | `core/case-capture`、`core/precedent`、`core/capability-candidate`、`core/capability` | 显式案例沉淀、前例、能力候选、验证与发布 |
-| Product application | `product/application` | 将项目初始化、profile lock、版本检查与 Codex hooks 组合为 proposal → adopt → apply |
+| Product application | `product/application` | 将项目初始化、profile lock、版本检查、Codex hooks 与任务绑定的上下文 Skill receipt 组合为产品用例 |
 | Host / integration | `host/*`、`integration/*`、`plugin/contract` | 宿主安装器和外部来源 adapter；不拥有核心状态机 |
 | Template / bundle | `template/*`、`bundle/*` | 冷启动默认值和可复现组合；不覆盖用户实例 |
 | SDK | `sdk/`、`python/sdk/` | 明确的跨进程协议边界；不是第二套 runtime |

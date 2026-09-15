@@ -19,11 +19,13 @@ import {
   proposeProfileMigration,
   proposeProfileUpdate,
   proposeProjectInitialize,
+  receiveContextSkillPackage,
   type CodexHookInput,
   type ProfileUpdateInput,
   type ProjectInitializeInput,
 } from '../../../packages/product/application/src/index.js';
 import type {ProjectActivationConfigurationInput, ProjectSourceProfileInput} from '../../../packages/core/instance/src/index.js';
+import {currentCodexSessionId, TraceProductClient, type TraceProductArtifact} from './product-client.js';
 
 function textResult(value: unknown, isError = false) {
   return {content: [{type: 'text' as const, text: JSON.stringify(value, null, 2)}], ...(isError ? {isError: true} : {})};
@@ -36,7 +38,7 @@ function errorResult(error: unknown) {
 
 async function invoke(operation: () => unknown) {
   try {
-    const value = operation();
+    const value = await operation();
     const payload = value && typeof value === 'object' && !Array.isArray(value) ? {ok: true, ...(value as Record<string, unknown>)} : {ok: true, result: value};
     return textResult(payload);
   } catch (error) { return errorResult(error); }
@@ -48,6 +50,7 @@ function optionalHook(project_dir: string | undefined, hooks_file: string | unde
 }
 
 const projectDirectory = {project_dir: z.string().min(1).optional().describe('Existing project directory. Omit to use the host process working directory.')};
+const productProjectDirectory = {project_dir: z.string().min(1).describe('Absolute directory of the current Codex project. This binds a Trace handoff to the project that is actually running.')};
 const sourceMode = z.enum(['local', 'external', 'team', 'empty']);
 const sourceProfile = z.record(z.unknown()).describe('A structured source profile prepared from the user-adopted source selection; it is not shown as CLI JSON to the user.');
 const activationConfiguration = z.object({
@@ -56,7 +59,10 @@ const activationConfiguration = z.object({
 }).describe('A structured configuration prepared from a user-visible semantic proposal.');
 
 export function createTraceMcpServer(): McpServer {
-  const server = new McpServer({name: 'trace', version: '0.1.0'}, {capabilities: {logging: {}}});
+  const server = new McpServer({name: 'trace', version: '0.3.0'}, {
+    capabilities: {logging: {}},
+    instructions: 'Trace can deliver two distinct forms of context into Codex. For the user’s project collaboration/context Skill package, call trace_context_skill_receive with the absolute current project directory; apply it only in the bound task/project and treat source entries as navigation, not read evidence. For a user-confirmed product work handoff, call trace_product_context_receive and later trace_product_result_return after real work completes. Neither flow installs a global Skill or changes the user’s understanding automatically.',
+  });
 
   server.registerTool('trace_project_status', {
     title: 'Trace project status',
@@ -155,6 +161,60 @@ export function createTraceMcpServer(): McpServer {
     description: 'Install Trace-managed Codex hooks after explicit adoption. approval must exactly equal adopt:<proposal_id>. It creates a rollback backup and never persists raw prompt bodies.',
     inputSchema: {...projectDirectory, hooks_file: z.string().min(1).optional(), proposal_id: z.string().min(1), approval: z.string().min(1)},
   }, async ({project_dir, hooks_file, proposal_id, approval}) => invoke(() => applyCodexHookEnable({...optionalHook(project_dir, hooks_file), proposal_id, approval})));
+
+  server.registerTool('trace_context_skill_receive', {
+    title: 'Receive the Trace context Skill package',
+    description: 'Compile this Trace project’s locked collaboration model and cognitive-source map into a bounded, virtual Codex SKILL.md for the current task. The session identity comes from the MCP process environment and cannot be supplied by the model. The call writes a privacy-safe activation receipt, but does not read source bodies, install a global Skill, or update the profile.',
+    inputSchema: productProjectDirectory,
+  }, async ({project_dir}) => invoke(() => receiveContextSkillPackage({project_dir, host_session_id: currentCodexSessionId()})));
+
+  server.registerTool('trace_product_context_receive', {
+    title: 'Receive Trace context in Codex',
+    description: 'Receive one user-confirmed Trace work handoff for this Codex task. The MCP process binds it to the real Codex task/session identity; project_dir must be the current absolute workspace. Returned roles and boundaries are authoritative. This call creates a server-issued delivery receipt but does not change the user understanding.',
+    inputSchema: {...productProjectDirectory, work_id: z.string().min(1).max(512).optional().describe('Specific Trace work ID. Omit only when exactly one work is pending for this project.')},
+  }, async ({project_dir, work_id}) => invoke(async () => {
+    const value = await new TraceProductClient().receive({projectDir: project_dir, ...(work_id === undefined ? {} : {workId: work_id})});
+    return {...value, user_notice: 'Trace 已把这份上下文绑定到当前 Codex 任务；仅按每条 role 用于本次工作，尚未产生工作结果。'};
+  }));
+
+  server.registerTool('trace_product_result_return', {
+    title: 'Return a Codex result to Trace',
+    description: 'Return the actual result of a previously received Trace handoff. Use the delivery_id, context_hash, work_id and matter_id from trace_product_context_receive. Report verified facts separately from interpretation and uncertainty. Trace stores an immutable external return plus a review draft; it never updates the user understanding until the user confirms in Trace.',
+    inputSchema: {
+      ...productProjectDirectory,
+      work_id: z.string().min(1).max(512),
+      delivery_id: z.string().min(1).max(512),
+      context_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      matter_id: z.string().min(1).max(512),
+      fact: z.string().min(1).max(65536).describe('Concrete outcome and verification evidence from the work that actually ran.'),
+      summary: z.string().max(65536).optional(),
+      interpretation: z.string().max(65536).optional(),
+      unconfirmed: z.string().max(65536).optional(),
+      proposed_understanding: z.string().max(65536).optional().describe('Optional candidate only; never present it as an adopted user understanding.'),
+      artifacts: z.array(z.object({
+        title: z.string().min(1).max(1000),
+        kind: z.enum(['file', 'test', 'link', 'note']),
+        path: z.string().max(4096).optional(),
+        url: z.string().max(4096).optional(),
+        digest: z.string().max(512).optional(),
+      }).strict()).max(20).optional(),
+    },
+  }, async input => invoke(async () => {
+    const value = await new TraceProductClient().returnResult({
+      projectDir: input.project_dir,
+      workId: input.work_id,
+      deliveryId: input.delivery_id,
+      contextHash: input.context_hash,
+      matterId: input.matter_id,
+      fact: input.fact,
+      ...(input.summary === undefined ? {} : {summary: input.summary}),
+      ...(input.interpretation === undefined ? {} : {interpretation: input.interpretation}),
+      ...(input.unconfirmed === undefined ? {} : {unconfirmed: input.unconfirmed}),
+      ...(input.proposed_understanding === undefined ? {} : {proposedUnderstanding: input.proposed_understanding}),
+      ...(input.artifacts === undefined ? {} : {artifacts: input.artifacts as TraceProductArtifact[]}),
+    });
+    return {...value, user_notice: 'Codex 的实际结果已回到 Trace 复核区；当前个人理解没有自动改变。'};
+  }));
 
   return server;
 }

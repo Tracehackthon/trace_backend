@@ -1,28 +1,17 @@
-# 产品入口与宿主边界
+# Apps：当前宿主与入口
 
-`apps/` 是 Trace 的产品接触面：用户通过 Codex Plugin 进入，宿主通过 MCP / hooks 接入，未来桌面端可复用同一项目状态。它们不拥有领域规则：协议、版本、状态机和 SQLite 语义全部在 `packages/`，因此不同产品面不会各自形成一套“记忆”。
+此目录既有已运行的服务，也有宿主适配器；不能把目录存在当成全部完成，或把“desktop”误读成已经发行桌面应用。
 
-## 用户应该从哪里开始
+| 目录 | 当前职责 | 入口 |
+| --- | --- | --- |
+| desktop | 本机 HTTP 宿主、产品页面、SQLite 产品状态及领域命令 | [本机 Web](desktop/README.md) |
+| agent | Trace 主动调用 Codex，管理运行、上下文、流式事件与候选 | [Agent 后端](agent/README.md) |
+| mcp | Codex 通过 Plugin 领取项目上下文/工作并回流 | [MCP](mcp/README.md) |
+| codex | 原生 Codex hooks 与项目认知接续适配 | [来源与 evidence](../docs/host-native-retrieval.md) |
+| cli | 自动化、诊断、安装后备与认知账本维护 | [项目使用](../docs/getting-started.md) |
 
-日常 Codex 使用者从 `trace-codex` Plugin 开始，而不是从 CLI 命令列表开始：
+默认本机只需一个服务：仓库根目录 `npm start`；同时开启生成用 `npm start -- --agent`。不是每个 apps 目录都要启动一个进程。
 
-```text
-$trace 帮我开始这个项目，并说明什么会被保存。
-$trace-adapt 我希望你更适配我的协作方式。
-$trace-review 看看有哪些候选正在等我决定。
-```
+**当前产品领域规则仍在 desktop/src/product 中**，并未全部收进 packages。Agent 只读产品版本并写独立运行库；MCP 工作回流经产品 API，而不是直接改数据库。完整分工见[架构](../docs/architecture.md)，后续抽包和交付条件见[生产计划](../docs/production-plan.md)。
 
-Plugin 的 Skill 负责理解意图和解释选择；本地 MCP 负责读取安全摘要、生成 proposal，并且只在用户明确采用后执行变更。完整接入见[Trace Codex Plugin](../docs/codex-plugin.md)。
-
-CLI 仅是恢复、备份、诊断、脚本和无 Plugin 环境的回退入口；它不是面向普通用户的主流程。
-
-## 目录职责
-
-| 目录 | 作用 | 不做什么 |
-|---|---|---|
-| `mcp/` | 标准 stdio MCP server，将 Codex 的自然语言入口接到 application service | 不保存 raw prompt、来源正文、凭证或工具参数；不 shell-out 拼 CLI |
-| `cli/` | 发行包 CLI、运维和兼容入口 | 不定义日常交互产品模型 |
-| `codex/` | 将 Codex hook 事件变成 source lease、预算检查与安全 evidence | 不替 Codex 搜索、读取、推理或决定采纳 |
-| `desktop/` | 未来桌面工作台的明确宿主边界 | 当前没有伪造的 desktop 实现 |
-
-任何新宿主先定义事件、权限、回放与验收契约，再通过 application service / SDK 接入；不得直接读写 core storage。
+原生 Codex 用户从 Plugin 的 `$trace` / `$trace-work` 开始；Web 调用生成 API 不需要安装 Plugin。CLI 不是两类用户的日常必经流程。

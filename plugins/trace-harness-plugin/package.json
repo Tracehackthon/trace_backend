@@ -2,7 +2,7 @@
   "name": "dsh-trace",
   "version": "0.1.0",
   "private": true,
-  "description": "Trace UI V1 standalone client plugin for DeepSeek Harness",
+  "description": "Trace UI V1 for DeepSeek Harness Web and the native desktop overlay",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -32,9 +32,20 @@
     }
   },
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "desktop": "npm run build && electron lib/desktop/main.mjs",
+    "desktop:start": "electron lib/desktop/main.mjs"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "esbuild": "0.25.9"
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "44.3.0",
+    "esbuild": "0.25.9",
+    "typescript": "7.0.2"
   }
 }

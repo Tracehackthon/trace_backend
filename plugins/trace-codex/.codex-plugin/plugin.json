@@ -1,7 +1,7 @@
 {
   "name": "trace-codex",
-  "version": "0.1.0",
-  "description": "Trace collaboration, cognitive-source, review, and version-governance workflow for Codex.",
+  "version": "0.3.0",
+  "description": "Trace context delivery, result return, collaboration, review, and version-governance workflow for Codex.",
   "author": {
     "name": "Tracehackthon",
     "url": "https://github.com/Tracehackthon"
@@ -13,14 +13,16 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Trace for Codex",
-    "shortDescription": "Make Agent collaboration visible, adaptable, and reviewable.",
-    "longDescription": "Trace adds a user-visible lifecycle for project collaboration context, cognitive-source routing, candidate review, and explicit version migration without replacing Codex's native reasoning or retrieval.",
+    "shortDescription": "Bring Trace context into Codex and return reviewable results.",
+    "longDescription": "Trace delivers a locked collaboration/context Skill package and user-confirmed work context into the current Codex task with verifiable receipts, returns actual Codex results to a user review boundary, and supports cognitive-source routing, candidate review, and explicit version migration.",
     "developerName": "Tracehackthon",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "websiteURL": "https://github.com/Tracehackthon/trace_backend",
     "defaultPrompt": [
       "Use $trace to show how this project is configured.",
+      "Use $trace-context to receive my current Trace context Skill package.",
+      "Use $trace-work to receive the Trace context prepared for this Codex task.",
       "Use $trace to help me adapt collaboration to how I work.",
       "Use $trace-review to show what Trace retained and what awaits my decision."
     ],

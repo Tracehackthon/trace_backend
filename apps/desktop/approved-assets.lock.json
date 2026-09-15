@@ -1,0 +1,261 @@
+{
+  "version": 1,
+  "status": "locked-existing-assets",
+  "policy": "Existing approved visual direction only; originals are unchanged. Do not regenerate or update this lock merely to silence a mismatch.",
+  "assets": [
+    {
+      "key": "environment.home",
+      "path": "public/home/environment.png",
+      "source": "artifacts/trace-home-v1-20260914/images/ready/home-environment.png",
+      "sha256": "16BC94CF2D00D7ECFA63FCB635C90067F650B6FA15F6738560C520E0825F1A05",
+      "bytes": 1564971,
+      "license": {
+        "type": "project-generated-provenance-not-OSS-license",
+        "entries": [
+          "artifacts/trace-home-v1-20260914/images/ASSET-NOTES.md",
+          "artifacts/trace-home-v1-20260914/images/manifest.json"
+        ],
+        "note": "保留既有生成来源；不杜撰图片 MIT/OFL 许可，不声称恢复隐藏原始像素。"
+      },
+      "visualReferences": [
+        "manunl/具体页面与视觉实现/桌面端/首页/Trace首页交互状态_v1/01-首页静默总览态.png",
+        "manunl/具体页面与视觉实现/桌面端/首页/Trace首页交互状态_v1/02-气泡唤醒四帧分镜.png",
+        "manunl/具体页面与视觉实现/桌面端/首页/Trace首页交互状态_v1/03-思考接续态.png",
+        "manunl/具体页面与视觉实现/桌面端/首页/Trace首页交互状态_v1/04-思考生长态.png",
+        "manunl/具体页面与视觉实现/桌面端/首页/Trace首页交互状态_v1/05-工作接续态.png",
+        "manunl/具体页面与视觉实现/桌面端/首页/Trace首页交互状态_v1/06-结果回流态.png"
+      ]
+    },
+    {
+      "key": "environment.matters",
+      "path": "public/matters/environment.png",
+      "source": "artifacts/trace-matters-v1-20260915/images/ready/matters-environment.png",
+      "sha256": "185D0FA9FD1DA6C0C16FAD0B22830FAE275B0E9C7BB565A7564A2F2F9D731B89",
+      "bytes": 1943325,
+      "license": {
+        "type": "project-generated-provenance-not-OSS-license",
+        "entries": [
+          "artifacts/trace-matters-v1-20260915/images/ASSET-NOTES.md",
+          "artifacts/trace-matters-v1-20260915/images/manifest.json"
+        ],
+        "note": "保留既有生成来源；不杜撰图片 MIT/OFL 许可，不声称恢复隐藏原始像素。"
+      },
+      "visualReferences": [
+        "manunl/具体页面与视觉实现/桌面端/核心功能页面/Trace在意的事完整交互链路_v1/01-静默总览态.png",
+        "manunl/具体页面与视觉实现/桌面端/核心功能页面/Trace在意的事完整交互链路_v1/02-悬停识别态.png",
+        "manunl/具体页面与视觉实现/桌面端/核心功能页面/Trace在意的事完整交互链路_v1/03-点击进入-气泡生长态.png",
+        "manunl/具体页面与视觉实现/桌面端/核心功能页面/Trace在意的事完整交互链路_v1/04-重新进入面.png",
+        "manunl/具体页面与视觉实现/桌面端/核心功能页面/Trace在意的事完整交互链路_v1/05-新的对照-深度继续态.png",
+        "manunl/具体页面与视觉实现/桌面端/核心功能页面/Trace在意的事完整交互链路_v1/06-搜索精确找回态.png",
+        "manunl/具体页面与视觉实现/桌面端/核心功能页面/Trace在意的事完整交互链路_v1/07-变化折回总览态.png"
+      ]
+    },
+    {
+      "key": "environment.chain.inner",
+      "path": "public/product/chain-environment.png",
+      "source": "artifacts/trace-one-thing-v1-20260915/images/ready/chain-environment.png",
+      "sha256": "49A39B936545E0AC5AA65B4CA8E5D998A392728E5D6EB72033F68185ADB6ED13",
+      "bytes": 1387038,
+      "license": {
+        "type": "project-generated-provenance-not-OSS-license",
+        "entries": [
+          "artifacts/trace-one-thing-v1-20260915/images/ASSET-NOTES.md",
+          "artifacts/trace-one-thing-v1-20260915/images/manifest.json"
+        ],
+        "note": "保留既有生成来源；不杜撰图片 MIT/OFL 许可，不声称恢复隐藏原始像素。"
+      },
+      "visualReferences": [
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/01-阅读现场-留下一点.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/02-气泡展开-接着这里.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/03-围绕一处-展开讨论.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/04-找个对照-接回具体位置.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/05-我的理解-局部编辑与建议.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/06-先放这里-收起后留下停点.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/07-重新拿起-带着新材料回来.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/08-带去用-确认这次怎么参与.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/09-原生工作旁-参考与新增发现.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/10-结果回来-比较并修正理解.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/11-修订落回-从新理解继续.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/图片校验.json",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/生图提示词与来源.json",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/看图说明.md"
+      ]
+    },
+    {
+      "key": "environment.chain.overview",
+      "path": "public/product/chain-overview-environment.png",
+      "source": "artifacts/trace-one-thing-v1-20260915/images/ready/chain-overview-environment.png",
+      "sha256": "A4DDA0E97BF3FFEF2D87D48BE07C272E6C69633A236B07676A92A4DC755C6875",
+      "bytes": 1719534,
+      "license": {
+        "type": "project-generated-provenance-not-OSS-license",
+        "entries": [
+          "artifacts/trace-one-thing-v1-20260915/images/ASSET-NOTES.md",
+          "artifacts/trace-one-thing-v1-20260915/images/manifest.json"
+        ],
+        "note": "保留既有生成来源；不杜撰图片 MIT/OFL 许可，不声称恢复隐藏原始像素。"
+      },
+      "visualReferences": [
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/01-阅读现场-留下一点.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/02-气泡展开-接着这里.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/03-围绕一处-展开讨论.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/04-找个对照-接回具体位置.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/05-我的理解-局部编辑与建议.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/06-先放这里-收起后留下停点.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/07-重新拿起-带着新材料回来.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/08-带去用-确认这次怎么参与.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/09-原生工作旁-参考与新增发现.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/10-结果回来-比较并修正理解.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/11-修订落回-从新理解继续.png",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/图片校验.json",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/生图提示词与来源.json",
+        "manunl/具体页面与视觉实现/桌面端/一件事完整交互链路/Trace一件事连续页面_v1/看图说明.md"
+      ]
+    },
+    {
+      "key": "environment.worksite",
+      "path": "public/product/worksite-environment.png",
+      "source": "artifacts/trace-worksite-v1-20260915/images/ready/worksite-environment.png",
+      "sha256": "2463A5F88546A19621FEE22F95279F7BD6523734301C1AAA92DF614BE13B24E5",
+      "bytes": 1406696,
+      "license": {
+        "type": "project-generated-provenance-not-OSS-license",
+        "entries": [
+          "artifacts/trace-worksite-v1-20260915/images/ASSET-NOTES.md",
+          "artifacts/trace-worksite-v1-20260915/images/manifest.json"
+        ],
+        "note": "保留既有生成来源；不杜撰图片 MIT/OFL 许可，不声称恢复隐藏原始像素。"
+      },
+      "visualReferences": [
+        "manunl/具体页面与视觉实现/桌面端/工作现场完整交互链路/Trace工作现场_UI状态_v1/01-工作总览态.png",
+        "manunl/具体页面与视觉实现/桌面端/工作现场完整交互链路/Trace工作现场_UI状态_v1/02-带入展开态.png",
+        "manunl/具体页面与视觉实现/桌面端/工作现场完整交互链路/Trace工作现场_UI状态_v1/03-影响追溯态.png",
+        "manunl/具体页面与视觉实现/桌面端/工作现场完整交互链路/Trace工作现场_UI状态_v1/04-发现展开态.png",
+        "manunl/具体页面与视觉实现/桌面端/工作现场完整交互链路/Trace工作现场_UI状态_v1/05-结果比较态.png",
+        "manunl/具体页面与视觉实现/桌面端/工作现场完整交互链路/Trace工作现场_UI状态_v1/README.md",
+        "manunl/具体页面与视觉实现/桌面端/工作现场完整交互链路/Trace工作现场_UI状态_v1/生图提示词.json",
+        "manunl/具体页面与视觉实现/桌面端/工作现场完整交互链路/Trace工作现场_UI状态_v1/资源清单.json"
+      ]
+    },
+    {
+      "key": "environment.compare",
+      "path": "public/product/compare-environment.png",
+      "source": "artifacts/trace-compare-v1-20260915/images/ready/compare-environment.png",
+      "sha256": "23217AF8B9CAD4A4FF3C0A1CE99E89ED7D26E24E79BD1D9DAE81155166859185",
+      "bytes": 1247365,
+      "license": {
+        "type": "project-generated-provenance-not-OSS-license",
+        "entries": [
+          "artifacts/trace-compare-v1-20260915/images/ASSET-NOTES.md",
+          "artifacts/trace-compare-v1-20260915/images/manifest.json"
+        ],
+        "note": "保留既有生成来源；不杜撰图片 MIT/OFL 许可，不声称恢复隐藏原始像素。"
+      },
+      "visualReferences": [
+        "manunl/具体页面与视觉实现/桌面端/找个对照完整交互链路/Trace找个对照_UI链路_v1/01-从这一处找.png",
+        "manunl/具体页面与视觉实现/桌面端/找个对照完整交互链路/Trace找个对照_UI链路_v1/02-发现候选.png",
+        "manunl/具体页面与视觉实现/桌面端/找个对照完整交互链路/Trace找个对照_UI链路_v1/03-放在一起看.png",
+        "manunl/具体页面与视觉实现/桌面端/找个对照完整交互链路/Trace找个对照_UI链路_v1/04-接回原处.png",
+        "manunl/具体页面与视觉实现/桌面端/找个对照完整交互链路/Trace找个对照_UI链路_v1/generation-prompts.json"
+      ]
+    },
+    {
+      "key": "bird.perched",
+      "path": "public/home/bird-perched.png",
+      "source": "artifacts/trace-home-v1-20260914/images/repaired/bird-perched.png",
+      "sha256": "81DE590D9C88D27AD73BE569385D8B1D6999F08FC269912B4B97B5D403B4EFEC",
+      "bytes": 428617,
+      "license": {
+        "type": "project-generated-authorized-repair-provenance-not-OSS-license",
+        "entries": [
+          "artifacts/trace-home-v1-20260914/images/ASSET-NOTES.md",
+          "artifacts/trace-home-v1-20260914/images/repaired/repair-manifest.json"
+        ],
+        "note": "两静态姿态不是自然振翅；高倍下 1–2 源像素羽缘有修复估计。"
+      },
+      "visualReferences": []
+    },
+    {
+      "key": "bird.takeoff",
+      "path": "public/home/bird-takeoff.png",
+      "source": "artifacts/trace-home-v1-20260914/images/repaired/bird-takeoff.png",
+      "sha256": "9BCE1F159D48AB6A8D3230ACA3F41FD4C4A114A064F59DFCC4B62F05EFA7ED93",
+      "bytes": 858034,
+      "license": {
+        "type": "project-generated-authorized-repair-provenance-not-OSS-license",
+        "entries": [
+          "artifacts/trace-home-v1-20260914/images/ASSET-NOTES.md",
+          "artifacts/trace-home-v1-20260914/images/repaired/repair-manifest.json"
+        ],
+        "note": "两静态姿态不是自然振翅；高倍下 1–2 源像素羽缘有修复估计。"
+      },
+      "visualReferences": []
+    },
+    {
+      "key": "font.original.serif",
+      "path": "public/product/fonts/TraceSerif.woff2",
+      "source": "artifacts/trace-home-v1-20260914/fonts/originals/source-han-serif-cn/SourceHanSerifCN-VF.ttf.woff2",
+      "sha256": "556749BA783B148FA1F48644E8883E5B9351F01ABD0D1FAAD0BA24A21185E76A",
+      "bytes": 11035128,
+      "license": {
+        "type": "OFL-1.1",
+        "entries": [
+          "artifacts/trace-home-v1-20260914/fonts/originals/source-han-serif-cn/LICENSE.txt",
+          "artifacts/trace-home-v1-20260914/fonts/FONT-USAGE.md"
+        ],
+        "reservedFontNames": [
+          "Source"
+        ]
+      },
+      "visualReferences": []
+    },
+    {
+      "key": "font.original.sans",
+      "path": "public/product/fonts/TraceSans.ttf",
+      "source": "artifacts/trace-home-v1-20260914/fonts/originals/noto-sans-sc/NotoSansSC[wght].ttf",
+      "sha256": "A3041811A78C361B1DE50F953C805E0244951C21C5BD412F7232EF0D899AF0DA",
+      "bytes": 17772300,
+      "license": {
+        "type": "OFL-1.1",
+        "entries": [
+          "artifacts/trace-home-v1-20260914/fonts/originals/noto-sans-sc/OFL.txt",
+          "artifacts/trace-home-v1-20260914/fonts/FONT-USAGE.md"
+        ],
+        "reservedFontNames": [
+          "Source"
+        ]
+      },
+      "visualReferences": []
+    },
+    {
+      "key": "animation.anime",
+      "path": "src/vendor/anime.esm.js",
+      "source": "artifacts/trace-home-v1-20260914/components/originals/animejs/dist/bundles/anime.esm.min.js",
+      "sha256": "A19015A1A92D52025A2FB6703B6D67EADD1CC2AEAF880770E96E04CF6AA07BE1",
+      "bytes": 118678,
+      "license": {
+        "type": "MIT",
+        "entries": [
+          "artifacts/trace-home-v1-20260914/components/originals/animejs/LICENSE.md",
+          "artifacts/trace-home-v1-20260914/components/INTEGRATION.md"
+        ]
+      },
+      "visualReferences": []
+    },
+    {
+      "key": "material.glass-shape",
+      "path": "src/vendor/shape-only.mjs",
+      "source": "artifacts/trace-home-v1-20260914/components/derived/liquidglassjs/shape-only.mjs",
+      "sha256": "30CE49881E35EC8ED8E4235CE6934A19F56761069E072DA11E77C9B6191E6D22",
+      "bytes": 17644,
+      "license": {
+        "type": "MIT",
+        "entries": [
+          "artifacts/trace-home-v1-20260914/components/derived/liquidglassjs/LICENSE",
+          "artifacts/trace-home-v1-20260914/components/INTEGRATION.md"
+        ]
+      },
+      "visualReferences": []
+    }
+  ]
+}

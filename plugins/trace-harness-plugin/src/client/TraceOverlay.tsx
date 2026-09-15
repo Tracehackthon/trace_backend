@@ -23,6 +23,11 @@ const panelInset = 16
 type Viewport = { width: number; height: number }
 type PetPosition = { x: number; y: number }
 type TraceReminder = { observationId: string; text: string }
+type DesktopCandidatePayload = { type?: string; observationId?: string; status?: ObservationStatus }
+type TraceNativeBridge = {
+  openDiscussion?: (url: string) => void
+  onCandidate?: (listener: (payload: DesktopCandidatePayload) => void) => (() => void) | undefined
+}
 type OrbitItem =
   | { id: string; kind: 'observation'; observation: Observation }
   | { id: string; kind: 'guide' | 'capture'; kicker: string; title: string; detail: string; tone: string; action: 'capture' | 'focus-first' }
@@ -33,6 +38,10 @@ const reminderTemplates = [
   { observationId: 'decision-card-handoff', suffix: '需要回顾，要补一条反例吗？' },
   { observationId: 'evidence-traceability', suffix: '也许值得带一条证据继续讨论。' },
 ]
+
+function getTraceNativeBridge() {
+  return (window as Window & { traceNative?: TraceNativeBridge }).traceNative
+}
 
 function getViewport(): Viewport {
   if (typeof window === 'undefined') return { width: 1280, height: 720 }
@@ -150,8 +159,8 @@ export function TraceOverlay() {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; origin: PetPosition; moved: boolean } | null>(null)
   const panelDragRef = useRef<{ pointerId: number; startX: number; startY: number; origin: PetPosition } | null>(null)
   const suppressClickRef = useRef(false)
-  const petClickTimerRef = useRef<number | undefined>()
-  const hugTimerRef = useRef<number | undefined>()
+  const petClickTimerRef = useRef<number | undefined>(undefined)
+  const hugTimerRef = useRef<number | undefined>(undefined)
   const lastReminderIndexRef = useRef(-1)
 
   useEffect(() => {
@@ -189,25 +198,34 @@ export function TraceOverlay() {
   }, [])
 
   useEffect(() => {
-    const receiveDesktopCandidate = (event: MessageEvent) => {
-      if (event.origin !== 'http://127.0.0.1:4173') return
-      const payload = event.data as { type?: string; observationId?: string; status?: ObservationStatus }
+    const receiveCandidate = (payload: DesktopCandidatePayload) => {
       if (payload.type !== 'trace.desktop.candidate' || !payload.observationId || !payload.status) return
-      if (payload.status !== '候选中' && payload.status !== '待确认') return
+      const nextStatus = payload.status
+      if (nextStatus !== '候选中' && nextStatus !== '待确认') return
 
       traceSessionStore.observations = traceSessionStore.observations.map((observation) => (
-        observation.id === payload.observationId ? { ...observation, status: payload.status } : observation
+        observation.id === payload.observationId ? { ...observation, status: nextStatus } : observation
       ))
-      traceSessionStore.candidateStatus = payload.status === '候选中' ? '候选中' : traceSessionStore.candidateStatus
+      traceSessionStore.candidateStatus = nextStatus === '候选中' ? '候选中' : traceSessionStore.candidateStatus
       setObservations(traceSessionStore.observations)
       setCandidateStatus(traceSessionStore.candidateStatus)
       setFocusedObservationId(payload.observationId)
-      setDiscussionNotice(payload.status === '候选中'
+      setDiscussionNotice(nextStatus === '候选中'
         ? '桌面端已将这条观察标记为候选中。'
         : '桌面端已撤回候选，这条观察回到待确认。')
     }
+
+    const receiveDesktopCandidate = (event: MessageEvent) => {
+      if (event.origin !== 'http://127.0.0.1:4173') return
+      receiveCandidate(event.data as DesktopCandidatePayload)
+    }
+
     window.addEventListener('message', receiveDesktopCandidate)
-    return () => window.removeEventListener('message', receiveDesktopCandidate)
+    const removeNativeListener = getTraceNativeBridge()?.onCandidate?.(receiveCandidate)
+    return () => {
+      window.removeEventListener('message', receiveDesktopCandidate)
+      removeNativeListener?.()
+    }
   }, [])
 
   const currentPetPosition = petPosition ?? getDefaultPetPosition(viewport)
@@ -263,6 +281,15 @@ export function TraceOverlay() {
     desktopUrl.searchParams.set('text', observation.text)
     desktopUrl.searchParams.set('status', observation.status)
     desktopUrl.searchParams.set('source', observation.source ?? 'Trace 历史观察')
+
+    const nativeBridge = getTraceNativeBridge()
+    if (nativeBridge?.openDiscussion) {
+      desktopUrl.searchParams.set('from', 'trace-native')
+      nativeBridge.openDiscussion(desktopUrl.toString())
+      setDiscussionNotice('正在打开原生 Trace 深度讨论窗口。')
+      return
+    }
+
     window.open(desktopUrl.toString(), 'trace-desktop-agent', 'popup,width=1440,height=900')
     setDiscussionNotice('正在打开 Trace 桌面 Agent；如果页面未加载，请先启动 desktop 开发服务。')
   }
@@ -451,35 +478,35 @@ export function TraceOverlay() {
         <div className="trace-orbit-stage" aria-label="Trace 历史观察卡片">
           {orbitItems.map((item, index) => {
             const position = orbitPositions[index]
-            const observation = item.kind === 'observation' ? item.observation : undefined
             const brightnessClass = item.kind === 'observation'
-              ? observation?.isNew || (observation.id === candidateJudgement.linkedObservationId && candidateStatus === '候选中')
+              ? item.observation.isNew || (item.observation.id === candidateJudgement.linkedObservationId && candidateStatus === '候选中')
                 ? 'trace-orbit-item-level-2'
                 : 'trace-orbit-item-level-3'
               : 'trace-orbit-item-level-1'
             const toneClass = item.kind === 'observation'
-              ? observation?.isNew ? 'trace-orbit-item-new' : 'trace-orbit-item-existing'
+              ? item.observation.isNew ? 'trace-orbit-item-new' : 'trace-orbit-item-existing'
               : `trace-orbit-item-${item.tone}`
+            const orbitStyle = {
+              '--trace-orbit-x': `${position.x}px`,
+              '--trace-orbit-y': `${position.y}px`,
+              '--trace-orbit-rotate': `${position.rotate}deg`,
+              '--trace-orbit-delay': `${index * 40}ms`,
+              '--trace-collapse-delay': `${(orbitItems.length - index - 1) * 40}ms`,
+            } as CSSProperties
             return (
               <button
                 className={`trace-orbit-item ${brightnessClass} ${toneClass}`}
                 key={item.id}
                 type="button"
-                style={{
-                  '--trace-orbit-x': `${position.x}px`,
-                  '--trace-orbit-y': `${position.y}px`,
-                  '--trace-orbit-rotate': `${position.rotate}deg`,
-                  '--trace-orbit-delay': `${index * 40}ms`,
-                  '--trace-collapse-delay': `${(orbitItems.length - index - 1) * 40}ms`,
-                }}
+                style={orbitStyle}
                 onClick={() => handleOrbitItem(item)}
-                aria-label={observation ? `打开观察：${observation.text}` : item.title}
+                aria-label={item.kind === 'observation' ? `打开观察：${item.observation.text}` : item.title}
               >
-                {observation?.isNew && <span className="trace-new-orb-label">新想法</span>}
+                {item.kind === 'observation' && item.observation.isNew && <span className="trace-new-orb-label">新想法</span>}
                 <span className="trace-memory-card-body">
-                  <span className="trace-memory-card-status">{observation ? observation.status : item.kicker}</span>
-                  <strong>{observation ? observation.text : item.title}</strong>
-                  <small>{observation ? observation.source ? `来源 ${observation.source}` : `置信度 ${observation.confidence}%` : item.detail}</small>
+                  <span className="trace-memory-card-status">{item.kind === 'observation' ? item.observation.status : item.kicker}</span>
+                  <strong>{item.kind === 'observation' ? item.observation.text : item.title}</strong>
+                  <small>{item.kind === 'observation' ? item.observation.source ? `来源 ${item.observation.source}` : `置信度 ${item.observation.confidence}%` : item.detail}</small>
                 </span>
               </button>
             )

@@ -40,6 +40,8 @@ importers:
         specifier: catalog:devTools
         version: 7.0.2
 
+  apps/agent: {}
+
   apps/cli:
     dependencies:
       '@trace/codex-adapter':
@@ -315,6 +317,9 @@ importers:
       '@trace/collaboration-context':
         specifier: workspace:*
         version: link:../../core/collaboration-context
+      '@trace/context':
+        specifier: workspace:*
+        version: link:../../core/context
       '@trace/host-codex-hooks':
         specifier: workspace:*
         version: link:../../host/codex-hooks

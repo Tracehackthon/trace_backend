@@ -24,7 +24,8 @@ import {
   type ProjectSourceMode,
   type ProjectSourceProfileInput,
 } from '../../../core/instance/src/index.js';
-import {validateCollaborationModel, validateSourceActivationManifest} from '../../../core/collaboration-context/src/index.js';
+import {compileCollaborationContext, validateCollaborationModel, validateSourceActivationManifest} from '../../../core/collaboration-context/src/index.js';
+import {buildContextSkillPackage, type ContextSkillPackage} from '../../../core/context/src/index.js';
 import {SELECTABLE_TEMPLATES} from '../../../template/catalog/src/index.js';
 import {validateTemplateManifest} from '../../../template/contract/src/index.js';
 import {CodexHookInstaller, type CodexHookPreview} from '../../../host/codex-hooks/src/index.js';
@@ -59,6 +60,26 @@ export interface ProfileUpdateInput {
 }
 
 export interface CodexHookInput {project_dir?: string; hooks_file?: string;}
+
+export interface ContextSkillReceiveInput {
+  project_dir: string;
+  host_session_id: string;
+}
+
+export interface ContextSkillReceiveResult {
+  package: ContextSkillPackage;
+  receipt: {
+    receipt_id: string;
+    status: 'received';
+    session_id: string;
+    project_id: string;
+    package_id: string;
+    content_sha256: string;
+    activated_refs: string[];
+    not_persisted: string[];
+  };
+  user_notice: string;
+}
 
 type JsonRecord = Record<string, unknown>;
 
@@ -169,6 +190,97 @@ function configurationSummary(context: ProductProjectContext) {
       entry_point_count: activation.source_activation.entry_points.length,
     },
   };
+}
+
+function availableSourceProfile(context: ProductProjectContext): boolean {
+  const profile = context.source_profile;
+  if (context.descriptor.source_mode === 'empty' || profile.read_enabled === false || profile.host_retrieval?.mode === 'disabled') return false;
+  try {
+    const root = path.resolve(profile.root);
+    const prefixes = profile.host_retrieval?.allowed_prefixes ?? [profile.formal_prefix ?? 'wiki'];
+    if (prefixes.length === 0 || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) return false;
+    return prefixes.every(prefix => {
+      const candidate = path.resolve(root, prefix);
+      const relative = path.relative(root, candidate);
+      return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative)
+        && fs.existsSync(candidate) && fs.statSync(candidate).isDirectory();
+    });
+  } catch { return false; }
+}
+
+/**
+ * Materialize the locked collaboration profile as a virtual Codex Skill.
+ * Only the activation receipt is durable; no generated Skill is installed in
+ * the user's global discovery directory and no source body/root is returned.
+ */
+export function receiveContextSkillPackage(input: ContextSkillReceiveInput): ContextSkillReceiveResult {
+  if (!path.isAbsolute(input.project_dir)) throw new ProtocolError('INVALID_INPUT', 'project_dir must be absolute when binding a context Skill package to Codex');
+  if (!input.host_session_id || input.host_session_id.length > 512 || /[\x00-\x1f\x7f]/.test(input.host_session_id)) throw new ProtocolError('INVALID_INPUT', 'host_session_id must be a usable Codex task/session identity');
+  const context = requireTraceProject(input.project_dir);
+  const activation = activationFor(context);
+  if (activation.configuration_state !== 'locked' || activation.activation_lock === undefined) {
+    throw new ProtocolError('PROFILE_MIGRATION_REQUIRED', 'This Trace project has no locked collaboration profile. Review and adopt the profile migration before receiving a context Skill package.');
+  }
+  if (!fs.existsSync(context.state_file)) throw new ProtocolError('STATE_UNAVAILABLE', 'The Trace project state database is unavailable; no context receipt was written.');
+
+  const sourceAvailable = availableSourceProfile(context);
+  const compiled = compileCollaborationContext({
+    model: activation.collaboration_model,
+    source: activation.source_activation,
+    source_available: sourceAvailable,
+  });
+  const contextPackage = buildContextSkillPackage({
+    host_session_id: input.host_session_id,
+    project: {project_id: context.descriptor.project_id, project_label: path.basename(context.project_dir) || context.descriptor.project_id},
+    instructions: compiled.developer_context,
+    activation_lock: {lock_id: activation.activation_lock.lock_id, version: activation.activation_lock.version},
+    collaboration_model: compiled.collaboration_model,
+    source_activation: {...compiled.source_activation, available: sourceAvailable},
+  });
+
+  const threadId = `context-skill-${sha256(`${context.descriptor.project_id}:${input.host_session_id}:${contextPackage.package_id}`).slice(0, 32)}`;
+  const correlationId = `codex-context-skill:${sha256(`${context.descriptor.project_id}:${input.host_session_id}`).slice(0, 32)}`;
+  const activatedRefs = [
+    `${contextPackage.package_id}@${contextPackage.content_sha256}`,
+    `collaboration-model:${compiled.collaboration_model.model_id}@${compiled.collaboration_model.version}#${compiled.collaboration_model.sha256}`,
+    `source-activation:${compiled.source_activation.manifest_id}@${compiled.source_activation.version}#${compiled.source_activation.sha256}`,
+  ];
+  const notPersisted = ['generated SKILL.md body', 'raw cognitive-source bodies', 'absolute cognitive-source root', 'raw prompts', 'credentials', 'tool arguments'];
+  const runtime = new TraceRuntime({sqliteStateFile: context.state_file});
+  try {
+    runtime.createThread({
+      thread_id: threadId,
+      title: 'Codex context Skill package receipt',
+      current_summary: `A locked Trace context package was prepared for project ${context.descriptor.project_id}.`,
+      next_action: 'Apply the package only in its bound Codex task and project.',
+      correlation_id: correlationId,
+      causation_id: `context-skill-thread:${contextPackage.package_id}`,
+    });
+    const receipt = runtime.createReceipt({
+      thread_id: threadId,
+      receipt_kind: 'activation',
+      summary: 'Codex received the project’s locked collaboration context as a virtual Skill package.',
+      activated_refs: activatedRefs,
+      not_persisted: notPersisted,
+      next_prompts: ['Use this package for the current task', 'Read a listed cognitive-source entry only when the current work makes it relevant'],
+      correlation_id: correlationId,
+      causation_id: `context-skill-receipt:${contextPackage.package_id}`,
+    });
+    return {
+      package: contextPackage,
+      receipt: {
+        receipt_id: receipt.record_id,
+        status: 'received',
+        session_id: contextPackage.session_binding.session_id,
+        project_id: contextPackage.scope.project_id,
+        package_id: contextPackage.package_id,
+        content_sha256: contextPackage.content_sha256,
+        activated_refs: activatedRefs,
+        not_persisted: notPersisted,
+      },
+      user_notice: 'Trace 已把当前项目锁定的协作上下文作为动态 Skill 包交给本次 Codex 任务；来源入口只是导航，尚不表示任何页面已读取，也没有安装或覆盖全局 Skill。',
+    };
+  } finally { runtime.close(); }
 }
 function installationView(context: ProductProjectContext) {
   const lockFile = path.join(context.trace_dir, 'instance', 'trace.lock.json');

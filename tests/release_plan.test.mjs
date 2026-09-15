@@ -18,8 +18,9 @@ test('release-plan audit separates a pending workspace plan from the private pro
   assert.equal(report.requires_explicit_product_release_decision, true);
   if (report.workspace_plan_resolution.available) {
     assert.equal(report.pending_workspace_plan.patch.length, 9, 'resolved plan includes internal dependent patch releases');
-    assert.equal(report.pending_workspace_plan.minor.length, 18, 'the source-lock hardening changeset adds the independently versioned instance package to the pending minor plan');
+    assert.equal(report.pending_workspace_plan.minor.length, 19, 'source-lock hardening and the context Skill protocol add their independently versioned packages to the pending minor plan');
     assert.equal(report.pending_workspace_plan.minor.includes('@trace/instance'), true);
+    assert.equal(report.pending_workspace_plan.minor.includes('@trace/context'), true);
   } else {
     assert.match(report.workspace_plan_resolution.message, /declared changesets only/);
     assert.equal(report.pending_workspace_plan.patch.length, 2, 'the dependency-free source checkout retains the declared plan');

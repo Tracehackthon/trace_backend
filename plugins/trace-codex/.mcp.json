@@ -5,6 +5,9 @@
       "args": ["./scripts/launch-trace-mcp.mjs"],
       "cwd": ".",
       "enabled": true,
+      "env": {
+        "TRACE_PRODUCT_URL": "http://127.0.0.1:4173"
+      },
       "startup_timeout_sec": 15,
       "tool_timeout_sec": 30
     }

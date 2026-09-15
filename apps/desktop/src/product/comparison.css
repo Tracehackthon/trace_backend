@@ -1,0 +1,335 @@
+/* All selectors are scoped to the host-owned root. No body or :root changes. */
+.compare-root{--compare-ink:#101b23;--compare-muted:#516676;--compare-green:#005b49;--compare-line:#cfe0e4;--compare-mist:#eff8f5;--compare-amber:#efb24d;position:relative;width:100%;height:100%;min-height:520px;overflow:hidden;background-color:#f9fdfc;background-size:cover;background-position:center;color:var(--compare-ink);font-family:'Trace Compare Sans','Microsoft YaHei UI','PingFang SC',sans-serif;font-size:22px;line-height:1.5;isolation:isolate;-webkit-font-smoothing:antialiased}
+.compare-root *,.compare-root *::before,.compare-root *::after{box-sizing:border-box}
+.compare-root [hidden]{display:none!important}
+.compare-root button,.compare-root input,.compare-root textarea,.compare-root select{font:inherit;color:inherit}
+.compare-root button{cursor:pointer}
+.compare-root button:disabled{cursor:default;opacity:.48}
+.compare-root :is(button,input,textarea,select,summary):focus-visible{outline:3px solid #358e7d;outline-offset:4px}
+.compare-root h1,.compare-root h2,.compare-root h3,.compare-root p,.compare-root blockquote{margin:0}
+.compare-root h1,.compare-root h2,.compare-root h3{font-family:'Trace Compare Sans','Microsoft YaHei UI','PingFang SC',sans-serif;font-weight:700}
+.compare-root .compare-icon{width:25px;height:25px;flex-shrink:0;vertical-align:middle}
+.compare-root .compare-sr{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden;white-space:nowrap}
+.compare-root .compare-scene{position:absolute;width:1672px;height:941px;left:50%;top:50%;transform:translate(-50%,-50%) scale(var(--compare-scale,1));transform-origin:center;overflow:visible}
+.compare-root .compare-header{position:absolute;inset:22px 29px auto;display:flex;align-items:center;gap:27px;height:48px;z-index:5}
+.compare-root .compare-brand{display:flex;align-items:center;gap:13px;flex:none;color:#070e13;font-size:32px;letter-spacing:-.8px}
+.compare-root .compare-brand>span{display:grid;place-items:center;width:45px;height:45px;background:linear-gradient(135deg,#057059,#00523f);border-radius:12px;color:#fff;box-shadow:inset 0 0 0 1px #ffffff35}
+.compare-root .compare-brand svg{width:31px;height:31px}
+.compare-root .compare-brand strong{font-family:Arial,sans-serif;font-weight:650}
+.compare-root .compare-header nav{display:flex;align-items:center;gap:15px;min-width:0;padding-left:27px;border-left:1px solid #aebeca;color:#42586a;font-size:18px}
+.compare-root .compare-header nav span,.compare-root .compare-header nav strong{max-width:510px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:450}
+.compare-root .compare-header nav strong{color:var(--compare-ink)}
+.compare-root .compare-header nav i{font-style:normal;color:#95a6b1}
+.compare-root .compare-button{display:inline-flex;align-items:center;justify-content:center;gap:12px;padding:11px 24px;min-height:48px;border:1px solid var(--compare-line);border-radius:28px;background:linear-gradient(140deg,#ffffffbd,#f7fbfbcd);color:var(--compare-ink);white-space:nowrap;line-height:1.35;font-size:20px;font-weight:450;transition:background .18s,border-color .18s,box-shadow .18s}
+.compare-root .compare-button:hover:not(:disabled){background:#eef8f4;border-color:#9fc8be}
+.compare-root .compare-button.compare-primary{background:linear-gradient(130deg,#086b55,#005440 80%);color:#fff;border-color:#006451;box-shadow:inset 0 1px 2px #ffffff24;font-weight:550}
+.compare-root .compare-button.compare-primary:hover:not(:disabled){background:#00715a;box-shadow:0 3px 12px #005e4824}
+.compare-root .compare-button.compare-text-button{border-color:transparent;background:none;padding:6px 10px;border-radius:9px;color:#244b5d}
+.compare-root .compare-button.compare-link-button{border-color:transparent;background:none;color:#004386;text-decoration:underline;text-underline-offset:5px}
+.compare-root .compare-button.compare-quiet{background:#f5f8f9;border-radius:17px;font-size:18px;color:#4f6270;border:1px solid #e2ecef;padding:10px 19px}
+.compare-root .compare-top-return{margin-left:auto;font-size:19px;min-height:45px;padding:9px 28px}
+.compare-root .compare-top-return .compare-icon{width:20px;height:20px}
+.compare-root .compare-demo{position:absolute;right:12px;top:58px;color:#81919e;font-size:17px}
+.compare-root .compare-profile{position:absolute;z-index:4;bottom:29px;left:30px;display:grid;place-items:center;width:47px;height:47px;padding:0;border:2px solid white;border-radius:50%;background:linear-gradient(#e8f3f0,#cae1dc);color:#34766a;box-shadow:0 1px 6px #46625a0d;cursor:pointer}
+.compare-root .compare-profile .compare-icon{width:31px;height:31px}
+.compare-root .compare-main{position:absolute;inset:0;z-index:1}
+.compare-root .compare-heading{position:absolute;left:200px;right:200px;top:95px;text-align:center}
+.compare-root .compare-heading h1{font-size:62px;line-height:1.3;letter-spacing:.5px;color:#060c10}
+.compare-root .compare-heading>p{font-size:26px;color:#51606d;line-height:1.45;margin-top:7px}
+.compare-root .compare-heading-small{top:85px}
+.compare-root .compare-heading-small h1{font-size:60px}
+.compare-root .compare-heading-small>p{font-size:21px;margin-top:3px}
+.compare-root .compare-paper{position:absolute;background:linear-gradient(125deg,#ffffffed,#fbfefef0);border:1px solid #c9e2e7;border-radius:42px;box-shadow:0 17px 40px #33736505;isolation:isolate}
+.compare-root .compare-glass{position:absolute;inset:0;z-index:-1;pointer-events:none}
+.compare-root .compare-kicker{font-size:20px;color:#075e51;font-weight:500}
+.compare-root .compare-anchor{position:absolute;left:51px;top:309px;width:495px;height:269px;display:flex;align-items:center;isolation:isolate;border:1px solid #e7f6f1;border-radius:43% 39% 42% 36% / 39% 49% 50% 48%;background:#ffffffaa;box-shadow:inset 5px 5px 13px #ffffffb0,0 8px 22px #d1eee130}
+.compare-root .compare-anchor-copy{padding:37px 45px 30px;max-height:251px;overflow:auto;scrollbar-width:thin}
+.compare-root .compare-anchor .compare-kicker{margin:0 0 24px 10px}
+.compare-root .compare-anchor blockquote{font-family:'Trace Compare Serif','Songti SC',SimSun,serif;font-size:30px;font-weight:600;line-height:1.53;overflow-wrap:anywhere}
+.compare-root mark{color:inherit;background:#ffebbb;border-radius:5px;padding:0 3px}
+.compare-root .compare-before s{text-decoration-thickness:1px;text-decoration-color:#6b7e8b}
+.compare-root .compare-threads{position:absolute;inset:0;width:1672px;height:941px;pointer-events:none;overflow:visible;z-index:2}
+.compare-root .compare-threads path{fill:none;stroke:#227963;stroke-width:1.2}
+.compare-root .compare-threads circle{fill:#19715e;stroke:#fff;stroke-width:4;filter:drop-shadow(0 0 4px #bde1d7)}
+.compare-root .compare-threads .compare-amber-thread{stroke:#b9984b}
+.compare-root .compare-threads .compare-amber-node{fill:#edaa45}
+.compare-root .compare-bird{position:absolute;object-fit:contain;pointer-events:none;z-index:3}
+.compare-root .compare-search-bird{width:48px;left:654px;top:306px;transform:rotate(-8deg)}
+.compare-root .compare-candidates-bird{width:73px;left:105px;top:300px}
+.compare-root .compare-reading-bird{width:55px;left:787px;top:282px}
+.compare-root .compare-search-form{left:714px;top:257px;width:900px;height:549px;padding:34px 46px 28px;overflow:visible}
+.compare-root .compare-search-form h2{font-size:29px;margin-bottom:11px}
+.compare-root input,.compare-root textarea,.compare-root select{min-width:0;border:1px solid #cbdce4;border-radius:15px;background:#ffffffb8;outline:none;padding:16px 19px;line-height:1.5;box-shadow:inset 0 1px 2px #b7c9d10a}
+.compare-root textarea{resize:vertical;max-height:270px;scrollbar-width:thin}
+.compare-root input::placeholder,.compare-root textarea::placeholder{color:#6a7a86;opacity:1}
+.compare-root .compare-question-row{position:relative;display:flex;align-items:center;border:1px solid #cbdce4;border-radius:16px;min-height:68px;background:#ffffff99}
+.compare-root .compare-question-row input{border:0;box-shadow:none;background:transparent;flex:1;width:100%;font-size:24px;padding:13px 20px;border-radius:16px}
+.compare-root .compare-question-row .compare-button{flex:none;margin-right:9px}
+.compare-root .compare-directions{display:flex;gap:13px;margin:25px 0 15px}
+.compare-root .compare-directions .compare-button{border-radius:20px;padding:11px 23px;font-size:20px;background:#f8fbfc9c}
+.compare-root .compare-directions .compare-button:first-child{font-weight:650}
+.compare-root .compare-directions .compare-selected{border-color:#76b7a8;color:#005c4c;background:#effbf6}
+.compare-root .compare-directions .compare-selected .compare-icon{stroke-width:2.1}
+.compare-root #compare-instructions{display:block;width:100%;height:133px;resize:none;font-size:22px}
+.compare-root .compare-search-bottom{display:flex;gap:18px;margin-top:17px}
+.compare-root .compare-search-bottom>.compare-button{padding:12px 21px;font-size:18px}
+.compare-root .compare-search-bottom>.compare-primary{margin-left:auto;width:167px;font-size:22px;flex-shrink:0}
+.compare-root .compare-search-bottom>[data-action="import"].compare-primary{margin-left:0;width:auto;font-size:18px;flex:0 0 auto}
+.compare-root .compare-scopes-wrap{position:relative;flex:1;min-width:0}
+.compare-root .compare-scopes-button{border-radius:16px;font-size:17px;width:100%;padding:14px 15px;flex-direction:row-reverse;justify-content:space-between;min-height:54px}
+.compare-root .compare-scopes-button span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.compare-root .compare-scopes-button .compare-icon{width:18px;height:18px}
+.compare-root .compare-scopes-popover{position:absolute;bottom:calc(100% + 8px);left:0;width:365px;background:#fff;border:1px solid #c6ddd6;border-radius:16px;padding:18px;box-shadow:0 10px 40px #134c3824;z-index:8;font-size:17px}
+.compare-root .compare-scopes-popover p{font-size:15px;color:#5e7278;margin-bottom:10px}
+.compare-root .compare-scopes-popover label{display:flex;gap:10px;align-items:center;padding:7px 0}
+.compare-root .compare-scopes-popover input{accent-color:var(--compare-green);width:19px;height:19px;box-shadow:none}
+.compare-root .compare-search-help{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;margin-top:12px;color:#768794;font-size:17px}
+.compare-root .compare-search-help p>.compare-icon{width:22px;height:22px;margin:5px 10px 0 0;vertical-align:top}
+.compare-root .compare-search-help small{display:block;margin-left:34px;font-size:14px;margin-top:3px;color:#74848e}
+.compare-root .compare-search-help>.compare-button{width:167px;min-height:47px;font-size:19px;flex-shrink:0;margin-top:-1px}
+.compare-root .compare-query-strip{position:absolute;left:565px;top:246px;width:543px;min-height:76px;border:1px solid #d1e0e5;border-radius:40px;background:#ffffffde;display:flex;align-items:center;gap:19px;padding:10px 18px}
+.compare-root .compare-query-strip>.compare-icon{width:52px;height:52px;padding:12px;border-radius:50%;background:#e4f5ef;color:#006350}
+.compare-root .compare-query-strip strong{font-size:21px;line-height:1.35;flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.compare-root .compare-query-strip .compare-button{font-size:17px;border-left:1px solid #d5e1e5;border-radius:0;min-height:25px;padding-left:20px}
+.compare-root .compare-query-strip .compare-button .compare-icon{order:1;width:20px;height:20px}
+.compare-root .compare-candidate-list{position:absolute;left:66px;right:63px;top:341px;display:grid;grid-template-columns:479px 395px 445px;gap:112px;align-items:start}
+.compare-root .compare-candidate{position:relative;width:100%;height:345px;display:flex;flex-direction:column;margin-top:15px;border-radius:66px 73px 58px 49px / 60px 64px 65px 72px;padding:29px 28px 19px;overflow:hidden}
+.compare-root .compare-candidate-emphasis{margin-top:0;height:369px;padding:33px 51px 25px;border-radius:98px 112px 85px 100px / 90px 100px 78px 90px;border-color:#a8dac5;background:#fbfffbba;box-shadow:inset 0 0 0 5px #ffffffae,0 8px 25px #bce7d326}
+.compare-root .compare-candidate:not(.compare-candidate-emphasis) h2{font-size:20px}
+.compare-root .compare-candidate:not(.compare-candidate-emphasis) .compare-round-icon{width:55px;height:55px}
+.compare-root .compare-candidate:not(.compare-candidate-emphasis) .compare-candidate-head{gap:15px}
+.compare-root .compare-candidate:nth-child(3){border-color:#e2e9e5}
+.compare-root .compare-candidate-head{display:flex;gap:18px;align-items:center;position:relative;z-index:1;max-height:94px;overflow:auto;scrollbar-width:thin;flex-shrink:0}
+.compare-root .compare-candidate-head>div{min-width:0}
+.compare-root .compare-round-icon{display:inline-grid;place-items:center;width:62px;height:62px;flex-shrink:0;border-radius:50%;background:linear-gradient(130deg,#dff4ed,#f7fff9);color:#005f4d;border:1px solid #d8eee6;box-shadow:inset 0 0 0 4px #ffffff74}
+.compare-root .compare-round-icon .compare-icon{width:31px;height:31px}
+.compare-root .compare-warm-icon{background:linear-gradient(140deg,#fff0d9,#fffaf0);color:#854000;border-color:#f0e4d3}
+.compare-root .compare-candidate h2{font-size:22px;line-height:1.5;font-weight:650;overflow-wrap:anywhere}
+.compare-root .compare-source-badge{display:inline-block;background:#e9f2f4;border-radius:19px;padding:3px 14px;font-size:16px;color:#39647a;margin-top:6px;line-height:1.5}
+.compare-root .compare-candidate-excerpt{margin:23px 0 19px;color:#405668;font-size:22px;line-height:1.5;min-height:50px;max-height:99px;overflow:auto;scrollbar-width:thin;overflow-wrap:anywhere;position:relative;z-index:1;flex-shrink:1}
+.compare-root .compare-candidate-relation{display:flex;align-items:flex-start;gap:12px;padding-top:13px;border-top:1px dashed #bfd1da;font-size:19px;line-height:1.4;color:#4c687a;max-height:68px;min-height:43px;overflow:auto;scrollbar-width:thin;position:relative;z-index:1;flex-shrink:1}
+.compare-root .compare-candidate-relation i{width:26px;height:26px;border:1.5px dashed #536b71;border-radius:50%;flex:none;margin-top:1px}
+.compare-root .compare-candidate>.compare-button{position:relative;z-index:1;display:flex;margin:17px auto 0;width:80%;min-height:47px;padding:8px 25px;font-size:20px;gap:26px;flex-shrink:0}
+.compare-root .compare-candidate-emphasis>.compare-button{width:84%;font-size:22px;min-height:53px;margin-top:auto}
+.compare-root .compare-decision{position:absolute;top:9px;right:50px;color:#11634f;font-size:14px}
+.compare-root .compare-candidates-footer{position:absolute;left:447px;right:296px;top:758px;display:flex;align-items:center;gap:23px}
+.compare-root .compare-adjust-strip{border:1px solid #d5e4e7;border-radius:38px;background:#ffffffdc;min-height:73px;display:flex;align-items:center;padding:8px 20px;gap:17px;width:720px;flex-shrink:0}
+.compare-root .compare-adjust-strip>.compare-icon{width:49px;height:49px;padding:12px;border:1px solid #e2eaee;border-radius:50%;background:#fff}
+.compare-root .compare-adjust-strip input{padding:10px 3px;border:0;background:none;box-shadow:none;flex:1;width:100%;font-size:18px}
+.compare-root .compare-adjust-strip .compare-button{font-size:18px;border-left:1px solid #d0dfe5;border-radius:0;min-height:23px;padding:1px 4px 1px 23px}
+.compare-root .compare-adjust-strip .compare-button .compare-icon{order:1;width:21px;height:21px}
+.compare-root .compare-candidates-footer>.compare-link-button{font-size:18px;padding:8px}
+.compare-root .compare-empty{left:450px;top:375px;width:770px;padding:60px;text-align:center}
+.compare-root .compare-empty p{margin:15px 0 24px;color:var(--compare-muted)}
+.compare-root .compare-back-candidates{position:absolute;top:92px;left:43px;font-size:18px;color:#005e4e}
+.compare-root .compare-reading{top:220px;height:311px;border-radius:57px 67px 53px 59px;padding:18px 44px 23px;overflow:hidden}
+.compare-root .compare-thought{left:43px;width:698px}
+.compare-root .compare-source{left:904px;width:727px;padding-left:47px;padding-right:47px}
+.compare-root .compare-reading h2{font-size:23px;display:flex;align-items:center;gap:20px;line-height:1.4}
+.compare-root .compare-reading .compare-round-icon{width:61px;height:61px}
+.compare-root .compare-reading blockquote{font-family:'Trace Compare Serif','Songti SC',SimSun,serif;font-size:31px;font-weight:600;line-height:1.52;max-height:112px;overflow:auto;scrollbar-width:thin;overflow-wrap:anywhere}
+.compare-root .compare-thought blockquote{margin:15px 13px 18px}
+.compare-root .compare-source blockquote{font-size:28px;margin:10px 4px 20px;max-height:91px}
+.compare-root .compare-meta{color:#5c7688;font-size:19px;line-height:1.45}
+.compare-root .compare-source>.compare-meta{margin:16px 4px 0}
+.compare-root .compare-question-context{border-top:1px solid #dae5e9;display:flex;gap:16px;padding-top:16px;margin:0 12px 0 8px}
+.compare-root .compare-question-mark{display:grid;place-items:center;background:#6c7e87;color:white;font-weight:700;border-radius:50%;width:30px;height:30px;font-size:24px;flex:none}
+.compare-root .compare-question-context strong{font-size:18px}
+.compare-root .compare-question-context p{font-size:22px;line-height:1.4;margin-top:2px;max-height:56px;overflow:auto}
+.compare-root .compare-source-actions{display:flex;gap:17px;border-top:1px solid #dae5e9;padding-top:12px;margin:0 4px}
+.compare-root .compare-source-actions .compare-button{font-size:19px;min-height:28px;padding:0 5px}
+.compare-root .compare-source-actions .compare-button+.compare-button{border-left:1px solid #9eb1bd;border-radius:0;padding-left:32px}
+.compare-root .compare-suggestions{left:45px;right:45px;top:544px;min-height:137px;border-color:#e5e1d6;background:linear-gradient(110deg,#fffefaec,#ffffffeb);border-radius:40px;display:flex;align-items:center;padding:21px 35px;gap:36px}
+.compare-root .compare-suggestion-label{display:flex;gap:19px;align-items:center;width:510px;flex-shrink:0;min-height:88px;border-right:1px solid #cbd3d3;padding-right:25px}
+.compare-root .compare-suggestion-label .compare-round-icon{width:67px;height:67px}
+.compare-root .compare-suggestion-label h2{font-size:23px;line-height:1.45;white-space:nowrap}
+.compare-root .compare-suggestion-label p{font-size:18px;color:#637989;line-height:1.4;margin-top:3px}
+.compare-root .compare-suggestion-rows{flex:1;min-width:0;font-size:19px;color:#405c70;max-height:100px;overflow:auto;scrollbar-width:thin}
+.compare-root .compare-suggestion-rows p{display:flex;gap:3px;align-items:baseline;line-height:1.8}
+.compare-root .compare-suggestion-rows strong{color:#132632;white-space:nowrap}
+.compare-root .compare-suggestion-rows i{width:12px;height:12px;border-radius:50%;background:#74aa7d;flex-shrink:0;margin-right:12px}
+.compare-root .compare-suggestion-rows p:nth-child(2) i{background:#edbd5b}
+.compare-root .compare-suggestion-rows p:nth-child(3) i{background:#aebabe}
+.compare-root .compare-note-form{left:218px;top:697px;width:1223px;height:114px;border-radius:37px;padding:5px 17px 12px 71px}
+.compare-root .compare-note-form>label{display:flex;align-items:center;gap:20px;font-size:20px;font-weight:550;line-height:1.3;min-height:36px;position:relative}
+.compare-root .compare-note-form>label>.compare-icon{position:absolute;left:-49px;top:1px;width:36px;height:36px;padding:7px;border:1px solid #dde8ef;border-radius:50%;background:#fff}
+.compare-root .compare-note-form>div{position:relative}
+.compare-root .compare-note-form textarea{display:block;width:100%;height:56px;resize:none;padding:11px 68px 11px 15px;font-size:20px;border-radius:12px;line-height:1.55}
+.compare-root .compare-send{position:absolute;right:6px;bottom:5px;border-radius:50%;min-height:46px;width:47px;height:47px;padding:10px}
+.compare-root .compare-send .compare-icon{width:25px;height:25px}
+.compare-root .compare-reading-actions{position:absolute;left:417px;top:828px;display:flex;align-items:center;gap:17px}
+.compare-root .compare-reading-actions>.compare-button{min-width:141px;min-height:55px;padding:11px 31px;font-size:20px}
+.compare-root .compare-reading-actions>.compare-primary{min-width:178px}
+.compare-root .compare-reading-actions>small{color:#667f8a;font-size:14px;display:flex;align-items:center;gap:10px;max-width:360px;margin-left:6px}
+.compare-root .compare-reading-actions>small>.compare-icon{width:23px;height:23px}
+.compare-root .compare-return-sheet{left:135px;top:94px;width:1402px;height:797px;border-radius:27px;padding:29px 43px;background:linear-gradient(115deg,#ffffffed,#ffffffea 75%,#f7fcfaa6)}
+.compare-root .compare-return-title{position:absolute;left:43px;top:31px}
+.compare-root .compare-return-title h1{font-size:44px;line-height:1.35;margin-top:12px;color:#070d11;letter-spacing:.3px}
+.compare-root .compare-receipt-actions{position:absolute;right:29px;top:38px;display:flex;align-items:center;gap:12px;border:1px solid #dce6e7;border-radius:14px;background:#f9fcfc;min-height:64px;padding:8px 14px;font-size:17px}
+.compare-root .compare-receipt-actions>.compare-icon{color:#155e50}
+.compare-root .compare-receipt-actions>span{border-right:1px solid #e2eaec;padding-right:12px}
+.compare-root .compare-receipt-actions>.compare-button{font-size:16px;min-height:38px;padding:8px 16px}
+.compare-root .compare-before{position:absolute;left:43px;top:145px;width:647px;min-height:98px;max-height:106px;border-radius:14px;padding:17px 23px;background:#f5f8fa;color:#5a6a76;overflow:auto;scrollbar-width:thin}
+.compare-root .compare-before>span,.compare-root .compare-after>span{font-size:19px;line-height:1.4}
+.compare-root .compare-before p{font-size:25px;line-height:1.5;margin-left:15px;overflow-wrap:anywhere}
+.compare-root .compare-after{position:absolute;right:29px;top:145px;width:664px;height:226px;border-radius:15px;background:#eff8f4;padding:20px 26px;color:#004d3e;overflow:auto;scrollbar-width:thin}
+.compare-root .compare-after p{font-size:29px;font-weight:650;line-height:1.6;margin-top:20px;overflow-wrap:anywhere}
+.compare-root .compare-reason{position:absolute;left:43px;top:258px;width:647px;font-size:19px}
+.compare-root .compare-reason summary{list-style:none;display:flex;align-items:center;gap:17px;color:#0f6653;cursor:pointer;padding:4px 0 10px}
+.compare-root .compare-reason summary::-webkit-details-marker{display:none}
+.compare-root .compare-reason summary .compare-icon{width:21px;height:21px;transition:transform .15s}
+.compare-root .compare-reason:not([open]) summary .compare-icon{transform:rotate(-90deg)}
+.compare-root .compare-reason article{border:1px solid #d2e3e8;border-radius:13px;padding:15px 14px 13px;background:#ffffffab;max-height:163px;overflow:auto;scrollbar-width:thin}
+.compare-root .compare-reason article>div{display:flex;align-items:center;gap:17px;position:relative}
+.compare-root .compare-reason .compare-round-icon{width:56px;height:56px}
+.compare-root .compare-reason h2{font-size:22px;line-height:1.4}
+.compare-root .compare-reason article>div>div>p{color:#708695;font-size:17px;line-height:1.3;margin-top:4px}
+.compare-root .compare-relation-badge{margin-left:auto;border-radius:17px;border:1px solid #b6dfca;background:#eafff2;color:#165b45;padding:3px 13px;font-size:16px;white-space:nowrap;align-self:flex-start}
+.compare-root .compare-reason-text{background:#f0f8f4;border-radius:12px;margin-top:12px!important;padding:12px 21px;font-size:19px;line-height:1.45;color:#33576a}
+.compare-root .compare-unresolved{position:absolute;top:480px;left:43px;right:29px;border-top:1px solid #d7e2e6;padding-top:16px;display:flex;align-items:flex-end;gap:24px}
+.compare-root .compare-unresolved>div:first-child{flex:1;min-width:0}
+.compare-root .compare-unresolved>div>p{font-size:17px;color:#5d7281;border-left:4px solid #547478;padding-left:13px;line-height:1.1;margin-bottom:8px}
+.compare-root .compare-unresolved blockquote{display:flex;gap:23px;align-items:center;min-height:58px;background:#fffcf5;border:1px solid #f2e6d3;border-radius:12px;padding:10px 16px;font-size:22px;line-height:1.4}
+.compare-root .compare-unresolved blockquote>span:first-child{display:grid;place-items:center;width:29px;height:29px;flex:none;background:#dd9639;border-radius:50%;color:white;font-size:25px;line-height:1.1}
+.compare-root .compare-unresolved blockquote>span:last-child{max-height:65px;overflow:auto}
+.compare-root .compare-next-actions{display:flex;gap:11px;margin-bottom:8px}
+.compare-root .compare-next-actions>.compare-button{font-size:19px;min-height:56px;padding:13px 27px}
+.compare-root .compare-trajectory{position:absolute;left:131px;right:32px;top:607px;height:152px}
+.compare-root .compare-trajectory>svg{position:absolute;inset:0 0 auto;width:100%;height:93px;overflow:visible}
+.compare-root .compare-trajectory path{fill:none;stroke:#17836c;stroke-width:1.5}
+.compare-root .compare-trajectory circle{fill:#85959f;stroke:#fff;stroke-width:3;filter:drop-shadow(0 0 6px #d8e5e3)}
+.compare-root .compare-trajectory circle:nth-child(3){fill:#609f8b}
+.compare-root .compare-trajectory circle:last-child{fill:#00654c;filter:drop-shadow(0 0 8px #82dfb1)}
+.compare-root .compare-trajectory>div{position:absolute;top:68px;left:-81px;right:12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:42px;text-align:center}
+.compare-root .compare-trajectory h3{font-size:18px;font-weight:500;margin-bottom:5px}
+.compare-root .compare-trajectory p,.compare-root .compare-trajectory small{font-size:16px;line-height:1.4;color:#697e8d;max-height:46px;overflow:auto;scrollbar-width:thin}
+.compare-root .compare-trajectory section:last-child h3{color:#005a43;font-weight:600}
+.compare-root .compare-return-bird{width:43px;right:168px;top:597px}
+.compare-root .compare-notice{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:20px;max-width:1000px;padding:9px 15px 9px 23px;background:#fffef3;border:1px solid #d6dbbd;border-radius:14px;box-shadow:0 4px 30px #1d584221;color:#34594c;font-size:18px;z-index:10}
+.compare-root .compare-notice>.compare-button{padding:4px;min-height:28px;border:none;background:none}
+.compare-root .compare-notice .compare-icon{width:18px;height:18px}
+.compare-root .compare-dialog{width:min(780px,calc(100vw - 40px));max-height:calc(100vh - 50px);padding:28px 34px 31px;border:1px solid #c5dbd5;border-radius:27px;background:#fbfffd;color:#152d2b;box-shadow:0 28px 100px #092d2530;font:18px/1.6 'Trace Compare Sans','Microsoft YaHei UI',sans-serif;overflow:auto;scrollbar-width:thin}
+.compare-root .compare-dialog::backdrop{background:#0d302b38;backdrop-filter:blur(5px)}
+.compare-root .compare-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:18px}
+.compare-root .compare-dialog h2{font-size:29px;line-height:1.35}
+.compare-root .compare-dialog .compare-icon-button{min-height:35px;width:35px;padding:5px;border-radius:50%;background:none}
+.compare-root .compare-dialog-content>label,.compare-root .compare-dialog form>label{display:block;margin:15px 0 7px;font-weight:600}
+.compare-root .compare-dialog input,.compare-root .compare-dialog textarea,.compare-root .compare-dialog select{display:block;width:100%;font-size:19px;padding:11px 14px;border-radius:12px;background:#fff}
+.compare-root .compare-dialog textarea{max-height:300px;min-height:100px}
+.compare-root .compare-dialog-help{font-size:16px;line-height:1.6;color:#697e7b;margin:14px 0}
+.compare-root .compare-dialog h3{font-size:18px;font-weight:600;margin-bottom:7px}
+.compare-root .compare-dialog-before,.compare-root .compare-dialog-after{background:#f0f4f5;border-radius:13px;padding:15px 18px;margin:17px 0;overflow-wrap:anywhere}
+.compare-root .compare-dialog-after{background:#eaf5ef;color:#15533e}
+.compare-root .compare-dialog-version{color:#73847f;font-size:15px;margin-top:14px}
+.compare-root .compare-dialog-actions{display:flex;justify-content:flex-end;gap:13px;margin-top:22px;flex-wrap:wrap}
+.compare-root .compare-dialog-actions .compare-button{font-size:18px;min-height:47px;padding:10px 22px}
+.compare-root .compare-dialog blockquote{padding:18px 22px;background:#f1f7f3;border-left:3px solid #8dbaa6;border-radius:8px;margin:12px 0 19px;overflow-wrap:anywhere}
+.compare-root .compare-source-context{white-space:pre-wrap;padding:18px 0;overflow-wrap:anywhere;font-family:'Trace Compare Serif','Songti SC',SimSun,serif;font-size:22px;line-height:1.9}
+.compare-root .compare-material-info{display:grid;grid-template-columns:120px 1fr;gap:10px;font-size:18px}
+.compare-root .compare-material-info dt{color:#72857f}.compare-root .compare-material-info dd{margin:0}
+/* Compact screens reflow instead of shrinking a desktop screenshot into unreadable text. */
+.compare-root.compare-compact{overflow:auto;min-height:400px;font-size:17px;background-attachment:local}
+.compare-root.compare-compact .compare-scene{position:relative;width:100%;height:auto;min-height:100%;left:0;top:0;transform:none;padding-bottom:45px}
+.compare-root.compare-compact .compare-header{position:relative;inset:auto;height:auto;padding:18px 20px;gap:14px;flex-wrap:wrap}
+.compare-root.compare-compact .compare-brand{font-size:25px}.compare-root.compare-compact .compare-brand>span{width:37px;height:37px}
+.compare-root.compare-compact .compare-header nav{font-size:14px;gap:9px;padding-left:14px;flex:1;order:2;width:100%;flex-basis:100%}
+.compare-root.compare-compact .compare-header nav span,.compare-root.compare-compact .compare-header nav strong{max-width:70vw}
+.compare-root.compare-compact .compare-top-return{padding:8px 15px;font-size:15px;min-height:37px}
+.compare-root.compare-compact .compare-demo{position:static;order:3;font-size:13px;margin-left:auto}
+.compare-root.compare-compact .compare-profile{display:none}
+.compare-root.compare-compact .compare-main{position:relative;inset:auto;padding:12px 20px;display:flex;flex-direction:column;gap:22px}
+.compare-root.compare-compact .compare-heading{position:relative;inset:auto;padding:3px 0 13px}
+.compare-root.compare-compact .compare-heading h1{font-size:38px;line-height:1.3}
+.compare-root.compare-compact .compare-heading>p{font-size:18px;margin-top:9px}
+.compare-root.compare-compact .compare-threads,.compare-root.compare-compact .compare-bird{display:none}
+.compare-root.compare-compact .compare-anchor,.compare-root.compare-compact .compare-paper,.compare-root.compare-compact .compare-query-strip,.compare-root.compare-compact .compare-candidate-list,.compare-root.compare-compact .compare-candidates-footer,.compare-root.compare-compact .compare-reading-actions,.compare-root.compare-compact .compare-back-candidates{position:relative;inset:auto;width:100%;height:auto;margin:0;max-height:none}
+.compare-root.compare-compact .compare-anchor{min-height:210px;max-width:650px;margin:0 auto}
+.compare-root.compare-compact .compare-anchor-copy{padding:25px 44px;max-height:350px}
+.compare-root.compare-compact .compare-anchor blockquote{font-size:25px}
+.compare-root.compare-compact .compare-anchor .compare-kicker{margin:0 0 14px;font-size:17px}
+.compare-root.compare-compact .compare-paper{border-radius:27px;padding:25px}
+.compare-root.compare-compact .compare-search-form h2{font-size:24px}
+.compare-root.compare-compact .compare-question-row{flex-wrap:wrap;padding:4px;min-height:70px}
+.compare-root.compare-compact .compare-question-row input{font-size:19px;flex-basis:100%;padding:12px}
+.compare-root.compare-compact .compare-question-row .compare-button{margin:0 6px 5px auto;font-size:14px;min-height:31px;padding:6px 12px}
+.compare-root.compare-compact .compare-directions{gap:9px;flex-wrap:wrap;margin:18px 0 12px}
+.compare-root.compare-compact .compare-directions .compare-button{font-size:16px;padding:9px 15px;min-height:41px}
+.compare-root.compare-compact #compare-instructions{font-size:18px;height:125px}
+.compare-root.compare-compact .compare-search-bottom{flex-wrap:wrap;gap:10px}
+.compare-root.compare-compact .compare-scopes-wrap{flex-basis:100%}
+.compare-root.compare-compact .compare-search-bottom>.compare-button{font-size:16px;padding:10px 15px;flex:1;width:auto;min-width:130px}
+.compare-root.compare-compact .compare-search-help{flex-wrap:wrap;font-size:14px}
+.compare-root.compare-compact .compare-search-help small{font-size:12px}
+.compare-root.compare-compact .compare-search-help>.compare-button{width:100%;min-height:39px;font-size:16px}
+.compare-root.compare-compact .compare-scopes-popover{max-width:calc(100vw - 110px)}
+.compare-root.compare-compact .compare-query-strip{padding:10px;gap:10px;border-radius:25px}
+.compare-root.compare-compact .compare-query-strip strong{font-size:18px}
+.compare-root.compare-compact .compare-query-strip>.compare-icon{width:43px;height:43px;padding:10px}
+.compare-root.compare-compact .compare-query-strip .compare-button{font-size:14px;padding:5px 7px}
+.compare-root.compare-compact .compare-candidate-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(285px,1fr));gap:20px}
+.compare-root.compare-compact .compare-candidate{min-height:315px;display:flex;flex-direction:column;padding:26px!important}
+.compare-root.compare-compact .compare-candidate h2{font-size:20px}
+.compare-root.compare-compact .compare-round-icon{width:51px;height:51px}
+.compare-root.compare-compact .compare-candidate-excerpt{font-size:18px;margin:22px 0 14px;min-height:58px}
+.compare-root.compare-compact .compare-candidate-relation{font-size:16px;margin-bottom:15px}
+.compare-root.compare-compact .compare-candidate>.compare-button{font-size:18px;min-height:44px;width:90%;margin-top:auto}
+.compare-root.compare-compact .compare-candidates-footer{display:flex;flex-direction:column;gap:7px}
+.compare-root.compare-compact .compare-adjust-strip{width:100%;padding:8px 10px;gap:8px;min-height:60px}
+.compare-root.compare-compact .compare-adjust-strip input{font-size:15px}
+.compare-root.compare-compact .compare-adjust-strip>.compare-icon{width:38px;height:38px;padding:9px}
+.compare-root.compare-compact .compare-adjust-strip .compare-button{font-size:14px;padding-left:10px}
+.compare-root.compare-compact .compare-empty{padding:35px}
+.compare-root.compare-compact .compare-back-candidates{width:auto;align-self:flex-start;font-size:15px;order:-1}
+.compare-root.compare-compact .compare-reading h2{font-size:20px;gap:13px}
+.compare-root.compare-compact .compare-reading .compare-round-icon{width:50px;height:50px}
+.compare-root.compare-compact .compare-reading blockquote{font-size:24px;max-height:230px;margin:20px 2px}
+.compare-root.compare-compact .compare-question-context{margin:0;padding-top:14px}
+.compare-root.compare-compact .compare-question-context p{font-size:18px;max-height:90px}
+.compare-root.compare-compact .compare-source>.compare-meta{font-size:16px}
+.compare-root.compare-compact .compare-source-actions{flex-wrap:wrap;gap:12px;margin:0}
+.compare-root.compare-compact .compare-source-actions .compare-button{font-size:16px;padding:4px 0}
+.compare-root.compare-compact .compare-source-actions .compare-button+.compare-button{padding-left:13px}
+.compare-root.compare-compact .compare-suggestions{display:block}
+.compare-root.compare-compact .compare-suggestion-label{width:100%;border-right:0;border-bottom:1px solid #dce4df;padding:0 0 15px;margin-bottom:14px;min-height:0;gap:13px}
+.compare-root.compare-compact .compare-suggestion-label .compare-round-icon{width:51px;height:51px}
+.compare-root.compare-compact .compare-suggestion-label h2{font-size:18px;white-space:normal}
+.compare-root.compare-compact .compare-suggestion-label p{font-size:15px}
+.compare-root.compare-compact .compare-suggestion-rows{font-size:17px;max-height:320px}
+.compare-root.compare-compact .compare-suggestion-rows p{display:block;position:relative;padding-left:22px;margin:7px 0;line-height:1.6}
+.compare-root.compare-compact .compare-suggestion-rows i{position:absolute;left:0;top:8px;width:9px;height:9px}
+.compare-root.compare-compact .compare-note-form{padding:17px 18px}
+.compare-root.compare-compact .compare-note-form>label{font-size:17px;padding-left:33px;margin-bottom:10px}
+.compare-root.compare-compact .compare-note-form>label>.compare-icon{left:0;width:29px;height:29px;padding:5px}
+.compare-root.compare-compact .compare-note-form textarea{font-size:17px;height:92px;padding:11px 56px 11px 12px}
+.compare-root.compare-compact .compare-send{right:7px;bottom:9px;width:39px;height:39px;min-height:39px;padding:8px}
+.compare-root.compare-compact .compare-reading-actions{display:flex;flex-wrap:wrap;gap:11px;justify-content:center}
+.compare-root.compare-compact .compare-reading-actions>.compare-button{font-size:17px;min-height:46px;padding:10px 21px;min-width:0}
+.compare-root.compare-compact .compare-reading-actions>small{max-width:100%;flex-basis:100%;justify-content:center;font-size:13px;margin:3px 0}
+.compare-root.compare-compact .compare-return-sheet{padding:26px 23px;display:flex;flex-direction:column;gap:22px}
+.compare-root.compare-compact .compare-return-title,.compare-root.compare-compact .compare-receipt-actions,.compare-root.compare-compact .compare-before,.compare-root.compare-compact .compare-after,.compare-root.compare-compact .compare-reason,.compare-root.compare-compact .compare-unresolved,.compare-root.compare-compact .compare-trajectory{position:relative;inset:auto;width:100%;height:auto;max-height:none}
+.compare-root.compare-compact .compare-return-title h1{font-size:32px;margin-top:7px}
+.compare-root.compare-compact .compare-return-title .compare-kicker{font-size:17px}
+.compare-root.compare-compact .compare-receipt-actions{flex-wrap:wrap;gap:8px;min-height:50px;padding:10px;font-size:14px}
+.compare-root.compare-compact .compare-receipt-actions>.compare-button{font-size:14px;padding:6px 12px;min-height:31px}
+.compare-root.compare-compact .compare-before,.compare-root.compare-compact .compare-after{padding:18px 20px}
+.compare-root.compare-compact .compare-before p{font-size:20px;margin:5px 0 0}
+.compare-root.compare-compact .compare-after p{font-size:24px;margin-top:13px;line-height:1.6}
+.compare-root.compare-compact .compare-reason h2{font-size:19px}
+.compare-root.compare-compact .compare-reason article{max-height:300px}
+.compare-root.compare-compact .compare-reason article>div{gap:10px;flex-wrap:wrap}
+.compare-root.compare-compact .compare-reason article>div>div{flex:1}
+.compare-root.compare-compact .compare-reason .compare-round-icon{width:45px;height:45px}
+.compare-root.compare-compact .compare-relation-badge{font-size:13px;padding:2px 10px}
+.compare-root.compare-compact .compare-reason-text{font-size:17px;padding:12px}
+.compare-root.compare-compact .compare-unresolved{display:flex;flex-direction:column;align-items:stretch;gap:20px}
+.compare-root.compare-compact .compare-unresolved blockquote{font-size:19px;gap:13px}
+.compare-root.compare-compact .compare-next-actions{display:flex;flex-wrap:wrap;gap:9px}
+.compare-root.compare-compact .compare-next-actions>.compare-button{font-size:16px;padding:10px 18px;min-height:44px}
+.compare-root.compare-compact .compare-trajectory{padding-top:10px}
+.compare-root.compare-compact .compare-trajectory>svg{display:none}
+.compare-root.compare-compact .compare-trajectory>div{position:static;display:flex;gap:18px;flex-direction:column;text-align:left;padding-left:21px;border-left:1px solid #9fc6b3}
+.compare-root.compare-compact .compare-trajectory section{position:relative}
+.compare-root.compare-compact .compare-trajectory section::before{content:'';position:absolute;width:10px;height:10px;background:#6ca58f;border:2px solid #fff;border-radius:50%;left:-27px;top:7px}
+.compare-root.compare-compact .compare-trajectory p{max-height:100px;font-size:16px}
+.compare-root.compare-compact .compare-notice{position:fixed;bottom:12px;left:20px;right:20px;transform:none;max-width:unset;font-size:15px;padding:10px 13px}
+@media(prefers-reduced-motion:reduce){.compare-root *{transition:none!important;animation:none!important;scroll-behavior:auto!important}}

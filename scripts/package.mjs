@@ -49,6 +49,7 @@ copy('marketplace.json', 'marketplace.json');
 // server source beside the compiled runtime so Electron can start it with its
 // bundled Node runtime without requiring a developer checkout.
 copy('apps/desktop/server.mjs', 'apps/desktop/server.mjs');
+copy('apps/desktop/runtime-port.mjs', 'apps/desktop/runtime-port.mjs');
 copy('apps/agent', 'apps/agent');
 copy('packages/product/workspace/src', 'packages/product/workspace/src');
 // The Node 22–24.1 runtime selects this pure-JS/WASM fallback before loading

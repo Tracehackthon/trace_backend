@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { createProductWorkspace } from '../../packages/product/workspace/src/workspace.mjs'
 import { createAgentBackend } from '../agent/backend.mjs'
 import { createZhihuBackend } from '../agent/zhihu.mjs'
+import { normalizeDesktopPort } from './runtime-port.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(root, '../..')
@@ -17,8 +18,9 @@ const productWorkspace = createProductWorkspace({ file: path.resolve(process.env
 // and `/api/zhihu/*`; the Agent receives its provider in-process only.
 const zhihu = createZhihuBackend()
 const agent = createAgentBackend({ productWorkspace, retrievalProvider: zhihu.provider })
-const requestedPort = Number(process.env.TRACE_DESKTOP_PORT ?? '4173')
-const port = Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 4173
+// Port 0 asks the OS for an available ephemeral loopback port. The packaged
+// desktop host uses this path and reads the selected port from `ready`.
+const port = normalizeDesktopPort(process.env.TRACE_DESKTOP_PORT)
 const mimeTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
@@ -89,10 +91,12 @@ export const ready = new Promise((resolve, reject) => {
   server.once('error', fail)
   server.listen(port, '127.0.0.1', () => {
     server.off('error', fail)
-    console.log(`Trace Web: http://127.0.0.1:${port}/`)
+    const address = server.address()
+    const listeningPort = address && typeof address === 'object' ? address.port : port
+    console.log(`Trace Web: http://127.0.0.1:${listeningPort}/`)
     console.log(`Local Web data: ${productWorkspace.file}`)
     console.log('Product writes: command protocol v1; legacy snapshot/reset writes disabled')
-    resolve({ port, file: productWorkspace.file })
+    resolve({ port: listeningPort, file: productWorkspace.file })
   })
 })
 

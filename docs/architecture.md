@@ -51,6 +51,7 @@ Web → Trace 产品后端 → AgentService（内容范围、版本、运行与�
 Codex 原生任务
   └─ trace-codex Plugin ── apps/mcp
        ├─ 工作领取/结果回流 ── 本机产品 API ── web.sqlite
+       ├─ 显式 Host Session attach/ingest ── 本机产品 API ── web.sqlite（独立 host 表）
        └─ 项目协作/上下文包 ── packages/product/application
                                   └─ packages/core ── 项目 trace.sqlite
 ```
@@ -62,16 +63,18 @@ Codex 原生任务
 | 层 | 当前代码 | 负责 | 不负责 / 待整理 |
 | --- | --- | --- | --- |
 | HTTP 宿主 | `apps/desktop/server.mjs` | 同源页面及四个明确 API 域：`product`、`search`、`zhihu`、`agent`；向 Agent 进程内注入只读 source provider | 不是 Electron 安装包，也没有公网租户认证 |
-| Product Workspace | `packages/product/workspace` | 事项／理解／来源关系／对照／工作状态机，以及 SQLite 事务、工作区 CAS、命令回放和 Codex 交接记录 | 不负责页面渲染、Agent 生成或项目协作账本 |
+| Product Workspace | `packages/product/workspace` | 事项／理解／来源关系／对照／工作状态机，以及 SQLite 事务、工作区 CAS、命令回放、Codex 交接记录和显式 Host Session Ingest | 不负责页面渲染、Agent 生成或项目协作账本 |
 | Web 页面 Adapter | `apps/desktop/src/product/*screen.mjs`、`web-main.js` | 渲染 Product Workspace 投影、把明确用户动作提交给产品命令 | 不拥有产品规则，不建立第二份事项状态 |
 | Agent 执行 | `apps/agent` | profile、通用工具桥、运行/SSE/取消、Codex/模型/外部 Agent adapter、候选校验与受信任采纳编排 | 不自动采纳；产品写入仍由 Product Workspace 裁决；远程 adapter 不代表公网服务已有租户隔离 |
 | 知乎内容来源 | `packages/integration/zhihu-transport`、`apps/agent/retrieval.mjs` | 知乎／全网接口、用户授权、摘要规范化、实际来源注册与引用校验 | source provider，不是模型 provider；本机单用户，不自动保存／采纳；[接入与回调](zhihu-native.md) |
-| Codex 桥接 | `plugins/trace-codex`、`apps/mcp` | 用户意图入口、上下文包、工作快照领取与结果送回复核 | 安装不会启用生成 API，不等于部署 Web 服务 |
+| Codex 桥接 | `plugins/trace-codex`、`apps/mcp`、`apps/codex` | 用户意图入口、上下文包、工作快照领取与结果送回复核、显式宿主会话附着及生命周期接收 | 安装不会启用生成 API，不等于部署 Web 服务；未附着 hook 不捕获 prompt |
 | 原生协作底座 | `packages/product/application`、`packages/core`、`apps/codex` | profile、来源授权、认知接续、提案/采用、hooks evidence | 不是六项 Web 功能已经统一抽出的领域包 |
 | 维护与集成 | `apps/cli`、`packages/sdk`、`native` | CLI、RPC、安装更新和认知账本维护 | 现有发行不覆盖新 Web/Agent；backup 不覆盖其两库 |
 | 探索形态 | `legacy.html`、`plugins/trace-harness-plugin`、`artifacts` | 旧原型、宿主实验与历史验证材料 | 不作为当前产品入口或生产发行依据 |
 
 Product Workspace 已从 desktop 页面目录迁入独立 Module，并由浏览器安全 Interface 与 Node 持久化 Interface 共同维护同一套规则。当前仍待深化的是 Agent Runtime：`apps/desktop` 仍导入 `apps/agent` 的组装入口，下一步应让两个可执行宿主共同依赖独立 Agent Runtime Module，而不是让一个 app 依赖另一个 app。
+
+Host Session 的后续闭环也保持相同的 owner 边界：Stop 只在 Product Workspace 事务内入队 sensemaking job，`apps/agent` 的 worker 通过受控 fixture/执行接缝异步消费；候选 WorkflowFinding 经确定性 Finding Router 生成 RoutingProposal，用户以 CAS receipt 采用、试用或拒绝。Activation 只回带 adopted（以及显式请求的 trial）finding 的短摘要，不回带原始 transcript；SessionStart/UserPromptSubmit 的 `additionalContext` 记录 offered/used/affected 事实而不代称 Codex 已使用。RepositoryPreflight 默认只读 suggest，只有 adopted runtime-guard、clean local checkout 且显式 apply 时才允许创建分支。
 
 接口级纵向验收由 `tests/backend-api-flow.test.mjs` 提供：不加载前端，从空库依次经过产品命令、知乎／全网来源、Agent 工具循环、SSE、运行读取、进程重启和两库恢复，并明确验证生成结果不自动采纳。外部模型与知乎上游使用受控 fixture，因此该测试验证执行链和状态权威性，不代替真实供应方质量或额度验收。
 
@@ -83,6 +86,8 @@ Product Workspace 已从 desktop 页面目录迁入独立 Module，并由浏览�
 | `agent.sqlite` | 运行输入/上下文、候选、工具事件与 SSE 游标 | 独立 owner，与产品库身份绑定；包含敏感内容，不是匿名日志 |
 | 项目 `trace.sqlite` | 协作配置相关状态、接续、候选/采用与 evidence | 现有 CLI backup/restore 的范围 |
 | trace-portal 的 IndexedDB | 当前浏览器站点内的独立产品内容 | 另一个前端仓库的实现；无自动同步或本机配对 |
+
+Host Session、WorkflowFinding、RoutingProposal、activation receipt、RepositoryPreflight 与 guard receipt 的权威内容均在 `web.sqlite` 的独立表中；sensemaking 的运行/profile/事件/结果哈希在 `agent.sqlite`，不复制用户 prompt/final。上述 host/workflow 表采用独立事务，不推进整个 Product Workspace snapshot revision。
 
 生成采用整工作区 revision 校验：别的事项写入也可能让运行过期。已有回答仍可作为历史；真实修订候选已有绑定运行与结果哈希的采纳／撤销命令，但细粒度事项 revision 和运行归档仍需实现，不能靠前端绕过。
 
@@ -106,7 +111,9 @@ Trace 的架构不是从“数据库、RAG 或 hook”倒推出来的，而是�
 
 ## 宿主层
 
-Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。Codex 的用户级 hook 不携带某个固定项目路径，而是按每个事件的 `cwd` 找到最近 `.trace/`，再加载该项目 profile 与状态库；非 Trace 项目成功 no-op。它们可以传递 event、引用、correlation 与 causation，但不能绕过 runtime 直接写 SQLite / JSONL。
+Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。Codex 的用户级 hook 不携带某个固定项目路径，而是按每个事件的 `cwd` 找到最近 `.trace/`，再加载该项目 profile 与状态库；非 Trace 项目通常成功 no-op。若用户已通过 Host Session Ingest 明确附着当前 session，生命周期事件可进入用户级 Product Workspace `web.sqlite`，但不绑定不存在的项目；未附着 session 仍不捕获 prompt。它们可以传递 event、引用、correlation 与 causation，但不能绕过 runtime 直接写 SQLite / JSONL。
+
+Host Session Ingest 是 Product Workspace 的独立事务边界：`attach` / `pause` / `detach` 控制会话，`UserPromptSubmit` 创建 `HostTurn(started)`，`Stop` / `Interrupt` / `SessionEnd` 封口；事件与控制命令各自使用 append-only receipt 表，幂等键覆盖 host、session、turn、event 和 tool identity，同键改内容会冲突。Host 表不参与产品 snapshot revision；不使用 `transcript_path`，也不写项目 `trace.sqlite` 或 Agent `agent.sqlite`。
 
 对于认知源检索，职责不是“Trace 检索、Codex 读取预选页”，而是：`UserPromptSubmit` 先编译版本化的协作模型与来源地图（不含来源正文），再给当前宿主 source lease（正式根、prefix、预算）；Codex 使用自己的 native search/read/tool 能力决定实际访问；`PreToolUse` 对可识别 read 检查预算；`PostToolUse` 把实际访问写成无正文的 `host_retrieval_evidence`。个人/项目地图存于 ignored `profiles/`，`instance/activation.lock.json` 只保存身份/hash；配置变更通过显式更新与备份，避免隐式 drift；source profile 漂移时不发出 source lease。`external` / `team` 的已审阅 profile 只能通过显式 source update 刷新 lock；`local` 固定指向该项目的 `.trace/source`，`empty` 固定禁用，二者不能藉 profile 更新取得任意外部 root，来源类型切换必须由单独的 selection migration 承担。因此用户可区分来源已提供、已搜索、已读取与未分类访问，不会把一个 pointer 当成 Agent 已读。完整协议见 [Codex 原生检索与 Trace 证据架构](host-native-retrieval.md) 与[适配使用者](personalization.md)。
 
@@ -125,3 +132,9 @@ Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。Codex �
 `native_observed` 不是文件系统沙箱：Codex hook 可以观察 Bash、MCP 和多数本地函数工具，但不能成为所有专用工具路径的强制 ACL。对需要硬隔离的来源，profile 不能开启 native lease，必须等待真实权限 adapter。
 
 开发者接口仍可通过 `trace --help --advanced` 发现。它们稳定、可测试，但不应成为新用户 README 或 Codex 日常提示中的默认操作。
+
+## 第三阶段运行闭环
+
+Host workflow 的本地闭环为：`Stop → web.sqlite sensemaking job → apps/agent ExecutorRegistry worker → candidate WorkflowFinding → RoutingProposal → user adopt/trial → bounded activation → RepositoryPreflight/Guard`。worker 只在服务端绑定 profile 下运行，失败、lease、profile identity、privacy receipt 和 shadow 结果均可查询；Agent 库不拥有用户原表达。Activation 只回带 adopted（trial 必须显式开启）的短摘要，并记录 offered/used/affected，不把旧 transcript 当作上下文。
+
+Repository Guard 的 crash journal 与 CapabilityTrial/PublicationPolicy/Capability orchestration 都属于 Product Workspace 的独立 append-only/CAS 表，不推进普通 workspace snapshot revision。Guard 只在 clean local、非 managed worktree、状态 hash 未变化和 adopted policy 满足时执行 `git switch -c`；恢复和发布都不自动执行远程 Git 操作。能力文件仍由既有 CapabilityPublisher 唯一写入，缺 producer 时记录 `producer_required` 而非生成空能力。

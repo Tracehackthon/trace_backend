@@ -8,7 +8,7 @@
     "@trace/product-workspace": "workspace:*"
   },
   "scripts": {
-    "build": "node --check server.mjs && node --check src/main.js && node --check src/discussion.js && node --check src/home.js && node --check src/home-model.js && node --check src/home-icons.js && node --check src/home/scene-glass.js && node --check src/prototype-session.js && node --check src/matters/matters-model.mjs && node --check src/matters/matters-screen.mjs && node --check src/web-main.js && node --check src/product/chain-screen.mjs && node --check src/product/comparison-screen.mjs && node --check src/product/worksite-screen.mjs && node --check src/product/library.mjs && node --check src/product/zhihu-panel.mjs && node --check src/product/agent-panel.mjs",
+    "build": "node --check server.mjs && node --check src/main.js && node --check src/discussion.js && node --check src/home.js && node --check src/home-model.js && node --check src/home-icons.js && node --check src/home/scene-glass.js && node --check src/prototype-session.js && node --check src/matters/matters-model.mjs && node --check src/matters/matters-screen.mjs && node --check src/web-main.js && node --check src/product/chain-screen.mjs && node --check src/product/comparison-screen.mjs && node --check src/product/worksite-screen.mjs && node --check src/product/library.mjs && node --check src/product/host-session.mjs && node --check src/product/zhihu-panel.mjs && node --check src/product/agent-panel.mjs",
     "dev": "node server.mjs",
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs ../../tests/web-store.test.mjs ../../tests/product-commands.test.mjs ../../tests/codex-product-bridge.test.mjs"

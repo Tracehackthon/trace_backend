@@ -12,6 +12,12 @@ import {
   validateCodexReceiveRequest,
   validateCodexReturnRequest,
 } from './codex-bridge.mjs';
+import {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError} from './host-ingest.mjs';
+import {createHostWorkflowService, ensureHostWorkflowSchema, HOST_WORKFLOW_TABLES, HostWorkflowError, computeRepositoryPreflight} from './host-workflow.mjs';
+
+// The Node adapter is the public boundary for SQLite-backed host ingest. Keep
+// these exports out of the browser-safe `src/index.mjs` entrypoint.
+export {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError, createHostWorkflowService, ensureHostWorkflowSchema, HOST_WORKFLOW_TABLES, HostWorkflowError, computeRepositoryPreflight};
 
 // This database is deliberately independent of the cognitive/adopted ledgers.
 // The caller owns TRACE_WEB_STATE_FILE and chooses an explicit absolute path.
@@ -20,6 +26,7 @@ const SCHEMA_VERSION = 1;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_ENTITIES = 10000;
 const KINDS = ['host-meta', 'chain-meta', 'matter', 'source', 'chain-session', 'comparison', 'worksite-meta', 'work', 'worksite-session', 'work-guard'];
+const CORE_TABLES = ['web_workspace', 'web_snapshots', 'web_entities', 'web_commands'];
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -136,7 +143,7 @@ function splitHost(host) {
 }
 
 function databaseError(error) {
-  if (error instanceof WebStoreError || error instanceof ProductCommandError || error instanceof CodexBridgeError) return error;
+  if (error instanceof WebStoreError || error instanceof ProductCommandError || error instanceof CodexBridgeError || error instanceof HostIngestError || error instanceof HostWorkflowError) return error;
   if (/SQLITE_BUSY|database is locked|database is busy/i.test(String(error))) return new WebStoreError(503, 'STORAGE_BUSY', '工作区存储正忙，请保留草稿并稍后重试。');
   return new WebStoreError(503, 'STORAGE_FAILURE', '工作区存储读取或写入失败，未重置原数据。');
 }
@@ -146,7 +153,11 @@ function assertDatabase(db, allowEmpty) {
   const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
   if (allowEmpty && tables.length === 0 && db.prepare('PRAGMA application_id').get().application_id === 0) return false;
   demand(db.prepare('PRAGMA application_id').get().application_id === APPLICATION_ID && db.prepare('PRAGMA user_version').get().user_version === SCHEMA_VERSION, 'WRONG_DATABASE', '这不是独立 Trace Web 数据库，未写入。', 503);
-  demand(['web_workspace', 'web_snapshots', 'web_entities', 'web_commands'].every(table => tables.includes(table)) && tables.length === 4, 'STORAGE_CORRUPT', '工作区数据表缺失或不一致，未重置。', 503);
+  // Host ingest is an additive extension. Older v1 web databases are valid
+  // and receive the extension in the startup transaction below; arbitrary
+  // tables still fail closed so a ledger cannot be mistaken for web.sqlite.
+  const allowed = new Set([...CORE_TABLES, ...HOST_SESSION_TABLES, ...HOST_WORKFLOW_TABLES]);
+  demand(CORE_TABLES.every(table => tables.includes(table)) && tables.every(table => allowed.has(table)), 'STORAGE_CORRUPT', '工作区数据表缺失或不一致，未重置。', 503);
   return true;
 }
 
@@ -187,7 +198,7 @@ function readBody(req) {
  * retained; product command fingerprints are namespaced in the existing ledger. */
 /** Authoritative local Product Workspace: product entities, command CAS,
  * receipts and Codex delivery/return records share one transactional owner. */
-export function createProductWorkspace({ file, allowSnapshotWrites = false, desktopSnapshotToken } = {}) {
+export function createProductWorkspace({ file, allowSnapshotWrites = false, desktopSnapshotToken, hostWorkflowFaultInjector = null } = {}) {
   demand(typeof file === 'string' && path.isAbsolute(file), 'INVALID_PATH', 'Web SQLite 路径必须明确为绝对路径。');
   demand(desktopSnapshotToken === undefined || typeof desktopSnapshotToken === 'string' && desktopSnapshotToken.length >= 32 && desktopSnapshotToken.length <= 256,
     'INVALID_DESKTOP_TOKEN', '桌面工作区令牌配置无效。');
@@ -254,7 +265,9 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
         CREATE TABLE web_snapshots(revision INTEGER PRIMARY KEY CHECK(revision>0),entity_counts TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE web_entities(workspace_revision INTEGER NOT NULL REFERENCES web_snapshots(revision),kind TEXT NOT NULL,object_id TEXT NOT NULL,ordinal INTEGER NOT NULL,payload TEXT NOT NULL,payload_sha256 TEXT NOT NULL,PRIMARY KEY(workspace_revision,kind,object_id));
         CREATE TABLE web_commands(command_id TEXT PRIMARY KEY,request_sha256 TEXT NOT NULL,committed_revision INTEGER NOT NULL REFERENCES web_snapshots(revision),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
+      ensureHostSessionSchema(db);
     });
+    else transaction(() => ensureHostSessionSchema(db));
     readSnapshot(currentRevision()); // A corrupt stored workspace must fail startup, not become empty.
   } catch (error) { db.close(); throw error; }
   function persist(host, fingerprint, commandId, revision) {
@@ -392,6 +405,44 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       return codexResult(kind, body.commandId, { request_sha256: fingerprint, committed_revision: revision + 1 }, revision + 1);
     });
   }
+  // Host-session receipts use their own append-only command table and never
+  // call persist(), so attaching or receiving a Codex turn cannot advance the
+  // Product Workspace snapshot revision.
+  const hostSessions = createHostSessionIngest({db, transaction});
+  const hostWorkflow = createHostWorkflowService({db, transaction, faultInjector: hostWorkflowFaultInjector});
+  // Re-check unfinished Repository Guard journals on every Product Service
+  // start.  This never mutates Git; ambiguous evidence is only marked in the
+  // Product-owned journal for explicit recovery.
+  hostWorkflow.inspectRepositoryGuardJournals();
+  function executeHost(kind, body) {
+    demand(plain(body), 'INVALID_HOST_COMMAND', '宿主接收请求必须是 JSON 对象。', 400);
+    // The direct hook adapter does not need a protocol field, while HTTP/MCP
+    // callers may include it. If present, it must select this version rather
+    // than silently falling through to a future incompatible shape.
+    demand(body.protocolVersion === undefined || body.protocolVersion === 1, 'PROTOCOL_MISMATCH', '宿主接收协议版本不受支持。', 400);
+    if (kind === 'attach') return {protocolVersion: 1, ...hostSessions.attach(body)};
+    if (kind === 'pause') return {protocolVersion: 1, ...hostSessions.pause(body)};
+    if (kind === 'detach') return {protocolVersion: 1, ...hostSessions.detach(body)};
+    if (kind === 'event') return {protocolVersion: 1, ...hostSessions.ingestEvent(body)};
+    if (kind === 'finding') return {protocolVersion: 1, ...hostSessions.captureWorkflowFinding(body)};
+    if (kind === 'routing-propose') return {protocolVersion: 1, proposal: hostWorkflow.createRoutingProposal(body)};
+    if (kind === 'routing-decide') return {protocolVersion: 1, ...hostWorkflow.decideRouting(body)};
+    if (kind === 'activation-mark') return {protocolVersion: 1, ...hostWorkflow.markActivation(body)};
+    if (kind === 'repository-preflight') return {protocolVersion: 1, ...hostWorkflow.repositoryPreflight(body)};
+    if (kind === 'repository-apply') return {protocolVersion: 1, ...hostWorkflow.repositoryGuardApply(body)};
+    if (kind === 'repository-recovery-preview') return {protocolVersion: 1, ...hostWorkflow.repositoryGuardRecoveryPreview(body)};
+    if (kind === 'repository-recovery-reconcile') return {protocolVersion: 1, ...hostWorkflow.repositoryGuardReconcile(body)};
+    if (kind === 'publication-policy-preview') return {protocolVersion: 1, ...hostWorkflow.publicationPolicyPreview(body)};
+    if (kind === 'publication-policy-adopt') return {protocolVersion: 1, ...hostWorkflow.publicationPolicyAdopt(body)};
+    if (kind === 'publication-policy-revoke') return {protocolVersion: 1, ...hostWorkflow.publicationPolicyRevoke(body)};
+    if (kind === 'capability-trial-create') return {protocolVersion: 1, ...hostWorkflow.capabilityTrialCreate(body)};
+    if (kind === 'capability-trial-complete') return {protocolVersion: 1, ...hostWorkflow.capabilityTrialComplete(body)};
+    if (kind === 'capability-stage') return {protocolVersion: 1, ...hostWorkflow.capabilityStage(body)};
+    if (kind === 'capability-validate') return {protocolVersion: 1, ...hostWorkflow.capabilityValidate(body)};
+    if (kind === 'capability-publish') return {protocolVersion: 1, ...hostWorkflow.capabilityPublish(body)};
+    if (kind === 'capability-rollback') return {protocolVersion: 1, ...hostWorkflow.capabilityRollback(body)};
+    throw new WebStoreError(404, 'NOT_FOUND', '没有这个宿主接收接口。');
+  }
   async function handle(req, res) {
     const rawPath = String(req.url || '').split('?')[0];
     const product = rawPath === '/api/product' || rawPath.startsWith('/api/product/');
@@ -402,14 +453,42 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       if (product) {
         const commandMatch = /^\/api\/product\/commands\/([^/]+)$/.exec(rawPath);
         const codexKind = rawPath === '/api/product/codex/receive' ? 'receive' : rawPath === '/api/product/codex/return' ? 'return' : null;
-        const methods = rawPath === '/api/product/workspace' || commandMatch ? ['GET'] : rawPath === '/api/product/commands' || codexKind ? ['POST'] : null;
+        const hostKind = rawPath === '/api/product/host/session/attach' ? 'attach'
+          : rawPath === '/api/product/host/session/pause' ? 'pause'
+            : rawPath === '/api/product/host/session/detach' ? 'detach'
+              : rawPath === '/api/product/host/event' ? 'event'
+                : rawPath === '/api/product/host/finding' ? 'finding'
+                  : rawPath === '/api/product/host/routing/propose' ? 'routing-propose'
+                    : rawPath === '/api/product/host/routing/decide' ? 'routing-decide'
+                      : rawPath === '/api/product/host/activation/mark' ? 'activation-mark'
+                        : rawPath === '/api/product/host/repository/preflight' ? 'repository-preflight'
+                          : rawPath === '/api/product/host/repository/apply' ? 'repository-apply'
+                              : rawPath === '/api/product/host/repository/recovery/preview' ? 'repository-recovery-preview'
+                              : rawPath === '/api/product/host/repository/recovery/reconcile' ? 'repository-recovery-reconcile'
+                                : rawPath === '/api/product/host/publication-policy/preview' ? 'publication-policy-preview'
+                                  : rawPath === '/api/product/host/publication-policy/adopt' ? 'publication-policy-adopt'
+                                    : rawPath === '/api/product/host/publication-policy/revoke' ? 'publication-policy-revoke'
+                                      : rawPath === '/api/product/host/capability/trial/create' ? 'capability-trial-create'
+                                        : rawPath === '/api/product/host/capability/trial/complete' ? 'capability-trial-complete'
+                                          : rawPath === '/api/product/host/capability/stage' ? 'capability-stage'
+                                            : rawPath === '/api/product/host/capability/validate' ? 'capability-validate'
+                                              : rawPath === '/api/product/host/capability/publish' ? 'capability-publish'
+                                                : rawPath === '/api/product/host/capability/rollback' ? 'capability-rollback' : null;
+        const hostList = rawPath === '/api/product/host/sessions' || rawPath === '/api/product/host/turns' || rawPath === '/api/product/host/findings'
+          || rawPath === '/api/product/host/sensemaking/jobs' || rawPath === '/api/product/host/sensemaking/results' || rawPath === '/api/product/host/sensemaking/privacy' || rawPath === '/api/product/host/routing/proposals'
+          || rawPath === '/api/product/host/activation/query'
+          || rawPath === '/api/product/host/activation/history' || rawPath === '/api/product/host/repository/receipts'
+          || rawPath === '/api/product/host/repository/recovery/status'
+          || rawPath === '/api/product/host/publication-policies' || rawPath === '/api/product/host/capability/orchestrations'
+          || rawPath === '/api/product/host/capability/trials';
+        const methods = rawPath === '/api/product/workspace' || commandMatch || hostList ? ['GET'] : rawPath === '/api/product/commands' || codexKind || hostKind ? ['POST'] : null;
         if (!methods) { reply(res, 404, {error:{code:'NOT_FOUND', message:'没有这个产品接口。'}}); return true; }
         if (!methods.includes(req.method)) { reply(res,405,{error:{code:'METHOD_NOT_ALLOWED',message:'不支持这个请求方法。'}},{allow:methods.join(', ')}); return true; }
         if (req.method === 'POST') {
           demand(/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(req.headers['content-type'] || ''), 'JSON_REQUIRED', '命令只接受 application/json。', 415);
           demand(!req.headers['content-encoding'] || req.headers['content-encoding'] === 'identity', 'ENCODING_NOT_SUPPORTED', '不接受压缩命令。', 415);
           const body = await readBody(req);
-          reply(res, 200, codexKind ? executeCodex(codexKind, body) : executeProduct(body));
+          reply(res, 200, codexKind ? executeCodex(codexKind, body) : hostKind ? executeHost(hostKind, body) : executeProduct(body));
         } else if (commandMatch) {
           let commandId;
           try { commandId = decodeURIComponent(commandMatch[1]); } catch { throw new WebStoreError(400,'INVALID_COMMAND','命令 ID 编码无效。'); }
@@ -417,6 +496,24 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
           const known = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(commandId);
           demand(known?.request_sha256.startsWith('product-v1:'), 'UNKNOWN_COMMAND', '没有该命令的已提交回执；不要推定已经保存。', 404);
           reply(res, 200, productResult(commandId, known, currentRevision()));
+        } else if (hostList) {
+          const query = new URL(req.url || '/', `http://${req.headers.host}`).searchParams;
+          const host = query.get('host') ?? undefined;
+          const sessionId = query.get('session_id') ?? undefined;
+           const result = rawPath.endsWith('/sessions') ? hostSessions.listSessions({...(host === undefined ? {} : {host})})
+             : rawPath.endsWith('/turns') ? hostSessions.listTurns({...(host === undefined ? {} : {host}), ...(sessionId === undefined ? {} : {session_id: sessionId})})
+               : rawPath.endsWith('/findings') ? hostSessions.listWorkflowFindings({...(host === undefined ? {} : {host}), ...(sessionId === undefined ? {} : {session_id: sessionId})})
+                   : rawPath.endsWith('/activation/query') ? hostWorkflow.queryActivation({host: host ?? 'codex', session_id: sessionId ?? query.get('session_id'), ...(query.get('project_ref') === null ? {} : {project_ref: query.get('project_ref')}), ...(query.get('repo_binding') === null ? {} : {repo_binding: query.get('repo_binding')}), ...(query.get('task_intent') === null ? {} : {task_intent: query.get('task_intent')}), ...(query.get('include_trial') === null ? {} : {include_trial: query.get('include_trial') === 'true'}), ...(query.get('max_items') === null ? {} : {max_items: Number(query.get('max_items'))}), ...(query.get('max_tokens') === null ? {} : {max_tokens: Number(query.get('max_tokens'))})})
+                   : rawPath.endsWith('/sensemaking/results') ? hostWorkflow.listSensemakingResults({...(host === undefined ? {} : {host}), ...(sessionId === undefined ? {} : {sessionId})})
+                     : rawPath.endsWith('/sensemaking/privacy') ? hostWorkflow.listSensemakingPrivacyReceipts({...(query.get('job_id') === null ? {} : {job_id: query.get('job_id')})})
+                   : rawPath.endsWith('/sensemaking/jobs') ? hostWorkflow.listSensemakingJobs({...(host === undefined ? {} : {host}), ...(sessionId === undefined ? {} : {sessionId}), ...(query.get('status') === null ? {} : {status: query.get('status')})}).map(job => { const {input, ...safeJob} = job; return {...safeJob, input_hash: job.input_hash, input_fields: input === null ? [] : Object.keys(input).filter(field => !['user_prompt', 'final_assistant_message'].includes(field)), private_fields_omitted: ['user_prompt', 'final_assistant_message']}; })
+                   : rawPath.endsWith('/routing/proposals') ? hostWorkflow.listRoutingProposals({...(host === undefined ? {} : {host}), ...(sessionId === undefined ? {} : {sessionId}), ...(query.get('status') === null ? {} : {status: query.get('status')})})
+                     : rawPath.endsWith('/activation/history') ? hostWorkflow.listActivationHistory({...(host === undefined ? {} : {host}), ...(sessionId === undefined ? {} : {sessionId})})
+                       : rawPath.endsWith('/repository/recovery/status') ? hostWorkflow.listRepositoryJournals({...(query.get('state') === null ? {} : {state: query.get('state')})})
+                         : rawPath.endsWith('/publication-policies') ? hostWorkflow.listPublicationPolicies({...(query.get('status') === null ? {} : {status: query.get('status')})})
+                           : rawPath.endsWith('/capability/orchestrations') ? hostWorkflow.listCapabilityOrchestrations({...(host === undefined ? {} : {host}), ...(sessionId === undefined ? {} : {sessionId}), ...(query.get('status') === null ? {} : {status: query.get('status')})})
+                             : hostWorkflow.listCapabilityTrials({...(query.get('orchestration_id') === null ? {} : {orchestration_id: query.get('orchestration_id')})});
+           reply(res, 200, rawPath.endsWith('/activation/query') ? result : {protocolVersion: 1, items: result});
         } else reply(res,200,{...readSnapshot(currentRevision()), protocolVersion:1, writeMode:'product-commands'});
         return true;
       }
@@ -453,6 +550,10 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     return true;
   }
   return { file, handle,
+    // User-level Codex host stream. These methods share the Product Workspace
+    // SQLite handle but use independent append-only tables/revisions.
+    hostSessions,
+    hostWorkflow,
     // Read-only application seam for the Agent backend. No whole-host write API.
     read() { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return readSnapshot(currentRevision()); },
     execute(command) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return executeProduct(command); },

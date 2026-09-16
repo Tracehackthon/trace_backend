@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "build": "node --check protocol.mjs && node --check context.mjs && node --check runtime.mjs && node --check remote-http.mjs && node --check model.mjs && node --check external-agent.mjs && node --check profiles.mjs && node --check codex.mjs && node --check store.mjs && node --check service.mjs && node --check http.mjs && node --check backend.mjs && node --check server.mjs",
+    "build": "node --check protocol.mjs && node --check context.mjs && node --check runtime.mjs && node --check remote-http.mjs && node --check model.mjs && node --check external-agent.mjs && node --check profiles.mjs && node --check codex.mjs && node --check store.mjs && node --check sensemaking-worker.mjs && node --check sensemaking-cli.mjs && node --check service.mjs && node --check http.mjs && node --check backend.mjs && node --check server.mjs",
     "test": "node --test --test-concurrency=1 ../../tests/agent-*.test.mjs"
   }
 }

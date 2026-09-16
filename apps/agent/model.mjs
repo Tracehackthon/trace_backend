@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { AgentError, demand, identity, keys, plain, text } from './protocol.mjs';
-import { contextManifest, createRunToolBridge, TRACE_AGENT_INSTRUCTIONS, TRACE_AGENT_RETRIEVAL_INSTRUCTIONS } from './runtime.mjs';
+import { AgentError, demand, identity, keys, plain, text, SENSEMAKING_OUTPUT_SCHEMA } from './protocol.mjs';
+import { contextManifest, createRunToolBridge, TRACE_AGENT_INSTRUCTIONS, TRACE_AGENT_RETRIEVAL_INSTRUCTIONS, TRACE_SENSEMAKING_INSTRUCTIONS } from './runtime.mjs';
 import { postRemoteJson } from './remote-http.mjs';
 
 const MODEL_PROTOCOL = 'openai-chat-completions-v1';
@@ -24,20 +24,24 @@ export function createModelAdapter({ profile, env = process.env, fetchImpl = fet
     async execute({ request, context, signal, onEvent, isCurrent, retrieval }) {
       const sessionId = randomUUID();
       const tools = createRunToolBridge({ context, retrieval, signal, isCurrent, onEvent });
-      const instructions = retrieval?.tools.length ? TRACE_AGENT_RETRIEVAL_INSTRUCTIONS : TRACE_AGENT_INSTRUCTIONS;
+      const sensemaking = request.purpose === 'sensemaking';
+      const instructions = sensemaking ? TRACE_SENSEMAKING_INSTRUCTIONS : retrieval?.tools.length ? TRACE_AGENT_RETRIEVAL_INSTRUCTIONS : TRACE_AGENT_INSTRUCTIONS;
+      const definitions = sensemaking ? [] : tools.definitions;
       const messages = [
         { role: 'system', content: instructions },
         { role: 'user', content: JSON.stringify({ purpose: request.purpose, input: request.input, context: contextManifest(context) }) },
       ];
       onEvent('runtime.connected', { sessionId, runtimeVersion: MODEL_PROTOCOL, model: profile.model });
-      for (let step = 0; step <= 12; step++) {
+      const maxSteps = Number.isSafeInteger(request.maxSteps) ? Math.min(12, Math.max(0, request.maxSteps)) : 12;
+      const maxOutputBytes = Number.isSafeInteger(request.maxOutputBytes) ? Math.min(128 * 1024, Math.max(1, request.maxOutputBytes)) : 128 * 1024;
+      for (let step = 0; step <= maxSteps; step++) {
         demand(!signal.aborted && isCurrent(), 'STALE_CONTEXT', '目标版本、上下文或执行配置已变化。', 409);
-        const response = await send({ model: profile.model, stream: false, messages, tools: providerTools(tools.definitions), tool_choice: 'auto' }, signal);
+        const response = await send({ model: profile.model, stream: false, messages, tools: providerTools(definitions), tool_choice: sensemaking ? 'none' : 'auto', ...(sensemaking ? {response_format: {type: 'json_schema', json_schema: {name: 'trace_sensemaking_result', strict: true, schema: SENSEMAKING_OUTPUT_SCHEMA}}} : {}) }, signal);
         const message = response.choices?.[0]?.message;
         demand(plain(message), 'MODEL_PROTOCOL_ERROR', '模型服务没有返回有效消息。', 502);
         const calls = message.tool_calls;
         if (Array.isArray(calls) && calls.length) {
-          demand(calls.length <= 12 && calls.every(call => plain(call)), 'MODEL_PROTOCOL_ERROR', '模型工具调用结构无效。', 502);
+          demand(!sensemaking && calls.length <= 12 && calls.every(call => plain(call)), 'MODEL_PROTOCOL_ERROR', '模型工具调用结构无效。', 502);
           const safeCalls = [];
           for (const call of calls) {
             demand(identity(call.id) && call.type === 'function' && plain(call.function) && identity(call.function.name)
@@ -57,7 +61,7 @@ export function createModelAdapter({ profile, env = process.env, fetchImpl = fet
         }
         demand(keys(message, ['role', 'content', 'refusal', 'annotations', 'audio']) || typeof message.content === 'string',
           'MODEL_PROTOCOL_ERROR', '模型最终消息结构无效。', 502);
-        demand(text(message.content, 128 * 1024) && message.content.trim(), 'MODEL_PROTOCOL_ERROR', '模型没有返回最终结构化结果。', 502);
+        demand(text(message.content, maxOutputBytes) && message.content.trim() && Buffer.byteLength(message.content, 'utf8') <= maxOutputBytes, 'MODEL_PROTOCOL_ERROR', '模型没有返回最终结构化结果或超过输出预算。', 502);
         onEvent('output.delta', { itemId: `model-${sessionId}`, delta: message.content, format: 'json-fragment' });
         return { raw: message.content, threadId: sessionId, turnId: `${sessionId}:${step + 1}`, runtimeVersion: MODEL_PROTOCOL,
           providedFragments: tools.providedFragments };

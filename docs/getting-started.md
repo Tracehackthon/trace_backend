@@ -61,7 +61,9 @@ trace codex enable --dry-run
 trace codex enable
 ```
 
-Trace 添加自己管理的 `SessionStart`、`UserPromptSubmit`、`PreToolUse` 和 `PostToolUse` hook，保留其他 hook，并把旧配置备份与本次 receipt 放入可追溯位置。`hooks.json` 虽然是用户级配置，但安装的是一个不绑定项目路径的路由入口：每次 Codex 事件都用自己的 `cwd` 向上找到最近的 `.trace/`。因此在项目 A、B 都执行 enable 后，A 只会使用 A 的状态和来源，B 也只会使用 B 的。
+Trace 添加自己管理的 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`Interrupt` 和 `SessionEnd` hook，保留其他 hook，并把旧配置备份与本次 receipt 放入可追溯位置。`hooks.json` 虽然是用户级配置，但安装的是一个不绑定项目路径的路由入口：每次 Codex 事件都用自己的 `cwd` 向上找到最近的 `.trace/`。因此在项目 A、B 都执行 enable 后，A 只会使用 A 的状态和来源，B 也只会使用 B 的。
+
+这些 hook 默认只观察，不会保存 Codex prompt。若要接收原生 Host Session，必须在当前 task 中通过 MCP 的 `trace_host_session_attach`（或高级 CLI `trace codex host-session attach --session-id ... --web-state-file ...`）明确附着；之后可用 pause/detach 控制接收。附着的生命周期记录进入 Product Workspace `web.sqlite` 的独立表，不写项目 `trace.sqlite`，也不依赖 `transcript_path`。
 
 Trace 不会先替 Codex 挑两个页面。它只把当前项目已授权的 formal source root、范围与单轮读取预算交给 Codex；Codex 用自己的原生搜索/读取工具完成工作。随后 Trace 记录安全 evidence，区分“来源已提供 / 已搜索 / 已读取 / 未分类访问”。
 
@@ -94,3 +96,11 @@ trace profile migrate --confirm true
 ```
 
 它只将正在使用的兼容协作模型/来源地图写成本地 profile 并创建 hash lock，不重新初始化，也不改动数据和来源。需要换协作方式或来源地图时，继续使用显式的 `trace profile update --file <绝对路径> --confirm true`。更新策略与边界见[版本、协议与发布](versioning.md)。
+
+## 查看 Host worker 与恢复状态
+
+启动桌面 Product Service 后，可以在“宿主会话”页查看 attached/paused/ended session、turn、finding、sensemaking job、隐私回执、worker health、Guard journal、CapabilityTrial 和 PublicationPolicy。原始 prompt/final 默认折叠且标为私有；浏览器不另存工作流状态。
+
+需要排查异步任务时使用 MCP 的 `trace_sensemaking_worker_status`（或高级 CLI `trace codex sensemaking-worker status`）；只在明确需要时调用 drain。Repository Guard 崩溃后先用 `trace_repository_recovery_preview`，只有 preview 证明分支、HEAD 与 clean state 唯一吻合才调用 reconcile。PublicationPolicy 和 capability publish 始终先 preview/producer evidence/validation，再由用户 adopt 或提供本次 approval；撤回 policy 会立即阻止后续发布。
+
+fixture-dev 是离线契约测试模式，不代表真实模型质量；没有真实 profile/cookie/远程凭据时不能声称联网验收。云同步、ADrive、多租户和远程鉴权仍不在本地启动流程内。

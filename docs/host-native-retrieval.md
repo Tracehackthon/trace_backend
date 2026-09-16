@@ -85,6 +85,40 @@ Codex hooks 能观察 Bash、`apply_patch`、MCP 与多数本地函数工具，�
 
 官方 Codex hook 合约说明了 `UserPromptSubmit` 可注入当轮开发者上下文，`PreToolUse` / `PostToolUse` 可收到本地工具名称、输入和输出，而托管工具不经过这条本地 hook 路径；本实现基于该边界设计。[OpenAI Codex Hooks 文档](https://learn.chatgpt.com/zh-Hans/docs/hooks)
 
+## Host Session Ingest 协议
+
+原生 hook 生命周期与认知源 evidence 分开接收。`SessionStart`、
+`UserPromptSubmit`、`Stop`、`Interrupt`、`SessionEnd` 只在用户明确
+`attach` 当前宿主会话后进入 Product Workspace 的 `web.sqlite`；全局 hook
+看见未附着会话时保持成功 no-op。`PreToolUse` / `PostToolUse` 继续按上面的
+native evidence 规则处理；附着时 Host Session 只记录它们的安全 event/tool
+identity，不把工具输入或输出复制进 Host Session 表。
+
+Host Session 的状态机为：
+
+```text
+attach → attached → pause → paused
+                 └──────────────→ attach (同一未结束 identity)
+attached/paused ────────────────→ detach → ended
+UserPromptSubmit → HostTurn started
+Stop             → HostTurn completed
+Interrupt        → HostTurn interrupted
+SessionEnd/detach→ 会话 ended，并将仍打开的 turn 标为 interrupted
+```
+
+Host ingest 的事实边界是独立 append-only receipt 表和同一事务内的 session/turn
+索引；它不调用产品快照写入，因此任何单个 hook 事件都不会推进
+`web_workspace.revision`。事件幂等键至少包含
+`(host, session_id, turn_id?, event_kind, tool_use_id?)`。规范化内容只包含
+官方生命周期字段（`prompt`、`last_assistant_message` 等）；同键同内容返回
+原回执，同键不同内容以冲突失败，Stop/Interrupt 的乱序以错误失败。
+
+`project_ref` 可为空，所以已附着会话即使当前 cwd 没有 `.trace/` 也能写入用户级
+接收空间；不使用 `transcript_path`。Workflow Finding 只能由用户明确的
+`$trace` 捕获命令关联一个已接收 HostTurn，初始为
+`scope=unknown`、`target_kind=unresolved`、`status=captured`，不会自动生成
+Skill、改变理解或发布规则。
+
 ## 用户看到什么
 
 | 状态 | 用户需要知道 | 用户不必看到 |
@@ -111,3 +145,9 @@ trace review <ID>
 `tests/codex_hook_routing.test.mjs` 和 `tests/evals/hook-replay.test.mjs` 回放真实 `hook-stdio --route-from-event-cwd` 的 `UserPromptSubmit` / `PreToolUse` / `PostToolUse` 输入，验证多项目 cwd 路由、host-native source lease、搜索与读取的语义区分、读取预算，以及 prompt/source/tool/absolute-path 不入库。
 
 `pnpm eval:pair` 只输出 fixture native-read replay 的 evidence coverage；它不是 Codex 模型检索质量结论。真实效果验收需要在固定模型和权限的干净项目中运行任务，结合最终 artifact、实际 `source_read` evidence、用户纠正次数与延迟比较。
+
+## Sensemaking、隐私与恢复边界
+
+Host Session 的 Stop 只创建 Product `web.sqlite` 中的异步 outbox/job。`apps/agent` 通过 `ExecutorRegistry` 使用服务端绑定的 profile；fixture、真实 profile 和 shadow 是显式模式，hook 永不等待 worker。发送给 executor 的输入只含 attached HostTurn 的允许字段、安全 evidence 和有界 finding 摘要，先经过 `trace.host-privacy@1` 的长度/字段 allowlist、secret/credential/path/PII 脱敏及 overlap detector。结果严格校验 `trace.sensemaking-result@1`；schema、identity、预算或回显检查失败只保存 hash、redaction/rejected receipt 和失败 job。
+
+从 adopted runtime-guard 到 Git 的 apply 由 `repository_guard_journal` 记录 `prepared → git_applied → receipt_committed`。启动或显式 recovery 会重取当前 branch、HEAD、working tree 和 state hash；状态无法证明时标记 `recovery_required`，不自动切回、reset、clean、删除或远程操作。Capability candidate 必须沿现有 Change Set/CapabilityPublisher 进入 stage、trial、validate、publish；PublicationPolicy 默认 manual 且可撤回，candidate/adoption/trial 不等于 Skill。

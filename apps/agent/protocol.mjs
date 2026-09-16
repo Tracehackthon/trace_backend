@@ -24,6 +24,20 @@ export const OUTPUT_SCHEMA = {
     uncertainties: { type: 'array', items: { type: 'string' } },
   },
 };
+export const SENSEMAKING_OUTPUT_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['schema_id', 'schema_version', 'kind', 'confidence', 'observation', 'desired_behavior', 'scope', 'target_kind', 'target_hint', 'understanding_delta', 'open_questions', 'source'],
+  properties: {
+    schema_id: {type: 'string', const: 'trace.sensemaking-result'}, schema_version: {type: 'integer', const: 1},
+    kind: {type: 'string', enum: ['candidate', 'noop']}, confidence: {type: 'number', minimum: 0, maximum: 1},
+    observation: {type: ['string', 'null'], maxLength: 16000}, desired_behavior: {type: ['string', 'null'], maxLength: 16000},
+    scope: {type: 'string', const: 'unknown'}, target_kind: {type: 'string', const: 'unresolved'}, target_hint: {type: ['string', 'null'], maxLength: 128},
+    understanding_delta: {type: ['object', 'null']}, open_questions: {type: 'array', maxItems: 16, items: {type: 'string', maxLength: 2000}},
+    source: {type: 'object', additionalProperties: false, required: ['host', 'session_id', 'turn_id', 'run_id', 'input_hash'], properties: {
+      host: {type: 'string'}, session_id: {type: 'string'}, turn_id: {type: 'string'}, run_id: {type: ['string', 'null']}, input_hash: {type: 'string'},
+    }},
+  },
+};
 export function validateRequest(value) {
   demand(keys(value, ['protocolVersion', 'requestId', 'expectedRevision', 'matterId', 'contextMode', 'contextEpoch', 'purpose', 'input', 'selection', 'sourceIds', 'previousRunId', 'retrieval', 'profileId']), 'INVALID_REQUEST', '请求包含不支持的字段。', 400);
   demand(value.protocolVersion === 1 && identity(value.requestId) && identity(value.matterId) && integer(value.expectedRevision)

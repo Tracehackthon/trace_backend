@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { once } from 'node:events';
-import { AgentError, demand, plain, OUTPUT_SCHEMA } from './protocol.mjs';
-import { contextManifest, createRunToolBridge, TRACE_AGENT_INSTRUCTIONS, TRACE_AGENT_RETRIEVAL_INSTRUCTIONS } from './runtime.mjs';
+import { AgentError, demand, plain, OUTPUT_SCHEMA, SENSEMAKING_OUTPUT_SCHEMA } from './protocol.mjs';
+import { contextManifest, createRunToolBridge, TRACE_AGENT_INSTRUCTIONS, TRACE_AGENT_RETRIEVAL_INSTRUCTIONS, TRACE_SENSEMAKING_INSTRUCTIONS } from './runtime.mjs';
 
 // This policy was exercised against the wire request of this exact runtime.
 // An unknown CLI must be requalified, not silently inherit new native tools.
@@ -151,6 +151,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
       let threadId, turnId, completed = false, outputBytes = 0;
       const texts = new Map(); let finish, fail;
       const tools = createRunToolBridge({ context, retrieval, signal, isCurrent, onEvent });
+      const sensemaking = request.purpose === 'sensemaking';
       const done = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
       done.catch(() => {}); // Failure can precede the awaited turn/start response.
       rpc.onFailure = fail;
@@ -160,6 +161,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
       const current = () => demand(!signal.aborted && isCurrent(), 'STALE_CONTEXT', '目标版本或上下文已变化。', 409);
       rpc.onRequest = async (method, params) => {
         current();
+        if (sensemaking) throw new AgentError('TOOL_NOT_ALLOWED', 'sensemaking profile 不开放工具。', 403);
         if (method !== 'item/tool/call') throw new AgentError('TOOL_NOT_ALLOWED', '此模式不授予额外权限或交互式工具。', 403);
         demand(threadId && params.threadId === threadId && (!turnId || params.turnId === turnId) && !completed,
           'TOOL_SCOPE_MISMATCH', '工具调用的会话不匹配。', 403);
@@ -175,12 +177,14 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
           current();
           demand(typeof params.delta === 'string', 'CODEX_PROTOCOL_ERROR', '消息片段无效。', 502);
           outputBytes += Buffer.byteLength(params.delta);
-          demand(outputBytes <= 128 * 1024, 'OUTPUT_LIMIT', '输出超过本次预算。', 502);
+          const outputLimit = Number.isSafeInteger(request.maxOutputBytes) ? Math.min(128 * 1024, Math.max(1, request.maxOutputBytes)) : 128 * 1024;
+          demand(outputBytes <= outputLimit, 'OUTPUT_LIMIT', '输出超过本次预算。', 502);
           texts.set(params.itemId, (texts.get(params.itemId) ?? '') + params.delta);
           onEvent('output.delta', { itemId: params.itemId, delta: params.delta, format: 'json-fragment' });
         }
         if (method === 'item/completed' && params.item?.type === 'agentMessage') {
-          demand(typeof params.item.text === 'string' && Buffer.byteLength(params.item.text) <= 128 * 1024, 'OUTPUT_LIMIT', '最终输出超过预算。', 502);
+          const outputLimit = Number.isSafeInteger(request.maxOutputBytes) ? Math.min(128 * 1024, Math.max(1, request.maxOutputBytes)) : 128 * 1024;
+          demand(typeof params.item.text === 'string' && Buffer.byteLength(params.item.text) <= outputLimit, 'OUTPUT_LIMIT', '最终输出超过预算。', 502);
           texts.set(params.item.id, params.item.text);
         }
         if (method === 'item/started' && ['commandExecution', 'fileChange', 'mcpToolCall', 'webSearch', 'collabAgentToolCall', 'imageView'].includes(params.item?.type)) {
@@ -188,7 +192,12 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         }
         if (method === 'turn/completed') {
           completed = true;
-          if (params.turn.status === 'completed') finish({ raw: [...texts.values()].at(-1) ?? '', threadId, turnId: params.turn.id, runtimeVersion: host.version,
+          if (params.turn.status === 'completed') finish({ raw: [...texts.values()].at(-1) ?? '', threadId, turnId: params.turn.id,
+            // Profile bindings identify the Codex app-server, not merely the
+            // CLI semver.  Keep the legacy runtime identity for ordinary
+            // Agent runs, while making the strict sensemaking worker's
+            // provider identity agree with profiles.safeProfile().
+            runtimeVersion: sensemaking ? `codex-app-server/${host.version}` : host.version,
             providedFragments: tools.providedFragments });
           else fail(new AgentError(params.turn.status === 'interrupted' ? 'CANCELLED' : 'CODEX_TURN_FAILED', 'Codex 未完成本次生成；原文未改变。', 502));
         }
@@ -203,17 +212,17 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
           'skills.config': skills.data.flatMap(e => e.skills).map(s => ({ path: s.path, enabled: false })),
         };
         current();
-        const instructions = retrieval?.tools.length ? TRACE_AGENT_RETRIEVAL_INSTRUCTIONS : TRACE_AGENT_INSTRUCTIONS;
+        const instructions = sensemaking ? TRACE_SENSEMAKING_INSTRUCTIONS : retrieval?.tools.length ? TRACE_AGENT_RETRIEVAL_INSTRUCTIONS : TRACE_AGENT_INSTRUCTIONS;
         const started = await rpc.rpc('thread/start', { cwd: host.cwd, ephemeral: true, approvalPolicy: 'never', sandbox: 'read-only',
           ...(model ? { model } : {}), config: threadConfig, baseInstructions: instructions, developerInstructions: instructions,
-          selectedCapabilityRoots: [], environments: [], dynamicTools: tools.definitions });
+          selectedCapabilityRoots: [], environments: [], dynamicTools: sensemaking ? [] : tools.definitions });
         threadId = started.thread.id;
         onEvent('runtime.connected', { threadId, runtimeVersion: host.version, model: started.model });
         current();
         const manifest = contextManifest(context);
         const turn = await rpc.rpc('turn/start', { threadId, effort: 'medium',
           input: [{ type: 'text', text: JSON.stringify({ purpose: request.purpose, input: request.input, context: manifest }), text_elements: [] }],
-          sandboxPolicy: { type: 'readOnly', networkAccess: false }, outputSchema: OUTPUT_SCHEMA });
+          sandboxPolicy: { type: 'readOnly', networkAccess: false }, outputSchema: sensemaking ? SENSEMAKING_OUTPUT_SCHEMA : OUTPUT_SCHEMA });
         turnId ??= turn.turn.id;
         return await done;
       } finally {

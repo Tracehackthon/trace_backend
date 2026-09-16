@@ -5,6 +5,7 @@ import { createAgentService } from './service.mjs';
 import { createExecutorRegistry } from './profiles.mjs';
 import { createAgentHttp } from './http.mjs';
 import { demand, hash } from './protocol.mjs';
+import { createSensemakingWorker } from './sensemaking-worker.mjs';
 
 /** Agent-only backend. Content-source and account routes are mounted by the
  * desktop host, so Web clients can distinguish /api/search, /api/zhihu and
@@ -19,7 +20,18 @@ export function createAgentBackend({ productWorkspace, env = process.env, retrie
   try {
     const executorRegistry = createExecutorRegistry({ env });
     executorRegistry.describe(); // fail startup before accepting work when server-owned config is invalid
-    return createAgentHttp({ service: createAgentService({ store, readWorkspace: productWorkspace.read,
+    const sensemakingMode = env.TRACE_SENSEMAKING_MODE ?? 'disabled';
+    demand(['disabled', 'fixture-dev', 'profile', 'shadow'].includes(sensemakingMode), 'INVALID_CONFIG', 'TRACE_SENSEMAKING_MODE 只支持 disabled、fixture-dev、profile 或 shadow。', 500);
+    let sensemakingWorker = null;
+    if (sensemakingMode !== 'disabled') {
+      if (['profile', 'shadow'].includes(sensemakingMode)) demand(typeof env.TRACE_SENSEMAKING_PROFILE_ID === 'string' && env.TRACE_SENSEMAKING_PROFILE_ID.trim(), 'INVALID_CONFIG', '真实 sensemaking profile 必须由 TRACE_SENSEMAKING_PROFILE_ID 明确配置。', 500);
+      sensemakingWorker = createSensemakingWorker({productWorkspace, agentStore: store,
+        mode: sensemakingMode === 'fixture-dev' ? 'fixture' : sensemakingMode,
+        profileId: env.TRACE_SENSEMAKING_PROFILE_ID, env,
+        pollMs: Number(env.TRACE_SENSEMAKING_POLL_MS || 1000)});
+      sensemakingWorker.start({pollMs: Number(env.TRACE_SENSEMAKING_POLL_MS || 1000), maxConcurrent: 1});
+    }
+    return createAgentHttp({ sensemakingWorker, service: createAgentService({ store, readWorkspace: productWorkspace.read,
       executeProduct: productWorkspace.execute, adoptCandidate: productWorkspace.adoptAgentCandidate,
       executorRegistry, timeoutMs, retrievalProvider }) });
   } catch (e) { store.close(); throw e; }

@@ -60,7 +60,7 @@ corepack pnpm build
 
 ## 你登记的是 HTTPS 回调
 
-当前提供的应用 ID 为 **669**，回调为 **`https://trace.neutronm.store/callback`**。2026-09-15 实测该路径返回 Trace 首页 HTML，而不是授权接收器；需部署下面的路由，不能只依赖 SPA fallback。
+当前提供的应用 ID 为 **669**，回调为 **`https://trace.neutrom.store/callback`**。该路径必须由服务端授权接收器处理，不能只依赖 SPA fallback。
 
 本机 Token 不能保存在公共回调页。实现将“接收授权码”和“换取 Token”分开：
 
@@ -82,7 +82,7 @@ corepack pnpm build
 
 ```text
 ZHIHU_OAUTH_APP_ID=669
-ZHIHU_OAUTH_REDIRECT_URI=https://trace.neutronm.store/callback
+ZHIHU_OAUTH_REDIRECT_URI=https://trace.neutrom.store/callback
 TRACE_OAUTH_RELAY_PORT=4175
 ```
 

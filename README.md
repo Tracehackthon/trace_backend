@@ -5,9 +5,9 @@
 >
 > - **直接体验产品：** [trace.neutrom.store](https://trace.neutrom.store/)
 > - **观看完整演示：** [trace.neutrom.store/video](https://trace.neutrom.store/video)
-> - **下载 Windows 桌面版：** [Trace Desktop 最新安装包](https://github.com/Tracehackthon/traceweb/releases/latest)
+> - **下载 Windows 桌面版：** [Trace Desktop 最新 Release](https://github.com/Tracehackthon/traceweb/releases/latest)（此链接始终指向当前正式版，不要从旧 tag 下载）
 >
-> 桌面版会同时打开 Trace 主应用与桌宠，并在本机启动受限 Runtime。第一次使用 Codex 时，进入「个人与设置 → Codex 接入」，选择当前项目并执行连接检查；Trace 会明确告诉你 Codex 是否已安装、已登录且版本可用，不会要求用户手填项目路径，也不会把系统路径暴露到页面。
+> 桌面版会同时打开 Trace 主应用与桌宠，并在本机启动受限 Runtime。知乎搜索、全网搜索和账号授权已经接入线上同源服务，安装包不携带 App Key 或 Access Secret；第一次使用 Codex 时，进入「个人与设置 → Codex 接入」，选择当前项目并执行连接检查。Trace 会明确告诉你 Codex 是否已安装、已登录且版本可用，不会要求用户手填项目路径，也不会把系统路径暴露到页面。
 
 ## 让值得思考但未完成的想法，继续发生。
 
@@ -93,9 +93,9 @@ Trace 的核心对象不是笔记、聊天或待办，而是：
 
 | 入口 | 适合什么 | 当前能验证什么 | 数据边界 |
 | --- | --- | --- | --- |
-| [Trace 在线演示](https://trace.neutrom.store/) | 快速体验“留下一点 → 理解 → 行动 → 结果”的手工闭环 | 浏览器中的手工产品流程 | 当前浏览器 IndexedDB；**不**自动连接本机 SQLite、知乎、Agent 或 Codex |
+| [Trace 在线演示](https://trace.neutrom.store/) | 快速体验“留下一点 → 真实来源 → 理解 → 行动 → 结果”的闭环 | 浏览器产品流程、知乎／全网公开搜索、用户主动发起的知乎授权 | 当前浏览器 IndexedDB；**不**自动连接本机 SQLite、Agent 或 Codex |
 | [Trace 视频展示](https://trace.neutrom.store/video) | 快速了解产品叙事、关键交互和完整体验路径 | 视频形式的产品演示 | 用于展示产品，不代替本机接口与持久化验收 |
-| [Trace Windows 桌面版](https://github.com/Tracehackthon/traceweb/releases/latest) | 体验桌宠、本机 Runtime、项目识别与 Codex 工作回流 | 安装后由应用完成环境检查，用户只需选择项目并确认 Codex 可用 | 本机单用户；首次安装包暂未提供 Windows 代码签名，系统可能显示发布者提醒 |
+| [Trace Windows 桌面版](https://github.com/Tracehackthon/traceweb/releases/latest) | 体验桌宠、知乎授权、本机 Runtime、项目识别与 Codex 工作回流 | 安装后直接使用线上知乎能力；本机由应用完成 Codex 环境检查，用户只需选择项目并确认 Codex 可用 | 知乎 Token 留在桌面应用隔离会话；本机 Runtime 单用户；安装包暂未提供 Windows 代码签名 |
 | 本仓库的本机 Web | 评委演示来源、产品状态、Codex 工作回流及可选 Agent API | SQLite、知乎／全网 provider、受控 Agent Runtime | 单用户、loopback、same-origin；详见下方运行方式 |
 
 <a id="zhihu"></a>
@@ -105,7 +105,7 @@ Trace 的核心对象不是笔记、聊天或待办，而是：
 
 | 能力 | 评委现在可以验证 | 状态与边界 |
 | --- | --- | --- |
-| **知乎搜索** | 围绕一个具体问题查看标题、作者、摘要与原始链接 | 需在本机配置 Access Secret；只展示 provider 返回的摘要，不冒充全文 |
+| **知乎搜索** | 围绕一个具体问题查看标题、作者、摘要与原始链接 | 在线应用和桌面版通过同源服务使用；只展示 provider 返回的摘要，不冒充全文，密钥不进入浏览器或安装包 |
 | **全网搜索** | 与知乎搜索分开调用，补充或反驳当前判断 | 固定路由和受限筛选；端点已连通，但非知乎站点覆盖仍待更多验收 |
 | **用户授权** | 用户主动连接后，按需读取自己的创作、关注、近期收藏、收藏夹及其中内容 | OAuth 与公共搜索分离；每次只读用户选择的 3 条，不自动翻页、保存，也不拿开发者身份代替用户 |
 | **Agent 检索** | 在网页的一件事中发起 Agent run，并为这一次显式勾选知乎／全网工具 | 默认关闭；调用次数、结果条数、来源和引文均受限并被宿主记录 |

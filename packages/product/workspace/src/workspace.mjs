@@ -175,8 +175,10 @@ function readBody(req) {
  * retained; product command fingerprints are namespaced in the existing ledger. */
 /** Authoritative local Product Workspace: product entities, command CAS,
  * receipts and Codex delivery/return records share one transactional owner. */
-export function createProductWorkspace({ file, allowSnapshotWrites = false } = {}) {
+export function createProductWorkspace({ file, allowSnapshotWrites = false, desktopSnapshotToken } = {}) {
   demand(typeof file === 'string' && path.isAbsolute(file), 'INVALID_PATH', 'Web SQLite 路径必须明确为绝对路径。');
+  demand(desktopSnapshotToken === undefined || typeof desktopSnapshotToken === 'string' && desktopSnapshotToken.length >= 32 && desktopSnapshotToken.length <= 256,
+    'INVALID_DESKTOP_TOKEN', '桌面工作区令牌配置无效。');
   file = path.resolve(file);
   demand(path.basename(file).toLowerCase() !== 'trace.sqlite', 'WRONG_DATABASE', 'Web 状态不得写入认知 trace.sqlite。');
   // Probe existing files read-only before WAL/schema pragmas can touch them.
@@ -406,7 +408,12 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false } = {
         } else reply(res,200,{...readSnapshot(currentRevision()), protocolVersion:1, writeMode:'product-commands'});
         return true;
       }
-      if (rawPath === '/api/web/reset' || rawPath === '/api/web/workspace' && req.method === 'PUT' && !allowSnapshotWrites) {
+      const suppliedDesktopToken = req.headers['x-trace-desktop-token'];
+      const desktopSnapshotWrite = rawPath === '/api/web/workspace' && req.method === 'PUT'
+        && typeof suppliedDesktopToken === 'string' && desktopSnapshotToken !== undefined
+        && Buffer.byteLength(suppliedDesktopToken) === Buffer.byteLength(desktopSnapshotToken)
+        && crypto.timingSafeEqual(Buffer.from(suppliedDesktopToken), Buffer.from(desktopSnapshotToken));
+      if (rawPath === '/api/web/reset' || rawPath === '/api/web/workspace' && req.method === 'PUT' && !allowSnapshotWrites && !desktopSnapshotWrite) {
         reply(res, 410, {error:{code:'LEGACY_WRITE_DISABLED',message:'整份工作区写入与旧重置已停用，请使用明确的产品命令。'}}); return true;
       }
       if (!['/api/web/workspace', '/api/web/export', '/api/web/reset'].includes(rawPath)) { reply(res, 404, { error: { code: 'NOT_FOUND', message: '没有这个工作区接口。' } }); return true; }

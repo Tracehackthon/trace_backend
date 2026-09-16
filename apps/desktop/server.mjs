@@ -12,7 +12,12 @@ const repositoryRoot = path.resolve(root, '../..')
 const defaultStateRoot = path.resolve(root, '../../..')
 const productModuleRoot = path.join(repositoryRoot, 'packages/product/workspace/src')
 const productBrowserAssets = new Set(['index.mjs', 'bridge.mjs', 'commands.mjs', 'demo-workspace.mjs', 'chain-model.mjs', 'comparison-model.mjs', 'worksite-model.mjs'])
-const productWorkspace = createProductWorkspace({ file: path.resolve(process.env.TRACE_WEB_STATE_FILE || path.join(defaultStateRoot, '.trace/state/web.sqlite')) })
+const productWorkspace = createProductWorkspace({
+  file: path.resolve(process.env.TRACE_WEB_STATE_FILE || path.join(defaultStateRoot, '.trace/state/web.sqlite')),
+  // Set only by the packaged Electron host. It is never exposed to a renderer,
+  // URL or command line and only unlocks the existing bounded snapshot parser.
+  ...(process.env.TRACE_DESKTOP_SNAPSHOT_TOKEN ? { desktopSnapshotToken: process.env.TRACE_DESKTOP_SNAPSHOT_TOKEN } : {}),
+})
 // Four explicit Web API domains: product state, public source search, Zhihu
 // account connection, and Agent runs. The Zhihu middleware owns `/api/search/*`
 // and `/api/zhihu/*`; the Agent receives its provider in-process only.

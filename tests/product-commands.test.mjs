@@ -18,8 +18,9 @@ async function fixture(t) {
     assert.ok(path.basename(absolute).startsWith('trace-product-command-'));
     fs.rmSync(absolute, {recursive:true,force:true});
   });
-  async function open(allowSnapshotWrites = false) {
-    const store = createProductWorkspace({file, allowSnapshotWrites});
+  async function open(options = false) {
+    const config = typeof options === 'boolean' ? { allowSnapshotWrites: options } : options;
+    const store = createProductWorkspace({file, ...config});
     const server = http.createServer(async (req,res) => {if (!await store.handle(req,res)){res.writeHead(404);res.end('{}');}});
     server.listen(0, '127.0.0.1'); await once(server,'listening');
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -51,6 +52,20 @@ test('product API default is commands-only; both legacy overwrite paths are clos
   assert.equal((await a.request('/api/web/workspace','PUT',{expectedRevision:0,commandId:'old',host:{}})).status,410);
   assert.equal((await a.request('/api/web/reset','POST',{commandId:'old-reset',host:{}})).status,410);
   assert.equal((await a.read()).revision,0);
+});
+
+test('packaged desktop snapshot bridge requires its private process token',async t=>{
+  const a=await fixture(t);await a.close();
+  const desktopToken='desktop-test-token-with-enough-entropy';
+  const b=await a.open({desktopSnapshotToken:desktopToken});
+  const captured=await b.ok(capture('desktop-matter','来自桌面窗口'));
+  const host=structuredClone(captured.host);host.chain.capture.text='桌面草稿';
+  const body={expectedRevision:captured.revision,commandId:'desktop-snapshot',host};
+  assert.equal((await b.request('/api/web/workspace','PUT',body)).status,410);
+  assert.equal((await b.request('/api/web/workspace','PUT',body,{'x-trace-desktop-token':'wrong'})).status,410);
+  const saved=await b.request('/api/web/workspace','PUT',body,{'x-trace-desktop-token':desktopToken});
+  assert.equal(saved.status,200,JSON.stringify(saved.json));
+  assert.equal(saved.json.host.chain.capture.text,'桌面草稿');
 });
 
 test('capture, explicit understanding and stop restore from the same v1 database after restart',async t=>{

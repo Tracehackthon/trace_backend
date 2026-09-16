@@ -4,9 +4,9 @@ import {createHash} from 'node:crypto';
 import {requireText as text} from '../../../core/protocol/src/index.js';
 
 export const CODEX_HOOK_INSTALLER_ID = 'trace.codex-hooks-installer' as const;
-export const CODEX_HOOK_INSTALLER_VERSION = '0.2.0' as const;
+export const CODEX_HOOK_INSTALLER_VERSION = '0.3.0' as const;
 export const TRACE_HOOK_MARKER = 'trace.codex-managed.v1' as const;
-export const DEFAULT_TRACE_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse'] as const;
+export const DEFAULT_TRACE_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'Interrupt', 'SessionEnd'] as const;
 
 export interface CodexHooksConfig {hooks?: Record<string, unknown[]>; [key: string]: unknown;}
 export interface CodexHookPreview {hooks_file: string; before_hash: string; after_hash: string; managed_events: string[]; legacy_commands: string[]; unrelated_hooks_preserved: boolean;}
@@ -15,7 +15,7 @@ export interface CodexHookPreview {hooks_file: string; before_hash: string; afte
  * rollback-compatible because a receipt is evidence for restoring the old
  * hooks.json, rather than a declaration that the old hook set has new events.
  */
-export type CodexHookReceiptVersion = '0.1.0' | '0.2.0';
+export type CodexHookReceiptVersion = '0.1.0' | '0.2.0' | '0.3.0';
 export interface CodexHookReceipt {protocol_id: 'trace.codex-hook-install'; protocol_version: CodexHookReceiptVersion; status: 'installed' | 'rolled_back'; hooks_file: string; before_hash: string; after_hash: string; backup_file: string | null; managed_events: string[]; installed_at: string;}
 
 function absolute(value: string, field: string): string { const result = path.resolve(text(value, field)); if (!path.isAbsolute(result)) throw new Error(`${field} must be absolute`); return result; }
@@ -80,10 +80,10 @@ export class CodexHookInstaller {
     const after = JSON.stringify(next, null, 2) + '\n';
     const staging = `${this.hooksFile}.trace-staging-${process.pid}`; fs.writeFileSync(staging, after, {flag: 'wx'});
     try { fs.renameSync(staging, this.hooksFile); } catch (error) { fs.rmSync(staging, {force: true}); throw error; }
-    return {protocol_id: 'trace.codex-hook-install', protocol_version: '0.2.0', status: 'installed', hooks_file: this.hooksFile, before_hash: preview.before_hash, after_hash: hash(after), backup_file: backup, managed_events: events, installed_at: new Date().toISOString()};
+    return {protocol_id: 'trace.codex-hook-install', protocol_version: CODEX_HOOK_INSTALLER_VERSION, status: 'installed', hooks_file: this.hooksFile, before_hash: preview.before_hash, after_hash: hash(after), backup_file: backup, managed_events: events, installed_at: new Date().toISOString()};
   }
   rollback(receipt: CodexHookReceipt): CodexHookReceipt {
-    if (receipt.protocol_id !== 'trace.codex-hook-install' || !['0.1.0', '0.2.0'].includes(receipt.protocol_version) || receipt.status !== 'installed' || !receipt.backup_file) throw new Error('Unsupported hook receipt');
+    if (receipt.protocol_id !== 'trace.codex-hook-install' || !['0.1.0', '0.2.0', '0.3.0'].includes(receipt.protocol_version) || receipt.status !== 'installed' || !receipt.backup_file) throw new Error('Unsupported hook receipt');
     const backup = absolute(receipt.backup_file, 'backup_file'); noSymlink(backup); if (!fs.existsSync(backup)) throw new Error('Hook backup does not exist');
     const current = load(this.hooksFile);
     if (hash(current.raw) !== receipt.after_hash) throw new Error('STALE_HOOK_ROLLBACK: hooks.json changed after Trace installed it; preserve the current file and inspect the receipt before retrying');

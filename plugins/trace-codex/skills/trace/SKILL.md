@@ -63,6 +63,33 @@ Never imply that an upgrade migrates templates, source data, or user profile aut
 
 For “enable Trace in Codex”, first call `trace_codex_hook_enable_propose`. State clearly that it updates the Codex user-level hook configuration, creates a rollback backup, preserves unrelated hooks, and routes every event by its own current project directory. Apply only after the user adopts it.
 
+## Follow the current Codex host session (explicitly)
+
+When the user says one of these natural requests, route it to the matching
+host-session MCP call. The session identity comes from the host environment;
+never ask the user to paste a session ID:
+
+| Natural request | MCP route | Boundary |
+| --- | --- | --- |
+| `$trace 跟着这个任务` | `trace_host_session_attach` | Starts explicit capture for this Codex session; no earlier prompt is retroactively imported. |
+| `$trace 暂停跟随` | `trace_host_session_pause` | Pauses capture; existing turns remain. |
+| `$trace 结束跟随` | `trace_host_session_detach` | Ends this session identity and closes unfinished turns. |
+| `$trace 记下这个流程改进：...` | `trace_workflow_finding_capture` | Captures one finding against the current HostTurn; omit `turn_id` when the current open turn is unambiguous. |
+| `$trace 这次带回了什么` | `trace_host_activation_history` / `trace_host_activation_query` | Shows offered/used activation receipts; do not claim an offer was used. |
+| `$trace 查看待处理发现` | `trace_workflow_findings_list` then `trace_routing_proposals_list` | Read-only review; captured/unresolved is not injected or adopted. |
+
+If the Product service is not running, `TRACE_PRODUCT_URL` is missing, the
+session is not attached, or no current HostTurn can be found, report the short
+recoverable error and ask the user to start/attach/resume instead of pretending
+the action succeeded. An ordinary `$trace` sentence never saves a global rule,
+changes canonical understanding, or publishes a Skill. Routing is always a
+proposal; adoption/trial/rejection uses `trace_routing_decide` with the latest
+revision.
+
+When a captured finding has no proposal yet, call `trace_routing_propose` with the
+finding identity returned by the read-only list before presenting its deterministic
+route. The proposal remains review-only until the user chooses adopt, trial, or reject.
+
 ## Response style
 
 Use product language, not raw CLI commands or JSON. Each state-changing response should include: **what changed**, **what stayed untouched**, **where the user can see the result**, and **a natural next sentence** they can say.

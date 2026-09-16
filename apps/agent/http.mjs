@@ -33,7 +33,7 @@ async function readBody(req) {
 
 /** Reusable Node HTTP middleware; no UI dependency, CORS wildcard, shell/cwd,
  * auth-token, arbitrary model, or arbitrary provider override in request bodies. */
-export function createAgentHttp({ service = null, maxStreams = 16 } = {}) {
+export function createAgentHttp({ service = null, sensemakingWorker = null, maxStreams = 16 } = {}) {
   const streams = new Set(); let checking = false, closed = false;
   return {
     async handle(req, res) {
@@ -49,12 +49,20 @@ export function createAgentHttp({ service = null, maxStreams = 16 } = {}) {
             cancellation: true, externalRetrieval: (service?.searchSources.length ?? 0) > 0, searchSources: service?.searchSources ?? [],
             retrievalDefault: 'disabled', fileExecution: false, autoApply: false, authenticationChecked: false,
             candidateAdoption: !!service?.candidateAdoption,
-            boundary: 'single-user-loopback-same-origin' }); return true;
+            boundary: 'single-user-loopback-same-origin', sensemaking: sensemakingWorker?.health?.() ?? {status: 'disabled', mode: 'disabled'} }); return true;
+        }
+        if (pathname === '/api/agent/sensemaking/health' && req.method === 'GET') {
+          reply(res, 200, sensemakingWorker?.health?.() ?? {protocolVersion: 1, component: 'trace-sensemaking-worker', status: 'disabled', mode: 'disabled', queue_depth: 0, failed_count: 0}); return true;
         }
         demand(service, 'AGENT_DISABLED', 'Agent 后端未启用；请设置 TRACE_AGENT_ENABLED=1 后启动后端。', 503);
+        if (pathname === '/api/agent/sensemaking/drain' && req.method === 'POST') {
+          demand(sensemakingWorker, 'SENSEMAKING_DISABLED', 'sensemaking worker 未配置；不会静默启动另一个 profile。', 503);
+          const body = await readBody(req); demand(keys(body, ['limit']) && (body.limit === undefined || integer(body.limit) && body.limit >= 1 && body.limit <= 1000), 'INVALID_REQUEST', 'drain 只接受 1..1000 的 limit。', 400);
+          const result = await sensemakingWorker.drain({limit: body.limit ?? 16}); reply(res, 200, result); return true;
+        }
         const runMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)(?:\/(events|cancel|adoption))?$/.exec(pathname);
         const requestMatch = /^\/api\/agent\/requests\/([^/]+)$/.exec(pathname);
-        const allowed = pathname === '/api/agent/runs' || pathname === '/api/agent/check' || ['cancel', 'adoption'].includes(runMatch?.[2]) ? 'POST' : runMatch || requestMatch ? 'GET' : null;
+        const allowed = pathname === '/api/agent/runs' || pathname === '/api/agent/check' || pathname === '/api/agent/sensemaking/drain' || ['cancel', 'adoption'].includes(runMatch?.[2]) ? 'POST' : pathname === '/api/agent/sensemaking/health' || runMatch || requestMatch ? 'GET' : null;
         demand(allowed, 'NOT_FOUND', '没有这个 Agent 接口。', 404);
         if (req.method !== allowed) { reply(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: '不支持这个方法。' } }, { allow: allowed }); return true; }
         if (pathname === '/api/agent/check') {
@@ -115,6 +123,6 @@ export function createAgentHttp({ service = null, maxStreams = 16 } = {}) {
       }
       return true;
     },
-    async close() { if (closed) return; closed = true; for (const close of [...streams]) close(); await service?.close(); },
+    async close() { if (closed) return; closed = true; for (const close of [...streams]) close(); await sensemakingWorker?.stop?.(); sensemakingWorker?.close?.(); await service?.close(); },
   };
 }

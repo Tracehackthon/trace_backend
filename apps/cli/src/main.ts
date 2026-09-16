@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {TraceRuntime} from '../../../packages/core/runtime/src/index.js';
 import {CHANGE_KINDS, CHANGE_STATUSES, type ChangeKind, type ChangeStatus, type ChangeLineage, type Compatibility, type ScopeType, type Validation, ProtocolError} from '../../../packages/core/protocol/src/index.js';
 import {DATA_KINDS, type DataKind} from '../../../packages/core/data/src/index.js';
@@ -10,7 +11,7 @@ import {createHash} from 'node:crypto';
 import {migrateJsonlToSqlite} from '../../../packages/core/migration/src/index.js';
 import {CapabilityPublisher} from '../../../packages/core/capability/src/index.js';
 import {backupSqlite, doctorSqlite, restoreSqlite} from '../../../packages/core/operations/src/index.js';
-import {activateCodexTurn, buildCodexHookOutput} from '../../codex/src/index.js';
+import {activateCodexTurn, buildCodexHookOutput, type CodexHostWorkflow} from '../../codex/src/index.js';
 import {ZhihuHttpTransport} from '../../../packages/integration/zhihu-transport/src/index.js';
 import {MyWikiSourceProvider, type MyWikiSourceProfile} from '../../../packages/integration/mywiki-source/src/index.js';
 import {CodexSkillInstaller} from '../../../packages/host/codex-skill/src/index.js';
@@ -81,6 +82,16 @@ const ADVANCED_USAGE = [
     '  trace-runtime codex activate --sqlite-state-file ABS --purpose TEXT --summary TEXT --source-ref JSON [--pointer JSON] [--thread-id ID] [--correlation-id ID --causation-id ID] [--forbidden-scope TEXT]',
     '  trace-runtime codex trigger --sqlite-state-file ABS --event-file ABS',
     '  trace-runtime codex hook-stdio --route-from-event-cwd',
+    '  trace-runtime codex host-session attach|pause|detach --session-id ID [--project-ref REF] [--web-state-file ABS]',
+    '  trace-runtime codex workflow-finding capture --session-id ID --turn-id ID --observation TEXT [--desired-behavior TEXT] [--web-state-file ABS]',
+    '  trace-runtime codex sensemaking-worker once|drain|status --web-state-file ABS --agent-state-file ABS [--limit N]',
+    '  trace-runtime codex repository preflight --repo-root ABS --task-intent TEXT [--proposal-id ID] [--web-state-file ABS]',
+    '  trace-runtime codex repository apply --preflight-id ID --proposal-id ID --expected-state-hash HASH --approval adopt:ID [--web-state-file ABS]',
+    '  trace-runtime codex repository recovery-preview --journal-id ID [--web-state-file ABS]',
+    '  trace-runtime codex repository recovery-reconcile --journal-id ID [--web-state-file ABS]',
+    '  trace-runtime codex repository recovery-status [--state STATE] [--web-state-file ABS]',
+    '  trace-runtime codex publication-policy preview|adopt|revoke|list ... [--web-state-file ABS]',
+    '  trace-runtime codex capability-orchestration list|trial-create|trial-complete|stage|validate|publish|rollback ... [--web-state-file ABS]',
     '  trace internal mcp stdio  # local MCP server used by the Trace Codex plugin',
     '  trace-runtime codex hook-stdio --sqlite-state-file ABS [--source-profile ABS]',
     '  trace-runtime zhihu search|global-search|hot --profile ABS --query TEXT|--limit N [--capture-run-id ID --sqlite-state-file ABS]',
@@ -100,7 +111,7 @@ function printUsage(advanced = false): void {
   process.stdout.write((advanced ? ADVANCED_USAGE : PRODUCT_USAGE) + '\n');
 }
 
-const VALUELESS_FLAGS = new Set(['--json', '--dry-run', '--replace', '--route-from-event-cwd']);
+const VALUELESS_FLAGS = new Set(['--json', '--dry-run', '--replace', '--route-from-event-cwd', '--user-requested-current-branch']);
 
 function args(argv: string[]): Map<string, string[]> {
   const result = new Map<string, string[]>();
@@ -415,6 +426,88 @@ function runtimePaths(parsed: Map<string, string[]>): {changeStateFile?: string;
   if (sqlite && (change || data || continuity)) throw new ProtocolError('INVALID_INPUT', '--sqlite-state-file cannot be combined with JSONL state flags');
   if (!sqlite && (!change || !data)) throw new ProtocolError('INVALID_INPUT', 'provide --sqlite-state-file or both --change-state-file and --data-state-file');
   return sqlite ? {sqliteStateFile: sqlite} : {changeStateFile: change!, dataStateFile: data!, ...(continuity === undefined ? {} : {continuityStateFile: continuity})};
+}
+
+function hostWebStateFile(parsed?: Map<string, string[]>): string | undefined {
+  const explicit = parsed === undefined ? undefined : one(parsed, '--web-state-file', false);
+  const configured = explicit ?? process.env.TRACE_WEB_STATE_FILE;
+  if (configured === undefined || configured.length === 0) return undefined;
+  if (!path.isAbsolute(configured)) throw new ProtocolError('INVALID_PATH', 'web state file must be absolute');
+  const resolved = path.resolve(configured);
+  if (path.basename(resolved).toLowerCase() === 'trace.sqlite') throw new ProtocolError('WRONG_DATABASE', 'Host session ingest must use Product Workspace web.sqlite, not project trace.sqlite');
+  return resolved;
+}
+
+function hostAgentStateFile(parsed?: Map<string, string[]>): string {
+  const explicit = parsed === undefined ? undefined : one(parsed, '--agent-state-file', false);
+  const configured = explicit ?? process.env.TRACE_AGENT_STATE_FILE;
+  if (configured === undefined || configured.length === 0 || !path.isAbsolute(configured)) throw new ProtocolError('INVALID_PATH', 'agent state file must be absolute; use --agent-state-file ABS or TRACE_AGENT_STATE_FILE');
+  const resolved = path.resolve(configured);
+  if (['web.sqlite', 'trace.sqlite'].includes(path.basename(resolved).toLowerCase())) throw new ProtocolError('WRONG_DATABASE', 'Agent sensemaking state must use an independent agent.sqlite');
+  return resolved;
+}
+
+type HostWorkflowPort = {
+  queryActivation: CodexHostWorkflow['queryActivation'];
+  repositoryPreflight?: (input: Record<string, unknown>) => Record<string, unknown>;
+  repositoryGuardApply?: (input: Record<string, unknown>) => Record<string, unknown>;
+  repositoryGuardRecoveryPreview?: (input: Record<string, unknown>) => Record<string, unknown>;
+  repositoryGuardReconcile?: (input: Record<string, unknown>) => Record<string, unknown>;
+  listRepositoryJournals?: (input?: Record<string, unknown>) => Record<string, unknown>[];
+  listPublicationPolicies?: (input?: Record<string, unknown>) => Record<string, unknown>[];
+  publicationPolicyPreview?: (input: Record<string, unknown>) => Record<string, unknown>;
+  publicationPolicyAdopt?: (input: Record<string, unknown>) => Record<string, unknown>;
+  publicationPolicyRevoke?: (input: Record<string, unknown>) => Record<string, unknown>;
+  listCapabilityOrchestrations?: (input?: Record<string, unknown>) => Record<string, unknown>[];
+  listCapabilityTrials?: (input?: Record<string, unknown>) => Record<string, unknown>[];
+  capabilityTrialCreate?: (input: Record<string, unknown>) => Record<string, unknown>;
+  capabilityTrialComplete?: (input: Record<string, unknown>) => Record<string, unknown>;
+  capabilityStage?: (input: Record<string, unknown>) => Record<string, unknown>;
+  capabilityValidate?: (input: Record<string, unknown>) => Record<string, unknown>;
+  capabilityPublish?: (input: Record<string, unknown>) => Record<string, unknown>;
+  capabilityRollback?: (input: Record<string, unknown>) => Record<string, unknown>;
+};
+
+async function sensemakingWorkerModule(): Promise<{createSensemakingWorker: (options: {webFile: string; agentFile: string}) => {once: () => unknown; drain: (options: {limit?: number}) => unknown; health?: () => unknown; close: () => void}}> {
+  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
+  const candidates = [runtimeRoot, process.cwd(), path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../'), path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../..')]
+    .filter((value): value is string => typeof value === 'string' && path.isAbsolute(value));
+  for (const initial of candidates) {
+    let cursor = path.resolve(initial);
+    for (let steps = 0; steps < 10; steps += 1) {
+      const modulePath = path.join(cursor, 'apps', 'agent', 'sensemaking-worker.mjs');
+      if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createSensemakingWorker: (options: {webFile: string; agentFile: string}) => {once: () => unknown; drain: (options: {limit?: number}) => unknown; health?: () => unknown; close: () => void}};
+      const parent = path.dirname(cursor); if (parent === cursor) break; cursor = parent;
+    }
+  }
+  throw new ProtocolError('IO_ERROR', 'Sensemaking worker module is unavailable; cannot drain local jobs');
+}
+
+/** Load the source Product Workspace adapter from both checkout and dist CLI. */
+async function productWorkspaceModule(): Promise<{createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}}> {
+  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
+  const candidates = [
+    runtimeRoot,
+    process.cwd(),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../'),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../..'),
+  ].filter((value): value is string => typeof value === 'string' && path.isAbsolute(value));
+  for (const initial of candidates) {
+    let cursor = path.resolve(initial);
+    for (let steps = 0; steps < 10; steps += 1) {
+      const modulePath = path.join(cursor, 'packages', 'product', 'workspace', 'src', 'workspace.mjs');
+      if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}};
+      const parent = path.dirname(cursor);
+      if (parent === cursor) break;
+      cursor = parent;
+    }
+  }
+  throw new ProtocolError('IO_ERROR', 'Product Workspace adapter is unavailable; cannot receive a Codex host session');
+}
+
+async function openHostProductWorkspace(file: string): Promise<{hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}> {
+  const module = await productWorkspaceModule();
+  return module.createProductWorkspace({file});
 }
 
 function traceLineageArgs(parsed: Map<string, string[]>): {correlation_id?: string; causation_id?: string} {
@@ -820,7 +913,118 @@ export async function run(argv: string[]): Promise<void> {
     return;
   }
   if (!['change', 'data', 'prompt-case', 'continuity', 'context', 'template', 'project', 'migrate', 'capability', 'codex', 'zhihu', 'mywiki', 'skill', 'hooks', 'doctor', 'backup', 'restore'].includes(group ?? '') || !action) usage();
-  const parsed = args(rest);
+  if (group === 'codex' && action === 'sensemaking-worker') {
+    const [operation, ...operationArgs] = rest;
+    if (!operation || !['once', 'drain', 'status'].includes(operation)) throw new ProtocolError('INVALID_INPUT', 'codex sensemaking-worker requires once, drain or status');
+    const workerArgs = args(operationArgs);
+    const webFile = hostWebStateFile(workerArgs);
+    if (webFile === undefined) throw new ProtocolError('INVALID_PATH', 'Sensemaking worker requires --web-state-file ABS or TRACE_WEB_STATE_FILE');
+    const agentFile = hostAgentStateFile(workerArgs);
+    const module = await sensemakingWorkerModule();
+    const worker = module.createSensemakingWorker({webFile, agentFile});
+    try {
+      const value = operation === 'once' ? worker.once() : operation === 'drain' ? worker.drain({limit: Number(one(workerArgs, '--limit', false) ?? '16')}) : worker.health?.() ?? {status: 'unavailable'};
+      // Profile executors are asynchronous while the offline fixture is
+      // synchronous.  Await either shape before closing the worker; otherwise
+      // a CLI `once`/`drain` would release its lease and print an empty
+      // Promise-shaped result before the provider contract completed.
+      const settled = value && typeof (value as PromiseLike<unknown>).then === 'function' ? await value : value;
+      result({...settled as Record<string, unknown>, operation,
+        status: operation === 'status' ? (settled as {status?: unknown})?.status ?? 'unavailable' : operation === 'once' ? 'processed' : 'drained'});
+    } finally { worker.close(); }
+    return;
+  }
+  if (group === 'codex' && action === 'repository') {
+    const [operation, ...operationArgs] = rest;
+    if (!operation || !['preflight', 'apply', 'recovery-preview', 'recovery-reconcile', 'recovery-status'].includes(operation)) throw new ProtocolError('INVALID_INPUT', 'codex repository requires preflight, apply, recovery-preview, recovery-reconcile or recovery-status');
+    const parsedRepository = args(operationArgs);
+    const webFile = hostWebStateFile(parsedRepository);
+    if (webFile === undefined) throw new ProtocolError('INVALID_PATH', 'Repository Guard requires --web-state-file ABS or TRACE_WEB_STATE_FILE');
+    const module = await productWorkspaceModule();
+    const store = module.createProductWorkspace({file: webFile});
+    try {
+      if (operation === 'preflight') {
+        const repoRoot = one(parsedRepository, '--repo-root')!;
+        if (!path.isAbsolute(repoRoot)) throw new ProtocolError('INVALID_PATH', '--repo-root must be absolute');
+        const value = store.hostWorkflow?.repositoryPreflight?.({commandId: one(parsedRepository, '--command-id', false), repoRoot, executionMode: one(parsedRepository, '--execution-mode', false) ?? 'local', taskIntent: one(parsedRepository, '--task-intent', false) ?? '', userRequestedCurrentBranch: has(parsedRepository, '--user-requested-current-branch')});
+        result({status: 'preflighted', ...value as Record<string, unknown>});
+      } else if (operation === 'apply') {
+        const value = store.hostWorkflow?.repositoryGuardApply?.({commandId: one(parsedRepository, '--command-id', false), preflightId: one(parsedRepository, '--preflight-id')!, proposalId: one(parsedRepository, '--proposal-id')!, expectedStateHash: one(parsedRepository, '--expected-state-hash')!, approval: one(parsedRepository, '--approval')!});
+        result({status: 'applied', ...value as Record<string, unknown>});
+      } else if (operation === 'recovery-preview') {
+        const value = store.hostWorkflow?.repositoryGuardRecoveryPreview?.({journalId: one(parsedRepository, '--journal-id', false), targetCommandId: one(parsedRepository, '--target-command-id', false)});
+        result({status: 'previewed', ...value as Record<string, unknown>});
+      } else if (operation === 'recovery-reconcile') {
+        const value = store.hostWorkflow?.repositoryGuardReconcile?.({journalId: one(parsedRepository, '--journal-id')});
+        result({status: 'reconciled', ...value as Record<string, unknown>});
+      } else {
+        const value = store.hostWorkflow?.listRepositoryJournals?.({state: one(parsedRepository, '--state', false)});
+        result({status: 'listed', items: value ?? []});
+      }
+    } finally { store.close(); }
+    return;
+  }
+  if (group === 'codex' && action === 'publication-policy') {
+    const [operation, ...operationArgs] = rest;
+    if (!operation || !['preview', 'adopt', 'revoke', 'list'].includes(operation)) throw new ProtocolError('INVALID_INPUT', 'codex publication-policy requires preview, adopt, revoke or list');
+    const parsedPolicy = args(operationArgs);
+    const webFile = hostWebStateFile(parsedPolicy);
+    if (webFile === undefined) throw new ProtocolError('INVALID_PATH', 'PublicationPolicy commands require --web-state-file ABS or TRACE_WEB_STATE_FILE');
+    const module = await productWorkspaceModule(); const store = module.createProductWorkspace({file: webFile});
+    try {
+      if (operation === 'list') {
+        const value = store.hostWorkflow?.listPublicationPolicies?.({status: one(parsedPolicy, '--status', false)});
+        result({status: 'listed', items: value ?? []});
+      } else if (operation === 'revoke') {
+        const value = store.hostWorkflow?.publicationPolicyRevoke?.({commandId: one(parsedPolicy, '--command-id', false) ?? `policy-revoke:${one(parsedPolicy, '--policy-id')}`, policyId: one(parsedPolicy, '--policy-id')!, expectedRevision: Number(one(parsedPolicy, '--expected-revision')!), reason: one(parsedPolicy, '--reason', false)});
+        result({status: 'revoked', ...value as Record<string, unknown>});
+      } else {
+        const targetRoot = one(parsedPolicy, '--target-root')!; if (!path.isAbsolute(targetRoot)) throw new ProtocolError('INVALID_PATH', '--target-root must be absolute');
+        const common = {commandId: one(parsedPolicy, '--command-id', false) ?? `policy-${operation}:${targetRoot}`, scope: one(parsedPolicy, '--scope')!, targetRoot: path.resolve(targetRoot), allowedCapabilityKinds: parsedPolicy.get('--allowed-kind') ?? undefined,
+          ...(one(parsedPolicy, '--validation-requirements', false) === undefined ? {} : {validationRequirements: jsonValue(one(parsedPolicy, '--validation-requirements')!, '--validation-requirements')}),
+          ...(one(parsedPolicy, '--expires-at', false) === undefined ? {} : {expiresAt: one(parsedPolicy, '--expires-at', false)}),
+        };
+        if (operation === 'preview') result({status: 'previewed', ...store.hostWorkflow?.publicationPolicyPreview?.(common) as Record<string, unknown>});
+        else result({status: 'adopted', ...store.hostWorkflow?.publicationPolicyAdopt?.({...common, approval: one(parsedPolicy, '--approval')!}) as Record<string, unknown>});
+      }
+    } finally { store.close(); }
+    return;
+  }
+  if (group === 'codex' && action === 'capability-orchestration') {
+    const [operation, ...operationArgs] = rest;
+    if (!operation || !['list', 'trial-create', 'trial-complete', 'stage', 'validate', 'publish', 'rollback'].includes(operation)) throw new ProtocolError('INVALID_INPUT', 'codex capability-orchestration requires list, trial-create, trial-complete, stage, validate, publish or rollback');
+    const parsedCapability = args(operationArgs); const webFile = hostWebStateFile(parsedCapability);
+    if (webFile === undefined) throw new ProtocolError('INVALID_PATH', 'Capability orchestration commands require --web-state-file ABS or TRACE_WEB_STATE_FILE');
+    const module = await productWorkspaceModule(); const store = module.createProductWorkspace({file: webFile});
+    try {
+      if (operation === 'list') {
+        const value = store.hostWorkflow?.listCapabilityOrchestrations?.({status: one(parsedCapability, '--status', false)});
+        result({status: 'listed', items: value ?? []});
+      } else if (operation === 'trial-create') {
+        const value = store.hostWorkflow?.capabilityTrialCreate?.({commandId: one(parsedCapability, '--command-id', false) ?? `trial-create:${one(parsedCapability, '--orchestration-id')}`, orchestrationId: one(parsedCapability, '--orchestration-id')!, expectedRevision: Number(one(parsedCapability, '--expected-revision')!), capabilityVersion: one(parsedCapability, '--capability-version')!, capabilityHash: one(parsedCapability, '--capability-hash')!, scenario: one(parsedCapability, '--scenario')!, task: one(parsedCapability, '--task')!, expected: one(parsedCapability, '--expected')!, host: one(parsedCapability, '--trial-host', false), model: one(parsedCapability, '--model', false), toolConfig: one(parsedCapability, '--tool-config', false) === undefined ? {} : jsonValue(one(parsedCapability, '--tool-config')!, '--tool-config'), evidenceRefs: parsedCapability.get('--evidence-ref') ?? []});
+        result({status: 'queued', ...value as Record<string, unknown>});
+      } else if (operation === 'trial-complete') {
+        const value = store.hostWorkflow?.capabilityTrialComplete?.({commandId: one(parsedCapability, '--command-id', false) ?? `trial-complete:${one(parsedCapability, '--trial-id')}`, trialId: one(parsedCapability, '--trial-id')!, expectedRevision: Number(one(parsedCapability, '--expected-revision')!), outcome: one(parsedCapability, '--outcome')!, observed: one(parsedCapability, '--observed')!, evidenceRefs: parsedCapability.get('--evidence-ref') ?? []});
+        result({status: 'completed', ...value as Record<string, unknown>});
+      } else if (operation === 'stage') {
+        const value = store.hostWorkflow?.capabilityStage?.({commandId: one(parsedCapability, '--command-id', false) ?? `capability-stage:${one(parsedCapability, '--orchestration-id')}`, orchestrationId: one(parsedCapability, '--orchestration-id')!, expectedRevision: Number(one(parsedCapability, '--expected-revision')!), candidateDir: one(parsedCapability, '--candidate-dir', false), manifestSha256: one(parsedCapability, '--manifest-sha256', false), producerStatus: one(parsedCapability, '--producer-status', false) ?? undefined});
+        result({status: 'staged', ...value as Record<string, unknown>});
+      } else if (operation === 'validate') {
+        const value = store.hostWorkflow?.capabilityValidate?.({commandId: one(parsedCapability, '--command-id', false) ?? `capability-validate:${one(parsedCapability, '--orchestration-id')}`, orchestrationId: one(parsedCapability, '--orchestration-id')!, expectedRevision: Number(one(parsedCapability, '--expected-revision')!), validation: jsonValue(one(parsedCapability, '--validation')!, '--validation')});
+        result({status: 'validated', ...value as Record<string, unknown>});
+      } else if (operation === 'publish') {
+        const value = store.hostWorkflow?.capabilityPublish?.({commandId: one(parsedCapability, '--command-id', false) ?? `capability-publish:${one(parsedCapability, '--orchestration-id')}`, orchestrationId: one(parsedCapability, '--orchestration-id')!, expectedRevision: Number(one(parsedCapability, '--expected-revision')!), policyId: one(parsedCapability, '--policy-id', false), approval: one(parsedCapability, '--approval', false), publicationReceipt: jsonValue(one(parsedCapability, '--publication-receipt')!, '--publication-receipt'), rollbackReceipt: one(parsedCapability, '--rollback-receipt')!, producerStatus: 'published'});
+        result({status: 'published', ...value as Record<string, unknown>});
+      } else {
+        const value = store.hostWorkflow?.capabilityRollback?.({commandId: one(parsedCapability, '--command-id', false) ?? `capability-rollback:${one(parsedCapability, '--orchestration-id')}`, orchestrationId: one(parsedCapability, '--orchestration-id')!, expectedRevision: Number(one(parsedCapability, '--expected-revision')!), rollbackReceipt: one(parsedCapability, '--rollback-receipt')!, producerStatus: 'rolled_back'});
+        result({status: 'rolled_back', ...value as Record<string, unknown>});
+      }
+    } finally { store.close(); }
+    return;
+  }
+  // Nested host-session/workflow-finding actions consume their first token as
+  // an operation below; do not feed that token to the flat flag parser.
+  const parsed = group === 'codex' && (action === 'host-session' || action === 'workflow-finding') ? new Map<string, string[]>() : args(rest);
   if (group === 'context' && action === 'build') {
     const sourceRefs = parsed.get('--source-ref')?.map(value => jsonValue(value, '--source-ref')) ?? [];
     const pointers = parsed.get('--pointer')?.map(value => jsonValue(value, '--pointer')) ?? [];
@@ -936,6 +1140,43 @@ export async function run(argv: string[]): Promise<void> {
     result({status: 'activated', ...activateCodexTurn(runtime, event)});
     return;
   }
+  if (group === 'codex' && action === 'host-session') {
+    const [operation, ...operationArgs] = rest;
+    if (!operation || !['attach', 'pause', 'detach'].includes(operation)) throw new ProtocolError('INVALID_INPUT', 'codex host-session requires attach, pause, or detach');
+    const parsed = args(operationArgs);
+    const file = hostWebStateFile(parsed);
+    if (file === undefined) throw new ProtocolError('INVALID_PATH', 'Host session commands require --web-state-file ABS or TRACE_WEB_STATE_FILE');
+    const sessionId = one(parsed, '--session-id')!;
+    const projectRef = one(parsed, '--project-ref', false);
+    const commandId = one(parsed, '--command-id', false) ?? `codex-host-${operation}:${sessionId}:${createHash('sha256').update(JSON.stringify({operation, sessionId, projectRef: projectRef ?? null})).digest('hex').slice(0, 24)}`;
+    const base = {commandId, host: one(parsed, '--host', false) ?? 'codex', sessionId};
+    const store = await openHostProductWorkspace(file);
+    try {
+      const value = operation === 'attach'
+        ? store.hostSessions.attach({...base, ...(projectRef === undefined ? {} : {projectRef})})
+        : operation === 'pause' ? store.hostSessions.pause(base) : store.hostSessions.detach(base);
+      result({status: value.status, ...value});
+    } finally { store.close(); }
+    return;
+  }
+  if (group === 'codex' && action === 'workflow-finding') {
+    const [operation, ...operationArgs] = rest;
+    if (operation !== 'capture') throw new ProtocolError('INVALID_INPUT', 'codex workflow-finding requires capture');
+    const parsed = args(operationArgs);
+    const file = hostWebStateFile(parsed);
+    if (file === undefined) throw new ProtocolError('INVALID_PATH', 'Workflow finding capture requires --web-state-file ABS or TRACE_WEB_STATE_FILE');
+    const sessionId = one(parsed, '--session-id')!;
+    const turnId = one(parsed, '--turn-id')!;
+    const observation = one(parsed, '--observation')!;
+    const desiredBehavior = one(parsed, '--desired-behavior', false);
+    const commandId = one(parsed, '--command-id', false) ?? `codex-finding:${createHash('sha256').update(JSON.stringify({sessionId, turnId, observation, desiredBehavior: desiredBehavior ?? null})).digest('hex').slice(0, 32)}`;
+    const store = await openHostProductWorkspace(file);
+    try {
+      const value = store.hostSessions.captureWorkflowFinding({commandId, host: one(parsed, '--host', false) ?? 'codex', sessionId, turnId, observation, ...(desiredBehavior === undefined ? {} : {desiredBehavior})});
+      result({status: value.status, ...value});
+    } finally { store.close(); }
+    return;
+  }
   if (group === 'codex' && action === 'trigger') {
     const eventFile = one(parsed, '--event-file')!;
     if (!path.isAbsolute(eventFile)) throw new ProtocolError('INVALID_INPUT', '--event-file must be absolute');
@@ -956,17 +1197,31 @@ export async function run(argv: string[]): Promise<void> {
     const explicitSqlite = one(parsed, '--sqlite-state-file', false);
     if (routeFromEventCwd && (profilePath !== undefined || explicitSqlite !== undefined)) throw new ProtocolError('INVALID_INPUT', '--route-from-event-cwd cannot be combined with static source or state paths');
     const context = routeFromEventCwd ? eventProjectContext(hookEvent) : explicitSqlite === undefined ? projectContext(parsed) : undefined;
-    // A user-level Codex hook also sees non-Trace projects. In that case it
-    // must be a successful no-op: no state file, profile, or data can leak in.
-    if (routeFromEventCwd && context === undefined) { process.stdout.write('{}\n'); return; }
+    // A user-level Codex hook also sees non-Trace projects. It may still feed
+    // an explicitly attached host session into the user Product Workspace;
+    // without an existing web.sqlite (or an attached session row) this remains
+    // a successful no-op and never creates state from a raw prompt.
+    const webFile = hostWebStateFile();
+    if (routeFromEventCwd && context === undefined) {
+      if (webFile !== undefined && fs.existsSync(webFile)) {
+        const hostStore = await openHostProductWorkspace(webFile);
+        // The hook payload is untrusted; keep the storage namespace bound to
+        // the adapter rather than allowing an arbitrary `host` field to forge
+        // another host identity.
+        try { hostStore.hostSessions.ingestEvent({...hookEvent, host: 'codex'}); }
+        finally { hostStore.close(); }
+      }
+      process.stdout.write('{}\n'); return;
+    }
     const configuration = profilePath === undefined
       ? context === undefined ? {} : activationConfigurationForContext(context)
       : {source_profile: readJsonFile(profilePath, '--source-profile') as unknown as MyWikiSourceProfile};
     const sqliteStateFile = explicitSqlite ?? context!.state_file;
     const runtime = new TraceRuntime({sqliteStateFile});
+    const hostStore = webFile === undefined || !fs.existsSync(webFile) ? undefined : await openHostProductWorkspace(webFile);
     try {
-      process.stdout.write(JSON.stringify(buildCodexHookOutput(hookEvent as Parameters<typeof buildCodexHookOutput>[0], runtime, configuration)) + '\n');
-    } finally { runtime.close(); }
+      process.stdout.write(JSON.stringify(buildCodexHookOutput(hookEvent as Parameters<typeof buildCodexHookOutput>[0], runtime, configuration, hostStore?.hostSessions, hostStore?.hostWorkflow as CodexHostWorkflow | undefined)) + '\n');
+    } finally { runtime.close(); hostStore?.close(); }
     return;
   }
   if (group === 'zhihu') {

@@ -120,6 +120,8 @@ export interface CodexHookInput {
   turn_id?: string;
   cwd?: string;
   prompt?: string;
+  /** Official Stop-hook field; kept transiently by the adapter and host ingest. */
+  last_assistant_message?: string;
   source?: string;
   tool_name?: string;
   tool_use_id?: string;
@@ -127,6 +129,40 @@ export interface CodexHookInput {
   tool_response?: unknown;
   [key: string]: unknown;
 }
+
+/**
+ * Product Workspace owns this port. Keeping the port structural prevents the
+ * Codex adapter from importing SQLite or making the project `.trace` ledger a
+ * second owner of the native host conversation.
+ */
+export interface CodexHostSessionIngest {
+  ingestEvent(input: {
+    host: 'codex';
+    hook_event_name: string;
+    session_id?: string;
+    turn_id?: string;
+    tool_use_id?: string;
+    tool_input?: unknown;
+    tool_response?: unknown;
+    prompt?: string;
+    last_assistant_message?: string;
+  }): Record<string, unknown>;
+}
+
+/** Optional Product Workspace activation port.  The hook only offers a
+ * bounded, receipt-backed pack; it never treats an offer as Codex usage. */
+export interface CodexHostWorkflow {
+  queryActivation(input: {
+    host: 'codex';
+    session_id: string;
+    turn_id?: string;
+    include_trial?: boolean;
+    max_items?: number;
+    max_tokens?: number;
+  }): Record<string, unknown>;
+}
+
+const HOST_SESSION_HOOK_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'Interrupt', 'SessionEnd']);
 
 /**
  * Project-local activation configuration. It is supplied only to the live
@@ -296,7 +332,15 @@ function buildSourceOffer(runtime: TraceRuntime, source: ResolvedSourceAccess, s
   });
 }
 
-function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRuntime, configuration: CodexHookConfiguration): Record<string, unknown> {
+function safeHostSessionReceipt(value: Record<string, unknown>): Record<string, unknown> {
+  // The hook response is visible to Codex and diagnostics. Host ingest may
+  // return a captured turn for the storage caller, but never echo that raw
+  // prompt back through the activation context (the host already owns it).
+  const {turn: _turn, ...safe} = value;
+  return safe;
+}
+
+function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRuntime, configuration: CodexHookConfiguration, hostSessionEvent?: Record<string, unknown>, hostWorkflow?: CodexHostWorkflow): Record<string, unknown> {
   const eventName = input.hook_event_name;
   if (eventName !== 'SessionStart' && eventName !== 'UserPromptSubmit') return {};
   const sourceProfile = configuration.source_profile;
@@ -324,6 +368,30 @@ function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRu
     source: configuration.source_activation ?? defaultSourceActivationManifest({source_id: sourceProfile?.source_id ?? 'unconfigured-source', source_mode: sourceMode, template_id: sourceMode === 'team' ? 'trace.codex-team' : sourceMode === 'empty' ? 'trace.codex-empty' : 'trace.codex-starter'}),
     source_available: source.resolved !== undefined,
   });
+  let hostActivation: Record<string, unknown> | undefined;
+  if (hostWorkflow !== undefined && hostSessionEvent?.status === 'captured') {
+    try {
+      const offered = hostWorkflow.queryActivation({
+        host: 'codex', session_id: sessionId,
+        ...(turnId === undefined ? {} : {turn_id: turnId}),
+        include_trial: true, max_items: 8, max_tokens: 4_000,
+      });
+      // The Product Workspace receipt is authoritative.  Marking an item as
+      // used is a separate explicit action; an additionalContext offer is not
+      // evidence that Codex consumed it.
+      hostActivation = {
+        receipt: offered.receipt ?? null,
+        items: offered.items ?? [],
+        // A repeated hook may observe a receipt that was already marked used
+        // or affected. Preserve that authoritative state instead of claiming
+        // every offer is still unused.
+        offered_not_used: offered.offered_not_used === true,
+        budget: offered.budget ?? null,
+      };
+    } catch (error) {
+      hostActivation = {status: 'unavailable', error_code: errorCode(error)};
+    }
+  }
   const visible = {
     trace: 'activation',
     activation_mode: 'host_native_evidence',
@@ -345,6 +413,8 @@ function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRu
     correlation_id: activation.correlation_id,
     trace_event_id: activation.trace_event?.event_id ?? null,
     ...(resume === undefined ? {} : {resume}),
+    ...(hostSessionEvent === undefined ? {} : {host_session_event: safeHostSessionReceipt(hostSessionEvent)}),
+    ...(hostActivation === undefined ? {} : {host_activation: hostActivation}),
     user_notice: source.resolved === undefined
       ? activation.user_notice
       : 'Trace 已提供受控的宿主原生认知源访问；Codex 自己检索和读取，Trace 只记录实际访问证据。',
@@ -449,9 +519,22 @@ function hookConfiguration(value?: MyWikiSourceProfile | CodexHookConfiguration)
   return 'source_id' in value ? {source_profile: value} : value;
 }
 
-export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntime, configuration?: MyWikiSourceProfile | CodexHookConfiguration): Record<string, unknown> {
+export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntime, configuration?: MyWikiSourceProfile | CodexHookConfiguration, hostSessionIngest?: CodexHostSessionIngest, hostWorkflow?: CodexHostWorkflow): Record<string, unknown> {
   const normalized = hookConfiguration(configuration);
-  if (input.hook_event_name === 'SessionStart' || input.hook_event_name === 'UserPromptSubmit') return buildSourceActivationHookOutput(input, runtime, normalized);
+  const hostSessionEvent = hostSessionIngest !== undefined && input.hook_event_name !== undefined && HOST_SESSION_HOOK_EVENTS.has(input.hook_event_name)
+    ? hostSessionIngest.ingestEvent({
+      host: 'codex',
+      hook_event_name: input.hook_event_name,
+      ...(input.session_id === undefined ? {} : {session_id: input.session_id}),
+      ...(input.turn_id === undefined ? {} : {turn_id: input.turn_id}),
+      ...(input.tool_use_id === undefined ? {} : {tool_use_id: input.tool_use_id}),
+      ...(input.tool_input === undefined ? {} : {tool_input: input.tool_input}),
+      ...(input.tool_response === undefined ? {} : {tool_response: input.tool_response}),
+      ...(input.prompt === undefined ? {} : {prompt: input.prompt}),
+      ...(input.last_assistant_message === undefined ? {} : {last_assistant_message: input.last_assistant_message}),
+    })
+    : undefined;
+  if (input.hook_event_name === 'SessionStart' || input.hook_event_name === 'UserPromptSubmit') return buildSourceActivationHookOutput(input, runtime, normalized, hostSessionEvent, hostWorkflow);
   if (input.hook_event_name === 'PreToolUse') return buildPreToolHookOutput(input, runtime, normalized.source_profile);
   if (input.hook_event_name === 'PostToolUse') return buildPostToolHookOutput(input, runtime, normalized.source_profile);
   return {};

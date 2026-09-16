@@ -10,6 +10,18 @@ import { createExternalAgentAdapter, EXTERNAL_AGENT_PROTOCOL } from './external-
 const PROFILE_LIMIT = 16;
 const COMMON = ['id', 'label', 'kind', 'enabled', 'version'];
 const AUTH = ['endpoint', 'credentialEnv', 'authScheme'];
+const SENSEMAKING = ['sensemaking'];
+
+function validateSensemakingConfig(value) {
+  if (value === undefined) return;
+  demand(value && typeof value === 'object' && !Array.isArray(value), 'INVALID_PROFILE', 'sensemaking profile 配置必须是对象。', 500);
+  const allowed = new Set(['timeoutMs', 'maxSteps', 'maxInputBytes', 'maxOutputBytes', 'maxAttempts', 'toolSet']);
+  demand(Object.keys(value).every(key => allowed.has(key)), 'INVALID_PROFILE', 'sensemaking profile 配置包含未知字段。', 500);
+  const bounds = [['timeoutMs', 1000, 120000], ['maxInputBytes', 1024, 2 * 1024 * 1024], ['maxOutputBytes', 1024, 128 * 1024], ['maxAttempts', 1, 10]];
+  for (const [key, min, max] of bounds) if (value[key] !== undefined) demand(integer(value[key]) && value[key] >= min && value[key] <= max, 'INVALID_PROFILE', `sensemaking.${key} 超出允许边界。`, 500);
+  if (value.maxSteps !== undefined) demand(integer(value.maxSteps) && value.maxSteps >= 0 && value.maxSteps <= 12, 'INVALID_PROFILE', 'sensemaking.maxSteps 超出允许边界。', 500);
+  if (value.toolSet !== undefined) demand(Array.isArray(value.toolSet) && value.toolSet.length <= 4 && value.toolSet.every(item => item === 'trace_context_read' || item === 'trace_context_search'), 'INVALID_PROFILE', 'sensemaking.toolSet 只能是受控只读工具。', 500);
+}
 
 function validateCommon(profile) {
   demand(identity(profile.id) && profile.id.length <= 80 && ['codex', 'model', 'agent'].includes(profile.kind)
@@ -30,18 +42,19 @@ function validateAuth(profile) {
 function validateProfile(value) {
   demand(value && typeof value === 'object' && !Array.isArray(value), 'INVALID_PROFILE', 'Agent profile 必须是对象。', 500);
   const profile = structuredClone(value); validateCommon(profile);
+  validateSensemakingConfig(profile.sensemaking);
   if (profile.kind === 'codex') {
-    demand(keys(profile, [...COMMON, 'executable', 'model', 'runtimeRoot'])
+    demand(keys(profile, [...COMMON, ...SENSEMAKING, 'executable', 'model', 'runtimeRoot'])
       && (profile.executable === undefined || text(profile.executable, 1000) && profile.executable.trim())
       && (profile.model === undefined || identity(profile.model))
       && (profile.runtimeRoot === undefined || path.isAbsolute(profile.runtimeRoot)),
     'INVALID_PROFILE', 'Codex profile 配置无效。', 500);
   } else if (profile.kind === 'model') {
-    demand(keys(profile, [...COMMON, ...AUTH, 'model']) && identity(profile.model),
+    demand(keys(profile, [...COMMON, ...SENSEMAKING, ...AUTH, 'model']) && identity(profile.model),
       'INVALID_PROFILE', 'Model profile 需要固定的 endpoint 和 model。', 500);
     validateAuth(profile);
   } else {
-    demand(keys(profile, [...COMMON, ...AUTH, 'protocol']) && (profile.protocol === undefined || profile.protocol === EXTERNAL_AGENT_PROTOCOL),
+    demand(keys(profile, [...COMMON, ...SENSEMAKING, ...AUTH, 'protocol']) && (profile.protocol === undefined || profile.protocol === EXTERNAL_AGENT_PROTOCOL),
       'INVALID_PROFILE', `Agent profile 只支持 ${EXTERNAL_AGENT_PROTOCOL}。`, 500);
     profile.protocol = EXTERNAL_AGENT_PROTOCOL; validateAuth(profile);
   }
@@ -90,9 +103,11 @@ function safeProfile(document, profile) {
     : { tools: true, streaming: false, cancellation: true, output: 'trace-result-v1' };
   return { profileId: profile.id, label: profile.label ?? profile.id, kind: profile.kind, ownerId: document.ownerId,
     version: profile.version, revision: hash({ configVersion: document.configVersion, ownerId: document.ownerId, profile }), capabilities,
+    serviceIdentity: profile.kind === 'model' ? 'openai-chat-completions-v1' : profile.kind === 'agent' ? EXTERNAL_AGENT_PROTOCOL : `codex-app-server/${VERIFIED_CODEX_VERSION}`,
     ...(profile.kind === 'codex' ? { verifiedRuntimeVersion: VERIFIED_CODEX_VERSION } : {}),
     ...(profile.kind === 'model' ? { model: profile.model } : {}),
-    ...(profile.kind === 'agent' ? { protocol: profile.protocol } : {}) };
+    ...(profile.kind === 'agent' ? { protocol: profile.protocol } : {}),
+    ...(profile.sensemaking === undefined ? {} : {sensemaking: structuredClone(profile.sensemaking)}) };
 }
 
 /** Reloaded server-side profiles. Public descriptors never contain endpoints,

@@ -5,6 +5,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { AgentError, demand, hash, TERMINAL } from './protocol.mjs';
 
 const APP_ID = 0x54524131; // TRA1; never a web.sqlite or cognitive ledger.
+const BASE_TABLES = ['agent_events', 'agent_meta', 'agent_runs'];
+const SENSEMAKING_TABLES = ['sensemaking_events', 'sensemaking_runs'];
+const AGENT_TABLES = [...BASE_TABLES, ...SENSEMAKING_TABLES];
 export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
   demand(typeof file === 'string' && path.isAbsolute(file) && !['web.sqlite', 'trace.sqlite'].includes(path.basename(file).toLowerCase()),
     'INVALID_AGENT_DB', 'Agent 记录必须使用独立绝对路径，不能使用 web.sqlite 或 trace.sqlite。', 500);
@@ -29,8 +32,10 @@ export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
     const appId = database.prepare('PRAGMA application_id').get().application_id;
     const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(r => r.name).sort();
     if (allowEmpty && appId === 0 && tables.length === 0) return false;
+    const supported = JSON.stringify(tables) === JSON.stringify([...BASE_TABLES].sort())
+      || JSON.stringify(tables) === JSON.stringify([...AGENT_TABLES].sort());
     demand(appId === APP_ID && database.prepare('PRAGMA user_version').get().user_version === 1
-      && JSON.stringify(tables) === JSON.stringify(['agent_events', 'agent_meta', 'agent_runs']), 'WRONG_AGENT_DB', '不是受支持的 Trace Agent 数据库，未修改。', 503);
+      && supported, 'WRONG_AGENT_DB', '不是受支持的 Trace Agent 数据库，未修改。', 503);
     demand(database.prepare('PRAGMA quick_check').get().quick_check === 'ok', 'AGENT_STORE_CORRUPT', 'Agent 数据库完整性检查失败。', 503);
     return true;
   }
@@ -57,6 +62,40 @@ export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
     db.prepare('INSERT INTO agent_events(run_id,sequence,payload,payload_hash) VALUES(?,?,?,?)').run(run.id, sequence, JSON.stringify(value), hash(value));
     write(run); return value;
   }
+  function decodeSense(row) {
+    if (!row) return null;
+    let value;
+    try { value = JSON.parse(row.payload); } catch { throw new AgentError('AGENT_STORE_CORRUPT', 'Sensemaking 运行记录无法解析。', 503); }
+    demand(hash(value) === row.payload_hash, 'AGENT_STORE_CORRUPT', 'Sensemaking 运行记录校验失败。', 503);
+    return value;
+  }
+  function getSense(id) { return decodeSense(db.prepare('SELECT payload,payload_hash FROM sensemaking_runs WHERE id=?').get(id)); }
+  function writeSense(run) { db.prepare('UPDATE sensemaking_runs SET payload=?,payload_hash=? WHERE id=?').run(JSON.stringify(run), hash(run), run.id); }
+  function senseEvent(run, type, data) {
+    const sequence = ++run.lastEventId;
+    const value = {protocolVersion: 1, runId: run.id, sequence, type, at: new Date().toISOString(),
+      jobId: run.jobId, host: run.host, sessionId: run.sessionId, turnId: run.turnId,
+      profile: run.profile, inputHash: run.inputHash, resultHash: run.resultHash ?? null, data};
+    db.prepare('INSERT INTO sensemaking_events(run_id,sequence,payload,payload_hash) VALUES(?,?,?,?)').run(run.id, sequence, JSON.stringify(value), hash(value));
+    writeSense(run); return value;
+  }
+  function ensureSensemakingTables() {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sensemaking_runs(
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL UNIQUE,
+        payload TEXT NOT NULL,
+        payload_hash TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sensemaking_events(
+        run_id TEXT NOT NULL REFERENCES sensemaking_runs(id),
+        sequence INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        PRIMARY KEY(run_id,sequence)
+      );
+    `);
+  }
   try {
     if (fs.existsSync(file)) { const probe = new DatabaseSync(file, { readOnly: true }); try { verify(probe, true); } finally { probe.close(); } }
     db = new DatabaseSync(file); const exists = verify(db, true);
@@ -67,8 +106,10 @@ export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
         CREATE TABLE agent_meta(id INTEGER PRIMARY KEY CHECK(id=1),workspace_key TEXT NOT NULL);
         CREATE TABLE agent_runs(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,request_hash TEXT NOT NULL,payload TEXT NOT NULL,payload_hash TEXT NOT NULL);
         CREATE TABLE agent_events(run_id TEXT NOT NULL REFERENCES agent_runs(id),sequence INTEGER NOT NULL,payload TEXT NOT NULL,payload_hash TEXT NOT NULL,PRIMARY KEY(run_id,sequence));`);
+      ensureSensemakingTables();
       db.prepare('INSERT INTO agent_meta(id,workspace_key) VALUES(1,?)').run(workspaceKey);
     });
+    if (exists) transaction(() => ensureSensemakingTables());
     transaction(() => {
       for (const row of db.prepare('SELECT payload,payload_hash FROM agent_runs').all()) {
         const run = decode(row);
@@ -114,6 +155,36 @@ export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
     },
     events(id, after = 0, limit = 512) {
       return db.prepare('SELECT payload,payload_hash FROM agent_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(decode);
+    },
+    findSensemaking(jobId) {
+      demand(typeof jobId === 'string' && jobId.length > 0, 'INVALID_SENSEMAKING_JOB', 'job_id 无效。', 400);
+      return decodeSense(db.prepare('SELECT payload,payload_hash FROM sensemaking_runs WHERE job_id=?').get(jobId));
+    },
+    createSensemaking(job) {
+      demand(job && typeof job.jobId === 'string' && job.jobId.length > 0 && typeof job.host === 'string'
+        && typeof job.sessionId === 'string' && typeof job.turnId === 'string' && typeof job.inputHash === 'string',
+      'INVALID_SENSEMAKING_JOB', 'Sensemaking run 身份或输入哈希无效。', 400);
+      return transaction(() => {
+        const existing = decodeSense(db.prepare('SELECT payload,payload_hash FROM sensemaking_runs WHERE job_id=?').get(job.jobId));
+        if (existing) return existing;
+        const run = {id: randomUUID(), jobId: job.jobId, host: job.host, sessionId: job.sessionId, turnId: job.turnId,
+          inputHash: job.inputHash, profile: {profileId: job.profileId ?? 'fixture-sensemaking', profileVersion: job.profileVersion ?? '1', modelVersion: job.modelVersion ?? 'fixture-1'},
+          status: 'running', attempt: job.attempt ?? 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          resultHash: null, result: null, error: null, lastEventId: 0};
+        db.prepare('INSERT INTO sensemaking_runs(id,job_id,payload,payload_hash) VALUES(?,?,?,?)').run(run.id, run.jobId, JSON.stringify(run), hash(run));
+        senseEvent(run, 'sensemaking.started', {status: run.status, attempt: run.attempt});
+        return run;
+      });
+    },
+    updateSensemaking(id, patch, type = 'sensemaking.updated', data = {}) {
+      return transaction(() => {
+        const run = getSense(id); demand(run, 'SENSEMAKING_RUN_NOT_FOUND', '没有这个 Sensemaking run。', 404);
+        Object.assign(run, patch, {updatedAt: new Date().toISOString()});
+        return {run, event: senseEvent(run, type, data)};
+      });
+    },
+    sensemakingEvents(id, after = 0, limit = 512) {
+      return db.prepare('SELECT payload,payload_hash FROM sensemaking_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(decodeSense);
     },
     close() { if (closed) return; closed = true; db.close(); release(); },
   };

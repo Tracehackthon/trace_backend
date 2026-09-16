@@ -1,5 +1,6 @@
 import { AgentError, demand, identity, keys, plain, text } from './protocol.mjs';
-import { contextManifest, createRunToolBridge, EXECUTOR_CONTRACT_VERSION } from './runtime.mjs';
+import { contextManifest, createRunToolBridge, EXECUTOR_CONTRACT_VERSION, TRACE_SENSEMAKING_INSTRUCTIONS } from './runtime.mjs';
+import { SENSEMAKING_OUTPUT_SCHEMA } from './protocol.mjs';
 import { postRemoteJson } from './remote-http.mjs';
 
 export const EXTERNAL_AGENT_PROTOCOL = 'trace-external-agent-v1';
@@ -19,17 +20,22 @@ export function createExternalAgentAdapter({ profile, env = process.env, fetchIm
     },
     async execute({ request, context, signal, onEvent, isCurrent, retrieval }) {
       const tools = createRunToolBridge({ context, retrieval, signal, isCurrent, onEvent });
+      const sensemaking = request.purpose === 'sensemaking';
+      const maxSteps = Number.isSafeInteger(request.maxSteps) ? Math.min(12, Math.max(0, request.maxSteps)) : 12;
+      const maxOutputBytes = Number.isSafeInteger(request.maxOutputBytes) ? Math.min(128 * 1024, Math.max(1, request.maxOutputBytes)) : 128 * 1024;
       let sessionId = null, completed = false, frame;
       try {
         frame = await send({
           protocolVersion: 1,
           operation: 'start',
           executorContractVersion: EXECUTOR_CONTRACT_VERSION,
-          request: { requestId: request.requestId, purpose: request.purpose, input: request.input },
+          request: { requestId: request.requestId, purpose: request.purpose, input: request.input,
+            ...(sensemaking ? {instructions: TRACE_SENSEMAKING_INSTRUCTIONS, outputSchema: SENSEMAKING_OUTPUT_SCHEMA,
+              maxSteps: request.maxSteps, maxOutputBytes: request.maxOutputBytes} : {}) },
           context: contextManifest(context),
-          tools: tools.definitions,
+          tools: sensemaking ? [] : tools.definitions,
         }, signal);
-        for (let step = 0; step <= 12; step++) {
+        for (let step = 0; step <= maxSteps; step++) {
           demand(!signal.aborted && isCurrent(), 'STALE_CONTEXT', '目标版本、上下文或执行配置已变化。', 409);
           demand(frame.protocolVersion === 1 && identity(frame.sessionId), 'EXTERNAL_AGENT_PROTOCOL_ERROR', '外部 Agent 会话身份无效。', 502);
           if (sessionId === null) {
@@ -40,7 +46,7 @@ export function createExternalAgentAdapter({ profile, env = process.env, fetchIm
             demand(keys(frame, ['protocolVersion', 'type', 'sessionId', 'runtimeVersion', 'output'])
               && (plain(frame.output) || text(frame.output, 128 * 1024)), 'EXTERNAL_AGENT_PROTOCOL_ERROR', '外部 Agent 最终结果无效。', 502);
             const raw = typeof frame.output === 'string' ? frame.output : JSON.stringify(frame.output);
-            demand(Buffer.byteLength(raw) <= 128 * 1024, 'OUTPUT_LIMIT', '外部 Agent 输出超过预算。', 502);
+            demand(Buffer.byteLength(raw) <= maxOutputBytes, 'OUTPUT_LIMIT', '外部 Agent 输出超过预算。', 502);
             onEvent('output.delta', { itemId: `external-${sessionId}`, delta: raw, format: 'json-fragment' });
             completed = true;
             return { raw, threadId: sessionId, turnId: `${sessionId}:${step + 1}`,

@@ -34,7 +34,10 @@
       "SessionStart",
       "UserPromptSubmit",
       "PreToolUse",
-      "PostToolUse"
+      "PostToolUse",
+      "Stop",
+      "Interrupt",
+      "SessionEnd"
     ],
     "routing": "event-cwd-to-nearest-trace-project",
     "command": "trace internal codex hook-stdio --route-from-event-cwd",

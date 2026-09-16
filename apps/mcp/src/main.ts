@@ -284,6 +284,190 @@ export function createTraceMcpServer(): McpServer {
     return {...value, user_notice: 'Codex 的实际结果已回到 Trace 复核区；当前个人理解没有自动改变。'};
   }));
 
+  server.registerTool('trace_host_session_attach', {
+    title: 'Attach the current Codex host session',
+    description: 'Explicitly opt the current Codex task/session into Trace host-session ingest. Until this is called, global hooks do not persist prompts or assistant messages. The MCP process supplies the session identity; an optional project_dir is only a binding hint.',
+    inputSchema: {project_dir: z.string().min(1).optional()},
+  }, async ({project_dir}) => invoke(async () => new TraceProductClient().attachHostSession(project_dir === undefined ? {} : {projectDir: project_dir})));
+
+  server.registerTool('trace_host_session_pause', {
+    title: 'Pause Codex host-session ingest',
+    description: 'Pause automatic capture for the current Codex task/session. Hook events remain successful no-ops until the session is explicitly attached again; existing captured turns stay unchanged.',
+    inputSchema: {},
+  }, async () => invoke(async () => new TraceProductClient().pauseHostSession()));
+
+  server.registerTool('trace_host_session_detach', {
+    title: 'End Codex host-session ingest',
+    description: 'End automatic capture for the current Codex task/session. The ended identity cannot be revived; a later task must use its own session identity.',
+    inputSchema: {},
+  }, async () => invoke(async () => new TraceProductClient().detachHostSession()));
+
+  server.registerTool('trace_workflow_finding_capture', {
+    title: 'Capture an explicit workflow finding',
+    description: 'Save one user-explicit $trace workflow discovery and associate it with a captured HostTurn. It is stored as scope=unknown, target_kind=unresolved, status=captured; it never creates a Skill, changes understanding, or publishes a rule.',
+    inputSchema: {
+      turn_id: z.string().min(1).max(512).optional().describe('Optional current turn. Omit to bind the newest open HostTurn.'),
+      observation: z.string().min(1).max(1_000_000),
+      desired_behavior: z.string().max(1_000_000).optional(),
+    },
+  }, async ({turn_id, observation, desired_behavior}) => invoke(async () => new TraceProductClient().captureWorkflowFinding({...(turn_id === undefined ? {} : {turnId: turn_id}), observation, ...(desired_behavior === undefined ? {} : {desiredBehavior: desired_behavior})})));
+
+  server.registerTool('trace_workflow_findings_list', {
+    title: 'List captured Trace workflow findings',
+    description: 'Read captured and worker-candidate findings for the current Codex session. Raw HostTurn prompt/final bodies are never returned by this list.',
+    inputSchema: {},
+  }, async () => invoke(async () => new TraceProductClient().listWorkflowFindings()));
+
+  server.registerTool('trace_routing_proposals_list', {
+    title: 'List Trace routing proposals',
+    description: 'Read deterministic routing proposals. Proposed, trial, adopted and rejected are distinct; this never publishes a Skill or changes canonical understanding.',
+    inputSchema: {},
+  }, async () => invoke(async () => new TraceProductClient().listRoutingProposals()));
+
+  server.registerTool('trace_routing_propose', {
+    title: 'Propose a Trace finding route',
+    description: 'Run the bounded deterministic Finding Router for one captured WorkflowFinding. It creates only a reviewable RoutingProposal; it does not adopt, publish a Skill or change canonical understanding.',
+    inputSchema: {finding_id: z.string().min(1).max(512)},
+  }, async ({finding_id}) => invoke(async () => new TraceProductClient().proposeRouting({findingId: finding_id})));
+
+  server.registerTool('trace_routing_decide', {
+    title: 'Decide a Trace routing proposal',
+    description: 'Adopt, trial or reject one routing proposal using compare-and-swap. Adoption creates only a receipt-backed route decision; it does not publish a Skill.',
+    inputSchema: {proposal_id: z.string().min(1).max(512), action: z.enum(['adopt', 'trial', 'reject']), expected_revision: z.number().int().min(0), note: z.string().max(2_000).optional()},
+  }, async ({proposal_id, action, expected_revision, note}) => invoke(async () => new TraceProductClient().decideRouting({proposalId: proposal_id, action, expectedRevision: expected_revision, ...(note === undefined ? {} : {note})})));
+
+  server.registerTool('trace_host_activation_query', {
+    title: 'Show Trace activation for this Codex task',
+    description: 'Offer a small activation pack from adopted findings, with trial items explicitly marked. The receipt is offered-not-used until a separate mark call.',
+    inputSchema: {task_intent: z.string().max(8_000).optional(), project_ref: z.string().min(1).optional().describe('Optional absolute stable Product Workspace project binding; omit to use the attached session binding.'), include_trial: z.boolean().optional(), max_items: z.number().int().min(1).max(16).optional(), max_tokens: z.number().int().min(128).max(12_000).optional()},
+  }, async ({task_intent, project_ref, include_trial, max_items, max_tokens}) => invoke(async () => new TraceProductClient().queryActivation({...(task_intent === undefined ? {} : {taskIntent: task_intent}), ...(project_ref === undefined ? {} : {projectRef: project_ref}), ...(include_trial === undefined ? {} : {includeTrial: include_trial}), ...(max_items === undefined ? {} : {maxItems: max_items}), ...(max_tokens === undefined ? {} : {maxTokens: max_tokens})})));
+
+  server.registerTool('trace_host_activation_mark', {
+    title: 'Mark Trace activation receipt',
+    description: 'Record whether an offered activation was used, affected work, dismissed, snoozed or released. Uses CAS and an idempotent receipt.',
+    inputSchema: {receipt_id: z.string().min(1).max(512), status: z.enum(['used', 'affected', 'dismissed', 'snoozed', 'released']), expected_revision: z.number().int().min(0)},
+  }, async ({receipt_id, status, expected_revision}) => invoke(async () => new TraceProductClient().markActivation({receiptId: receipt_id, status, expectedRevision: expected_revision})));
+
+  server.registerTool('trace_host_activation_history', {
+    title: 'List Trace activation history',
+    description: 'Read activation receipts and their current offered/used/affected/dismissed state for the current Codex session.',
+    inputSchema: {},
+  }, async () => invoke(async () => new TraceProductClient().listActivationHistory()));
+
+  server.registerTool('trace_sensemaking_worker_status', {
+    title: 'Show Trace sensemaking worker status',
+    description: 'Read resident sensemaking worker health, queue depth, failed count, profile identity, limits and last error. If the Product/Agent service is not running, return a recoverable error; never start or switch a profile silently.',
+    inputSchema: {},
+  }, async () => invoke(async () => new TraceProductClient().sensemakingWorkerStatus()));
+
+  server.registerTool('trace_sensemaking_worker_drain', {
+    title: 'Drain Trace sensemaking jobs',
+    description: 'Explicitly drain a bounded number of already queued HostTurn sensemaking jobs. The hook itself never waits for this worker; this call does not change routing or adoption policy.',
+    inputSchema: {limit: z.number().int().min(1).max(1_000).optional()},
+  }, async ({limit}) => invoke(async () => new TraceProductClient().sensemakingWorkerDrain(limit ?? 16)));
+
+  server.registerTool('trace_repository_preflight', {
+    title: 'Suggest a Trace repository branch preflight',
+    description: 'Read-only repository guard. It returns proceed-current, create-branch, use-managed-worktree, ask-user or block-dirty with a sanitized proposed branch; it never mutates git.',
+    inputSchema: {repo_root: z.string().min(1), task_intent: z.string().max(8_000).optional(), execution_mode: z.enum(['local', 'managed-worktree', 'cloud', 'unknown']).optional(), proposal_id: z.string().min(1).max(512).optional(), user_requested_current_branch: z.boolean().optional()},
+  }, async ({repo_root, task_intent, execution_mode, proposal_id, user_requested_current_branch}) => invoke(async () => new TraceProductClient().repositoryPreflight({repoRoot: repo_root, ...(task_intent === undefined ? {} : {taskIntent: task_intent}), ...(execution_mode === undefined ? {} : {executionMode: execution_mode}), ...(proposal_id === undefined ? {} : {proposalId: proposal_id}), ...(user_requested_current_branch === undefined ? {} : {userRequestedCurrentBranch: user_requested_current_branch})})));
+
+  server.registerTool('trace_repository_guard_apply', {
+    title: 'Apply an adopted Trace repository guard',
+    description: 'Create one proposed branch only after an adopted runtime-guard proposal, clean local state and a matching preflight CAS. Never pushes, merges, deletes or changes managed worktrees.',
+    inputSchema: {preflight_id: z.string().min(1).max(512), proposal_id: z.string().min(1).max(512), expected_state_hash: z.string().regex(/^[a-f0-9]{64}$/), approval: z.string().min(1).max(600)},
+  }, async ({preflight_id, proposal_id, expected_state_hash, approval}) => invoke(async () => new TraceProductClient().repositoryGuardApply({preflightId: preflight_id, proposalId: proposal_id, expectedStateHash: expected_state_hash, approval})));
+
+  server.registerTool('trace_repository_recovery_preview', {
+    title: 'Preview repository guard recovery',
+    description: 'Read-only crash recovery preview for a Repository Guard journal. It can recommend retryable, commit_receipt or recovery_required; it never switches, deletes, resets or cleans Git.',
+    inputSchema: {journal_id: z.string().min(1).max(512).optional(), command_id: z.string().min(1).max(512).optional()},
+  }, async ({journal_id, command_id}) => invoke(async () => new TraceProductClient().repositoryRecoveryPreview({...(journal_id === undefined ? {} : {journalId: journal_id}), ...(command_id === undefined ? {} : {commandId: command_id})})));
+
+  server.registerTool('trace_repository_recovery_reconcile', {
+    title: 'Reconcile repository guard journal',
+    description: 'Reconcile a journal only when the current Git branch, HEAD and clean state prove the prepared intent. Ambiguous state is recorded as recovery_required and no Git mutation is attempted.',
+    inputSchema: {journal_id: z.string().min(1).max(512)},
+  }, async ({journal_id}) => invoke(async () => new TraceProductClient().repositoryRecoveryReconcile(journal_id)));
+
+  server.registerTool('trace_repository_recovery_status', {
+    title: 'List repository guard journals',
+    description: 'Read Repository Guard journal states and recovery evidence without changing the repository.',
+    inputSchema: {state: z.enum(['prepared', 'git_applied', 'receipt_committed', 'recovery_required', 'reconciled', 'failed']).optional()},
+  }, async ({state}) => invoke(async () => new TraceProductClient().repositoryRecoveryStatus(state)));
+
+  server.registerTool('trace_publication_policy_preview', {
+    title: 'Preview capability publication policy',
+    description: 'Build a bounded standing PublicationPolicy preview. Preview is not adoption; ordinary prompts, findings and routing never create a policy.',
+    inputSchema: {scope: z.enum(['personal', 'project', 'cross-project']), target_root: z.string().min(1), allowed_capability_kinds: z.array(z.string().min(1).max(64)).min(1).max(16).optional(), validation_requirements: z.record(z.string()).optional(), expires_at: z.string().nullable().optional()},
+  }, async ({scope, target_root, allowed_capability_kinds, validation_requirements, expires_at}) => invoke(async () => new TraceProductClient().previewPublicationPolicy({scope, targetRoot: target_root, ...(allowed_capability_kinds === undefined ? {} : {allowedCapabilityKinds: allowed_capability_kinds}), ...(validation_requirements === undefined ? {} : {validationRequirements: validation_requirements}), ...(expires_at === undefined ? {} : {expiresAt: expires_at})})));
+
+  server.registerTool('trace_publication_policy_adopt', {
+    title: 'Adopt capability publication policy',
+    description: 'Adopt exactly the displayed PublicationPolicy with approval=adopt:<policy_id> supplied by the user. Policy scope, target root, allowed kinds, validation requirements and expiry are immutable after adoption.',
+    inputSchema: {scope: z.enum(['personal', 'project', 'cross-project']), target_root: z.string().min(1), allowed_capability_kinds: z.array(z.string().min(1).max(64)).min(1).max(16).optional(), validation_requirements: z.record(z.string()).optional(), expires_at: z.string().nullable().optional(), approval: z.string().min(1).max(256)},
+  }, async ({scope, target_root, allowed_capability_kinds, validation_requirements, expires_at, approval}) => invoke(async () => new TraceProductClient().adoptPublicationPolicy({scope, targetRoot: target_root, ...(allowed_capability_kinds === undefined ? {} : {allowedCapabilityKinds: allowed_capability_kinds}), ...(validation_requirements === undefined ? {} : {validationRequirements: validation_requirements}), ...(expires_at === undefined ? {} : {expiresAt: expires_at}), approval})));
+
+  server.registerTool('trace_publication_policy_revoke', {
+    title: 'Revoke capability publication policy',
+    description: 'Revoke a standing PublicationPolicy using CAS. Revocation immediately blocks subsequent capability publication.',
+    inputSchema: {policy_id: z.string().min(1).max(512), expected_revision: z.number().int().min(0), reason: z.string().max(2_000).optional()},
+  }, async ({policy_id, expected_revision, reason}) => invoke(async () => new TraceProductClient().revokePublicationPolicy(policy_id, expected_revision, reason)));
+
+  server.registerTool('trace_publication_policies_list', {
+    title: 'List capability publication policies',
+    description: 'List active, revoked and expired PublicationPolicy metadata; no raw HostTurn text is returned.',
+    inputSchema: {status: z.enum(['active', 'revoked', 'expired']).optional()},
+  }, async ({status}) => invoke(async () => new TraceProductClient().listPublicationPolicies(status)));
+
+  server.registerTool('trace_capability_orchestrations_list', {
+    title: 'List capability candidate orchestrations',
+    description: 'Read adopted capability-candidate orchestration states. Candidate, trial, producer_required, staged, validated, published and rolled_back remain distinct.',
+    inputSchema: {status: z.enum(['candidate', 'trial_queued', 'staged', 'validated', 'published', 'rolled_back', 'producer_required', 'failed']).optional()},
+  }, async ({status}) => invoke(async () => new TraceProductClient().listCapabilityOrchestrations(status)));
+
+  server.registerTool('trace_capability_trials_list', {
+    title: 'List capability trials',
+    description: 'Read first-class CapabilityTrial records with fixed capability hashes, evidence references and support/limit/challenge/inconclusive outcomes.',
+    inputSchema: {orchestration_id: z.string().min(1).max(512).optional()},
+  }, async ({orchestration_id}) => invoke(async () => new TraceProductClient().listCapabilityTrials(orchestration_id)));
+
+  server.registerTool('trace_capability_trial_create', {
+    title: 'Queue a capability trial',
+    description: 'Queue a bounded behavior trial for an adopted capability candidate. It records evidence references and never publishes a Skill.',
+    inputSchema: {orchestration_id: z.string().min(1).max(512), expected_revision: z.number().int().min(0), capability_version: z.string().min(1).max(128), capability_hash: z.string().min(1).max(128), scenario: z.string().min(1).max(4_000), task: z.string().min(1).max(4_000), expected: z.string().min(1).max(8_000), host: z.string().max(512).optional(), model: z.string().max(256).optional(), tool_config: z.record(z.unknown()).optional(), evidence_refs: z.array(z.string().max(512)).max(64).optional()},
+  }, async input => invoke(async () => new TraceProductClient().createCapabilityTrial({orchestrationId: input.orchestration_id, expectedRevision: input.expected_revision, capabilityVersion: input.capability_version, capabilityHash: input.capability_hash, scenario: input.scenario, task: input.task, expected: input.expected, ...(input.host === undefined ? {} : {host: input.host}), ...(input.model === undefined ? {} : {model: input.model}), ...(input.tool_config === undefined ? {} : {toolConfig: input.tool_config}), ...(input.evidence_refs === undefined ? {} : {evidenceRefs: input.evidence_refs})})));
+
+  server.registerTool('trace_capability_trial_complete', {
+    title: 'Complete a capability trial',
+    description: 'Record observed behavior and outcome for a queued CapabilityTrial. Evidence is required as references; a passing trial is not itself publication.',
+    inputSchema: {trial_id: z.string().min(1).max(512), expected_revision: z.number().int().min(0), outcome: z.enum(['support', 'limit', 'challenge', 'inconclusive']), observed: z.string().min(1).max(8_000), evidence_refs: z.array(z.string().max(512)).max(64).optional()},
+  }, async ({trial_id, expected_revision, outcome, observed, evidence_refs}) => invoke(async () => new TraceProductClient().completeCapabilityTrial({trialId: trial_id, expectedRevision: expected_revision, outcome, observed, ...(evidence_refs === undefined ? {} : {evidenceRefs: evidence_refs})})));
+
+  server.registerTool('trace_capability_stage', {
+    title: 'Stage capability candidate',
+    description: 'Record a candidate produced through the existing CapabilityPublisher/Change Set path. Without a verified candidate directory this remains producer_required and does not fabricate a Skill.',
+    inputSchema: {orchestration_id: z.string().min(1).max(512), expected_revision: z.number().int().min(0), candidate_dir: z.string().min(1).optional(), manifest_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), producer_status: z.enum(['required', 'staged']).optional()},
+  }, async ({orchestration_id, expected_revision, candidate_dir, manifest_sha256, producer_status}) => invoke(async () => new TraceProductClient().stageCapability({orchestrationId: orchestration_id, expectedRevision: expected_revision, ...(candidate_dir === undefined ? {} : {candidateDir: candidate_dir}), ...(manifest_sha256 === undefined ? {} : {manifestSha256: manifest_sha256}), ...(producer_status === undefined ? {} : {producerStatus: producer_status})})));
+
+  server.registerTool('trace_capability_validate', {
+    title: 'Validate capability candidate',
+    description: 'Record independent schema, replay, behavior, rollback and source-hash validation for an immutable staged candidate. Validation failure is durable and fail-closed.',
+    inputSchema: {orchestration_id: z.string().min(1).max(512), expected_revision: z.number().int().min(0), validation: z.object({schema: z.enum(['passed', 'failed', 'pending', 'not_run']), replay: z.enum(['passed', 'failed', 'pending', 'not_run']), behavior: z.enum(['passed', 'failed', 'pending', 'not_run']), rollback: z.enum(['passed', 'failed', 'pending', 'not_run']), source_hashes: z.enum(['passed', 'failed', 'pending', 'not_run'])}).strict()},
+  }, async ({orchestration_id, expected_revision, validation}) => invoke(async () => new TraceProductClient().validateCapability({orchestrationId: orchestration_id, expectedRevision: expected_revision, validation})));
+
+  server.registerTool('trace_capability_publish', {
+    title: 'Record capability publication',
+    description: 'Finalize publication only after the existing CapabilityPublisher has actually published, all validation gates pass, hashes/provenance match and rollback evidence is present. Without a standing policy, approval=publish:<orchestration_id> is required.',
+    inputSchema: {orchestration_id: z.string().min(1).max(512), expected_revision: z.number().int().min(0), policy_id: z.string().min(1).max(512).optional(), approval: z.string().max(2_000).optional(), publication_receipt: z.record(z.unknown()), rollback_receipt: z.string().min(1).max(4_000), producer_status: z.literal('published').optional()},
+  }, async ({orchestration_id, expected_revision, policy_id, approval, publication_receipt, rollback_receipt, producer_status}) => invoke(async () => new TraceProductClient().publishCapability({orchestrationId: orchestration_id, expectedRevision: expected_revision, ...(policy_id === undefined ? {} : {policyId: policy_id}), ...(approval === undefined ? {} : {approval}), publicationReceipt: publication_receipt, rollbackReceipt: rollback_receipt, ...(producer_status === undefined ? {} : {producerStatus: producer_status})})));
+
+  server.registerTool('trace_capability_rollback', {
+    title: 'Rollback published capability',
+    description: 'Record rollback after the existing CapabilityPublisher restores its receipt-backed files. Product never performs push, delete or an independent publication.',
+    inputSchema: {orchestration_id: z.string().min(1).max(512), expected_revision: z.number().int().min(0), rollback_receipt: z.string().min(1).max(4_000), producer_status: z.literal('rolled_back')},
+  }, async ({orchestration_id, expected_revision, rollback_receipt, producer_status}) => invoke(async () => new TraceProductClient().rollbackCapability({orchestrationId: orchestration_id, expectedRevision: expected_revision, rollbackReceipt: rollback_receipt, producerStatus: producer_status})));
+
   server.registerTool('trace_zhihu_status', {
     description: 'Inspect the local Zhihu provider and OAuth connection. No credentials, user data, login identity, or token is returned.', inputSchema: {},
   }, async () => invoke(() => new TraceZhihuClient().call('status')));

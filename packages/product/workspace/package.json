@@ -9,6 +9,6 @@
     "./node": "./src/workspace.mjs"
   },
   "scripts": {
-    "build": "node --check src/index.mjs && node --check src/bridge.mjs && node --check src/commands.mjs && node --check src/workspace.mjs && node --check src/codex-bridge.mjs"
+    "build": "node --check src/index.mjs && node --check src/bridge.mjs && node --check src/commands.mjs && node --check src/workspace.mjs && node --check src/host-ingest.mjs && node --check src/host-workflow.mjs && node --check src/codex-bridge.mjs"
   }
 }

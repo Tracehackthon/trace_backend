@@ -63,7 +63,18 @@ Codex plugin 暴露对应的 `trace_product_context_receive` 和 `trace_product_
 
 两条接口复用现有 SQLite 命令账本、幂等回放和工作区修订链。回传前重新核验项目、delivery、session、hash 与 matter 归属；成功状态 `returned_for_review` 不会自动修改「我的理解」。Plugin 默认通过 `TRACE_PRODUCT_URL=http://127.0.0.1:4173` 连接，MCP client 只允许无凭证、无路径的 HTTP loopback origin。
 
-`received` 证明该本机 Codex adapter 领取并持久化绑定了快照，不证明内容已经正确影响 Agent 的推理或产物；后者仍看实际 diff、测试和产物证据。当前还没有完整 outbox、运行中快照失效通知、远程宿主凭据或来源/模型 adapter。
+`received` 证明该本机 Codex adapter 领取并持久化绑定了快照，不证明内容已经正确影响 Agent 的推理或产物；后者仍看实际 diff、测试和产物证据。Host Session 的 Stop outbox/fixture worker 已覆盖本机异步 sensemaking，但运行中快照失效通知、远程宿主凭据或来源/模型 adapter 仍未实现。
+
+## Codex Host Session Ingest
+
+Product Workspace 还提供一条独立的用户级宿主会话接收边界：
+
+- `POST /api/product/host/session/attach`、`/pause`、`/detach`：显式附着、暂停或结束当前 Codex session；请求必须带 `commandId`、`host`、`sessionId`，附着可带空的 `projectRef`；
+- `POST /api/product/host/event`：接收 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`Interrupt`、`SessionEnd`；只有已 attach 的 session 才会保存 prompt / `last_assistant_message`，工具事件仅保存安全 identity；
+- `GET /api/product/host/sessions`、`/turns`、`/findings`：读取安全的 session、HostTurn 和 Workflow Finding 投影；
+- `POST /api/product/host/finding`：保存用户明确捕获、并指向已接收 HostTurn 的 finding，初始为 `scope=unknown`、`target_kind=unresolved`、`status=captured`。
+
+这些记录位于 `web.sqlite` 的独立 append-only 表，不推进产品 snapshot revision，也不写入项目 `trace.sqlite` 或 Agent 库；不依赖 `transcript_path`。全局 hook 在未附着或暂停时成功 no-op，非 `.trace/` cwd 也只有在 session 已附着时才可进入该用户级接收空间。幂等键由 host/session/turn/event/tool identity 组成，同键不同内容会冲突；不会由此自动生成 Skill、修改理解或发布规则。
 
 实现与验证见工作区[历史任务记录](../../../docs/tasks/trace-codex-product-bridge.md)（独立 checkout 不含此记录）。源码更新后须按 owner 安全重启对应服务；Codex 安装/更新 plugin 后须新开任务，已有会话不会热加载 MCP 工具。不要按历史端口描述判断当前进程版本。
 
@@ -77,3 +88,7 @@ Codex plugin 暴露对应的 `trace_product_context_receive` 和 `trace_product_
 当前完成本机 Web 链路及 Codex MCP 的隔离 receive/return 往返；知乎／全网面板可显示真实 provider 摘要，用户选择后可把来源及原始链接放入对照，并明确确认关联。启用 Agent 后，页面可发起运行、订阅 SSE、取消，并对局部修订候选执行确认、放弃或撤销；候选只改变理解草稿，不会自动保存为正式理解。其他任意外部 Agent、云账号 / 同步、移动端及桌面打包不在该 Web 已验证范围。不要把旧原型的 mock 讨论当作已连接模型。
 
 ---
+
+### Host Session 第三阶段状态
+
+宿主会话页继续通过 Product Workspace API 投影状态，不在浏览器另存副本。它同时展示 resident sensemaking worker 的 queue/profile/shadow/privacy 状态、Repository Guard recovery journal，以及 capability candidate/trial/publication policy。原始 turn 正文默认折叠；API 列表省略 prompt/final，仅返回 input fields、hash 和 redaction receipt。worker 未配置或 Product/Agent 服务未运行时显示“不可用”，不会伪称已执行模型或发布。

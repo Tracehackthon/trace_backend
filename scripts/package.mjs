@@ -38,7 +38,11 @@ copy('packages/bundle', 'bundle');
 copy('schemas', 'schemas');
 copy('python/sdk', 'python-sdk');
 copy('native', 'native');
-copy('plugins', 'plugins');
+// Only the supported Codex integration belongs in the distributable runtime.
+// `trace-harness-plugin` is an exploration host (and carries its own Electron
+// development tree); shipping it would add hundreds of megabytes and would
+// accidentally treat an internal prototype as a release surface.
+copy('plugins/trace-codex', 'plugins/trace-codex');
 copy('marketplace.json', 'marketplace.json');
 // The desktop installer hosts its renderer itself, but it still needs the
 // product/search/Agent loopback APIs on a true first launch. Keep this narrow

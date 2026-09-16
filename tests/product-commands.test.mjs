@@ -68,6 +68,24 @@ test('packaged desktop snapshot bridge requires its private process token',async
   assert.equal(saved.json.host.chain.capture.text,'桌面草稿');
 });
 
+test('legacy string capture is normalized before desktop draft commands mutate it',async t=>{
+  const a=await fixture(t);await a.close();
+  const desktopToken='desktop-test-token-with-enough-entropy';
+  const b=await a.open({desktopSnapshotToken:desktopToken});
+  const captured=await b.ok(capture('legacy-capture','保留已有事项'));
+  const host=structuredClone(captured.host);host.chain.capture='尚未提交的旧草稿';
+  const imported=await b.request('/api/web/workspace','PUT',{
+    expectedRevision:captured.revision,commandId:'legacy-capture-import',host,
+  },{'x-trace-desktop-token':desktopToken});
+  assert.equal(imported.status,200,JSON.stringify(imported.json));
+  assert.deepEqual(imported.json.host.chain.capture,{
+    text:'尚未提交的旧草稿',sourceIds:[],excerpt:'',excerptSourceId:null,
+  });
+  const drafted=await b.execute({type:'capture.draft',text:'恢复后继续输入'},imported.json.revision,'legacy-capture-draft');
+  assert.equal(drafted.status,200,JSON.stringify(drafted.json));
+  assert.equal(drafted.json.host.chain.capture.text,'恢复后继续输入');
+});
+
 test('capture, explicit understanding and stop restore from the same v1 database after restart',async t=>{
   const a=await fixture(t);
   let state=await a.ok(capture());let m=state.host.chain.matters[0];

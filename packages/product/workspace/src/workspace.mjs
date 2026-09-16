@@ -71,11 +71,23 @@ function normalizeHost(input) {
   demand(input.chain.isDemo !== true && input.worksite.isDemo !== true, 'DEMO_NOT_PERSISTABLE', '示例工作区不能写入真实工作区。');
   demand(!Object.hasOwn(input.worksite, 'matters'), 'DUPLICATE_MATTER_OWNER', '工作投影不能另存第二份事项库。');
   const host = structuredClone(input), chain = host.chain, worksite = host.worksite;
+  // Early desktop builds could persist the home draft as a bare string. Keep
+  // the text, but restore the canonical capture shape before any reducer tries
+  // to mutate capture.text. The repaired shape is written on the next command.
+  if (typeof chain.capture === 'string') chain.capture = { text: chain.capture, sourceIds: [], excerpt: '', excerptSourceId: null };
   const matters = arrayMap(chain.matters, 'chain.matters'), sources = arrayMap(chain.sources, 'chain.sources');
   const sessions = objectMap(chain.sessions, 'chain.sessions'), comparisons = objectMap(host.comparisons, 'comparisons');
   const works = objectMap(worksite.works, 'worksite.works'), workSessions = objectMap(worksite.sessions, 'worksite.sessions'), guards = objectMap(host.workGuards, 'workGuards');
   demand(matters.size + sources.size + sessions.size + comparisons.size + works.size + workSessions.size + guards.size <= MAX_ENTITIES, 'TOO_MANY_ENTITIES', '工作区实体数量超过限制。');
   demand(Number.isSafeInteger(chain.nextId) && chain.nextId >= 1, 'INVALID_HOST', '事项序号无效。');
+  demand(plain(chain.capture)
+    && Object.keys(chain.capture).every(key => ['text', 'sourceIds', 'excerpt', 'excerptSourceId'].includes(key))
+    && typeof chain.capture.text === 'string'
+    && Array.isArray(chain.capture.sourceIds)
+    && chain.capture.sourceIds.every(sourceId => sources.has(sourceId))
+    && typeof chain.capture.excerpt === 'string'
+    && (chain.capture.excerptSourceId === null || sources.has(chain.capture.excerptSourceId)),
+  'INVALID_HOST', '首页草稿结构或来源引用无效。');
   demand(chain.selectedId === null || matters.has(chain.selectedId), 'INVALID_REFERENCE', '所选事项不存在。');
   demand(worksite.selectedWorkId === null || works.has(worksite.selectedWorkId), 'INVALID_REFERENCE', '所选工作不存在。');
   for (const [id, matter] of matters) {

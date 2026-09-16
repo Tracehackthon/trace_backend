@@ -1,16 +1,27 @@
 # Trace
 
-## 让重要但未完成的想法，继续发生。
+> [!IMPORTANT]
+> **评委和第一次体验 Trace 的用户，请不要把这个源码仓库当成产品页面。**
+>
+> - **直接体验产品：** [trace.neutrom.store](https://trace.neutrom.store/)
+> - **观看完整演示：** [trace.neutrom.store/video](https://trace.neutrom.store/video)
+> - **下载 Windows 桌面版：** [Trace Desktop 最新安装包](https://github.com/Tracehackthon/traceweb/releases/latest)
+>
+> 桌面版会同时打开 Trace 主应用与桌宠，并在本机启动受限 Runtime。第一次使用 Codex 时，进入「个人与设置 → Codex 接入」，选择当前项目并执行连接检查；Trace 会明确告诉你 Codex 是否已安装、已登录且版本可用，不会要求用户手填项目路径，也不会把系统路径暴露到页面。
+
+## 让值得思考但未完成的想法，继续发生。
 
 **Trace Runtime** 是一个 local-first 的连续思考工作空间。
 
-它不把收藏、聊天、任务和 AI 回答堆成更多孤立记录；它把一条还没有想清楚的线索，沿着 **原始表达 → 真实材料 → 用户确认的理解 → 一次实践 → 结果回流**，保留为同一件仍然可以变化的事。
+我们不做重复的Agent工具、我们不想让用户脱离自己的工作空间、所以我们以codex作为首要宿主，充分利用codex的自身强大agent能力。
+
+Trace不把收藏、聊天、任务和 AI 回答堆成更多孤立记录；它更能把你还没有想清楚的线索，沿着 **原始表达 → 真实材料 → 用户确认的理解 → 一次实践 → 结果回流**，保留为同一件仍然可以变化的事。
 
 > **产品入口说明：** 本 GitHub 仓库是 Trace 的源码与技术文档入口，不是产品演示页面。请通过下方正式地址体验产品或观看演示视频。
 
 <p align="center">
-  <a href="https://trace.neutronm.store/"><strong>打开 Trace 在线演示</strong></a> ·
-  <a href="https://trace.neutronm.store/video"><strong>观看 Trace 视频展示</strong></a>
+  <a href="https://trace.neutrom.store/"><strong>打开 Trace 在线演示</strong></a> ·
+  <a href="https://trace.neutrom.store/video"><strong>观看 Trace 视频展示</strong></a>
 </p>
 
 <p align="center">
@@ -18,8 +29,9 @@
 </p>
 
 <p align="center">
-  <a href="https://trace.neutronm.store/">在线演示</a> ·
-  <a href="https://trace.neutronm.store/video">视频展示</a> ·
+  <a href="https://trace.neutrom.store/">在线演示</a> ·
+  <a href="https://trace.neutrom.store/video">视频展示</a> ·
+  <a href="https://github.com/Tracehackthon/traceweb/releases/latest">Windows 桌面版</a> ·
   <a href="#judge-demo">3 分钟评委演示</a> ·
   <a href="#what-is-trace">30 秒看懂</a> ·
   <a href="#run-locally">本机运行</a> ·
@@ -81,8 +93,9 @@ Trace 的核心对象不是笔记、聊天或待办，而是：
 
 | 入口 | 适合什么 | 当前能验证什么 | 数据边界 |
 | --- | --- | --- | --- |
-| [Trace 在线演示](https://trace.neutronm.store/) | 快速体验“留下一点 → 理解 → 行动 → 结果”的手工闭环 | 浏览器中的手工产品流程 | 当前浏览器 IndexedDB；**不**自动连接本机 SQLite、知乎、Agent 或 Codex |
-| [Trace 视频展示](https://trace.neutronm.store/video) | 快速了解产品叙事、关键交互和完整体验路径 | 视频形式的产品演示 | 用于展示产品，不代替本机接口与持久化验收 |
+| [Trace 在线演示](https://trace.neutrom.store/) | 快速体验“留下一点 → 理解 → 行动 → 结果”的手工闭环 | 浏览器中的手工产品流程 | 当前浏览器 IndexedDB；**不**自动连接本机 SQLite、知乎、Agent 或 Codex |
+| [Trace 视频展示](https://trace.neutrom.store/video) | 快速了解产品叙事、关键交互和完整体验路径 | 视频形式的产品演示 | 用于展示产品，不代替本机接口与持久化验收 |
+| [Trace Windows 桌面版](https://github.com/Tracehackthon/traceweb/releases/latest) | 体验桌宠、本机 Runtime、项目识别与 Codex 工作回流 | 安装后由应用完成环境检查，用户只需选择项目并确认 Codex 可用 | 本机单用户；首次安装包暂未提供 Windows 代码签名，系统可能显示发布者提醒 |
 | 本仓库的本机 Web | 评委演示来源、产品状态、Codex 工作回流及可选 Agent API | SQLite、知乎／全网 provider、受控 Agent Runtime | 单用户、loopback、same-origin；详见下方运行方式 |
 
 <a id="zhihu"></a>

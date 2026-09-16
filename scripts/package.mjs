@@ -40,6 +40,13 @@ copy('python/sdk', 'python-sdk');
 copy('native', 'native');
 copy('plugins', 'plugins');
 copy('marketplace.json', 'marketplace.json');
+// The desktop installer hosts its renderer itself, but it still needs the
+// product/search/Agent loopback APIs on a true first launch. Keep this narrow
+// server source beside the compiled runtime so Electron can start it with its
+// bundled Node runtime without requiring a developer checkout.
+copy('apps/desktop/server.mjs', 'apps/desktop/server.mjs');
+copy('apps/agent', 'apps/agent');
+copy('packages/product/workspace/src', 'packages/product/workspace/src');
 // The Node 22–24.1 runtime selects this pure-JS/WASM fallback before loading
 // experimental node:sqlite. Materialize its JS assets so native distribution
 // installation never depends on node-gyp or a platform-specific prebuild.

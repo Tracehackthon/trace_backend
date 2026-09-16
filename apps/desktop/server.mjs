@@ -84,14 +84,20 @@ const server = http.createServer(async (request, response) => {
   }
 })
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`Trace Web: http://127.0.0.1:${port}/`)
-  console.log(`Local Web data: ${productWorkspace.file}`)
-  console.log('Product writes: command protocol v1; legacy snapshot/reset writes disabled')
+export const ready = new Promise((resolve, reject) => {
+  const fail = error => reject(error)
+  server.once('error', fail)
+  server.listen(port, '127.0.0.1', () => {
+    server.off('error', fail)
+    console.log(`Trace Web: http://127.0.0.1:${port}/`)
+    console.log(`Local Web data: ${productWorkspace.file}`)
+    console.log('Product writes: command protocol v1; legacy snapshot/reset writes disabled')
+    resolve({ port, file: productWorkspace.file })
+  })
 })
 
 let closing = false
-async function close() {
+export async function close() {
   if (closing) return
   closing = true
   const stopped = new Promise(resolve => server.close(resolve))

@@ -2,7 +2,7 @@ import {createHash, randomBytes, timingSafeEqual} from 'node:crypto';
 import {ZhihuTransportError} from './index.js';
 import {record} from './normalize.js';
 
-type OAuthConfig = {app_id?: string; app_key?: string; redirect_uri?: string; fetch_impl?: typeof fetch; now?: () => number};
+type OAuthConfig = {app_id?: string; app_key?: string; redirect_uri?: string; loopback_forward?: boolean; fetch_impl?: typeof fetch; now?: () => number};
 const digest = (s: string) => createHash('sha256').update(s).digest();
 const equal = (value: string | null | undefined, hash: Buffer) => typeof value === 'string' && value.length <= 1000 && timingSafeEqual(digest(value), hash);
 function fail(code: string, message: string): never {throw new ZhihuTransportError(code, message);}
@@ -16,7 +16,7 @@ const single = (p: URLSearchParams, k: string) => {
 export class ZhihuOAuthSession {
   #config: OAuthConfig; #fetch: typeof fetch; #now: () => number;
   #token: {value: string; expiresAt: number} | null = null;
-  #pending: {ticket: Buffer; expiresAt: number; state?: Buffer; cookie?: Buffer; exchanging?: boolean} | null = null;
+  #pending: {ticket: Buffer; expiresAt: number; state?: Buffer; cookie?: Buffer; exchanging?: boolean; loopbackForward?: boolean} | null = null;
   #generation = 0; #exchange: AbortController | null = null;
   #relay: {id: string; verifier: string; state: string; cookie: string; origin: string} | null = null;
   #checking = false;
@@ -47,8 +47,11 @@ export class ZhihuOAuthSession {
     this.#exchange?.abort(); this.#generation++; this.#relay = null;
     const generation = this.#generation;
     const ticket = randomBytes(32).toString('base64url');
-    this.#pending = {ticket: digest(ticket), expiresAt: this.#now() + 5 * 60000};
+    this.#pending = {ticket: digest(ticket), expiresAt: this.#now() + 5 * 60000,
+      loopbackForward: callbackOrigin !== origin && this.#config.loopback_forward === true};
     if (callbackOrigin !== origin) {
+      if (this.#config.loopback_forward === true)
+        return {status: 'user_action_required', login_url: `${origin}/api/zhihu/oauth/connect?ticket=${ticket}`, expires_in: 300};
       const connection = this.connect(ticket), state = new URL(connection.url).searchParams.get('state')!;
       const verifier = randomBytes(32).toString('base64url');
       try {
@@ -102,7 +105,8 @@ export class ZhihuOAuthSession {
   connect(ticket: string | null) {
     this.status(); const p = this.#pending;
     if (!p || p.state || !equal(ticket, p.ticket)) fail('OAUTH_TICKET_INVALID', 'The authorization link is invalid or expired; start again.');
-    const state = randomBytes(32).toString('base64url'), cookie = randomBytes(32).toString('base64url');
+    const nonce = randomBytes(32).toString('base64url');
+    const state = p.loopbackForward ? `trace-local-v1.${nonce}` : nonce, cookie = randomBytes(32).toString('base64url');
     p.state = digest(state); p.cookie = digest(cookie);
     const u = new URL('https://openapi.zhihu.com/authorize');
     u.search = new URLSearchParams({app_id: this.#config.app_id!, redirect_uri: this.#config.redirect_uri!, response_type: 'code', state}).toString();

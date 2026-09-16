@@ -120,6 +120,7 @@ test('provider: user data requires explicit OAuth; public search is independent 
     if (String(url).endsWith('/access_token')) return tokenResponse();
     calls.push({url: String(url), options}); return response({Items: [item], Paging: {IsEnd: false, NextOffset: '9007199254740993'}});
   }});
+  assert.equal(provider.status().user_content_configured, true);
   await assert.rejects(provider.userRead({kind: 'contents'}), errorCode('USER_AUTH_REQUIRED')); assert.equal(calls.length, 0);
   const found = await provider.search({source: 'global', query: 'x'}); assert.equal(found.items[0].url, item.Url);
   await localAuthorize(provider.oauth);
@@ -171,6 +172,38 @@ test('relay + local OAuth: remote HTTPS callback end-to-end, proof redemption, n
   const result = await oauth.check(); assert.equal(result.status, 'authorized'); assert.equal(exchanges, 1);
   assert.ok(!JSON.stringify(result).includes('fixture-')); await oauth.check(); assert.equal(exchanges, 1);
   assert.equal((await fetch(start.login_url.replace(login.origin, origin), {redirect: 'manual'})).status, 400);
+});
+
+test('local OAuth loopback-forward mode keeps the app key and token in the local runtime', async t => {
+  const redirect_uri = 'https://trace.neutrom.store/callback';
+  let exchanges = 0;
+  const provider = new ZhihuProvider({...oauthConfig, redirect_uri, loopback_forward: true, access_secret: 'fixture-access', fetch_impl: async (url, options) => {
+    assert.equal(String(url), 'https://openapi.zhihu.com/access_token');
+    exchanges++;
+    assert.equal(options.body.get('code'), 'fixture-code');
+    assert.equal(options.body.get('redirect_uri'), redirect_uri);
+    return tokenResponse();
+  }});
+  const origin = await serve(t, createZhihuHttp(provider));
+  const post = (pathname, body = {}) => fetch(origin + pathname, {method: 'POST', headers: {origin, 'content-type': 'application/json'}, body: JSON.stringify(body)});
+  const started = await (await post('/api/zhihu/oauth/start')).json();
+  const localConnect = new URL(started.login_url);
+  assert.equal(localConnect.origin, origin);
+  const connected = await fetch(started.login_url, {redirect: 'manual'});
+  const localCookie = connected.headers.get('set-cookie').split(';')[0];
+  const authorize = new URL(connected.headers.get('location'));
+  assert.equal(authorize.origin, 'https://openapi.zhihu.com');
+  assert.equal(authorize.searchParams.get('redirect_uri'), redirect_uri);
+  assert.match(authorize.searchParams.get('state'), /^trace-local-v1\.[A-Za-z0-9_-]{43}$/);
+  const callback = new URL('/api/zhihu/oauth/loopback-callback', origin);
+  callback.searchParams.set('state', authorize.searchParams.get('state'));
+  callback.searchParams.set('authorization_code', 'fixture-code');
+  const completed = await fetch(callback, {headers: {cookie: localCookie}, redirect: 'manual'});
+  assert.equal(completed.status, 303);
+  assert.equal(completed.headers.get('location'), '/api/zhihu/oauth/result');
+  assert.equal(provider.oauth.status().status, 'authorized');
+  assert.equal(exchanges, 1);
+  assert.ok(!JSON.stringify(provider.oauth.status()).includes('fixture'));
 });
 
 test('relay: duplicate callbacks and mismatched aliases cannot overwrite code; transactions expire', async t => {

@@ -38,6 +38,7 @@ function cookie(req: IncomingMessage) {
  * authenticated owner/session boundary; no wildcard CORS or remote proxy flags. */
 export function createZhihuHttp(provider: ZhihuProvider | null = null) {
   const callbackPath = provider?.oauth.redirectUri ? new URL(provider.oauth.redirectUri).pathname : '/api/zhihu/oauth/callback';
+  const loopbackCallbackPath = '/api/zhihu/oauth/loopback-callback';
   let closed = false;
   return {
     provider,
@@ -66,6 +67,12 @@ export function createZhihuHttp(provider: ZhihuProvider | null = null) {
         }
         if (req.method === 'GET' && pathname === callbackPath) {
           if (url.origin !== new URL(provider.oauth.redirectUri!).origin) error('OAUTH_CALLBACK_MISMATCH', 'Callback origin differs from registration.');
+          await provider.oauth.complete(url.searchParams, cookie(req));
+          reply(res, 303, '', {location: '/api/zhihu/oauth/result', 'set-cookie': 'trace_zhihu_oauth=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'}); return true;
+        }
+        if (req.method === 'GET' && pathname === loopbackCallbackPath) {
+          const states = url.searchParams.getAll('state');
+          if (states.length !== 1 || !/^trace-local-v1\.[A-Za-z0-9_-]{43}$/.test(states[0]!)) error('OAUTH_STATE_MISMATCH', 'OAuth callback is not a Trace local handoff.');
           await provider.oauth.complete(url.searchParams, cookie(req));
           reply(res, 303, '', {location: '/api/zhihu/oauth/result', 'set-cookie': 'trace_zhihu_oauth=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'}); return true;
         }

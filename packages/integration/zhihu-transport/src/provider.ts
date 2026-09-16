@@ -16,12 +16,13 @@ export class ZhihuProvider {
   #secret: string; #fetch: typeof fetch; #now: () => number; #timeout: number;
   #busy = false; #cooldown = 0; #closed = false;
   #lifetime = new AbortController();
-  constructor({access_secret = '', app_id, app_key, redirect_uri, timeout_ms = 15000, fetch_impl = fetch, now = Date.now}:
-    {access_secret?: string; app_id?: string; app_key?: string; redirect_uri?: string; timeout_ms?: number; fetch_impl?: typeof fetch; now?: () => number} = {}) {
+  constructor({access_secret = '', app_id, app_key, redirect_uri, loopback_forward = false, timeout_ms = 15000, fetch_impl = fetch, now = Date.now}:
+    {access_secret?: string; app_id?: string; app_key?: string; redirect_uri?: string; loopback_forward?: boolean; timeout_ms?: number; fetch_impl?: typeof fetch; now?: () => number} = {}) {
     this.#secret = access_secret; this.#fetch = fetch_impl; this.#now = now; this.#timeout = timeout_ms;
-    this.oauth = new ZhihuOAuthSession({...(app_id ? {app_id} : {}), ...(app_key ? {app_key} : {}), ...(redirect_uri ? {redirect_uri} : {}), fetch_impl, now});
+    this.oauth = new ZhihuOAuthSession({...(app_id ? {app_id} : {}), ...(app_key ? {app_key} : {}), ...(redirect_uri ? {redirect_uri} : {}), loopback_forward, fetch_impl, now});
   }
-  status() {return {protocol_version: 1, enabled: !this.#closed, search_configured: !!this.#secret.trim(),
+  status() {const credentialConfigured = !!this.#secret.trim(); return {protocol_version: 1, enabled: !this.#closed, search_configured: credentialConfigured,
+    user_content_configured: credentialConfigured,
     sources: ['zhihu', 'global'], oauth: this.oauth.status(), boundary: 'single-user-local-service',
     automatic_capture: false, full_text: false, credentials_exposed: false};}
   #transport(token?: string, signal?: AbortSignal) {
@@ -109,5 +110,6 @@ export function createZhihuProviderFromEnv(env: NodeJS.ProcessEnv = process.env)
   return new ZhihuProvider({access_secret: env.ZHIHU_ACCESS_SECRET ?? '',
     ...(env.ZHIHU_OAUTH_APP_ID ? {app_id: env.ZHIHU_OAUTH_APP_ID} : {}),
     ...(env.ZHIHU_OAUTH_APP_KEY ? {app_key: env.ZHIHU_OAUTH_APP_KEY} : {}),
-    ...(env.ZHIHU_OAUTH_REDIRECT_URI ? {redirect_uri: env.ZHIHU_OAUTH_REDIRECT_URI} : {})});
+    ...(env.ZHIHU_OAUTH_REDIRECT_URI ? {redirect_uri: env.ZHIHU_OAUTH_REDIRECT_URI} : {}),
+    ...(env.TRACE_ZHIHU_OAUTH_LOOPBACK_FORWARD === '1' ? {loopback_forward: true} : {})});
 }

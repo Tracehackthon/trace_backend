@@ -83,9 +83,18 @@ copy('apps/desktop/runtime-identity.mjs', 'apps/desktop/runtime-identity.mjs');
 copy('apps/agent', 'apps/agent');
 copy('packages/product/workspace/src', 'packages/product/workspace/src');
 // The Node 22–24.1 runtime selects this pure-JS/WASM fallback before loading
-// experimental node:sqlite. Materialize its JS assets so native distribution
-// installation never depends on node-gyp or a platform-specific prebuild.
-copy('node_modules/sql.js', 'node_modules/sql.js');
+// experimental node:sqlite. Do not copy the npm checkout wholesale: sql.js
+// includes dot-prefixed development containers plus documentation/test assets
+// which electron-builder does not preserve consistently in extraResources.
+// Keep the package metadata, the audited asm.js entry used by Trace, and the
+// normal wasm entry/sidecar so the packaged dependency remains valid for its
+// declared `main`/exports without carrying the development tree.
+for (const relative of [
+  'node_modules/sql.js/package.json',
+  'node_modules/sql.js/dist/sql-asm.js',
+  'node_modules/sql.js/dist/sql-wasm.js',
+  'node_modules/sql.js/dist/sql-wasm.wasm',
+]) copy(relative, relative);
 const sqlJsPackage = path.join(root, 'node_modules', 'sql.js', 'package.json');
 const sqlJsInfo = JSON.parse(fs.readFileSync(sqlJsPackage, 'utf8'));
 copy('README.md', 'README.md');

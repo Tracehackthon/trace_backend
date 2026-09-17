@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
 
 const root = path.resolve(process.cwd());
 const installer = path.join(root, 'native', 'install.mjs');
@@ -68,6 +69,31 @@ test('distribution retains product documentation and the trace launcher', () => 
     assert.match(packagedBundleIndex, /\]\(\.\.\/docs\/versioning\.md\)/, 'packaged bundle index links must resolve inside the distribution');
     assert.equal(fs.existsSync(path.join(output, 'bundle', '..', 'docs', 'versioning.md')), true);
     const manifest = JSON.parse(fs.readFileSync(path.join(output, 'release-manifest.json'), 'utf8'));
+    const sqlJsEntries = manifest.files
+      .filter(file => file.path.startsWith('node_modules/sql.js/'))
+      .map(file => file.path)
+      .sort();
+    assert.deepEqual(sqlJsEntries, [
+      'node_modules/sql.js/dist/sql-asm.js',
+      'node_modules/sql.js/dist/sql-wasm.js',
+      'node_modules/sql.js/dist/sql-wasm.wasm',
+      'node_modules/sql.js/package.json',
+    ], 'the runtime package must contain only sql.js runtime assets');
+    assert.equal(sqlJsEntries.some(file => /node_modules\/sql\.js\/(?:\.|.*(?:test|docs?|\.devcontainer)(?:\/|$))/i.test(file)), false, 'sql.js development assets must not enter the runtime manifest');
+    assert.equal(fs.existsSync(path.join(output, 'node_modules', 'sql.js', '.devcontainer')), false, 'sql.js dot-prefixed development assets must not be staged');
+    const sqliteProbe = spawnSync(process.execPath, ['--input-type=module', '-e', [
+      `process.env.TRACE_SQLITE_DRIVER = 'sql.js';`,
+      `const {openSqlite} = await import(${JSON.stringify(pathToFileURL(path.join(output, 'dist', 'packages', 'core', 'storage', 'src', 'sqlite-driver.js')).href)});`,
+      `const database = ${JSON.stringify(path.join(directory, 'sqljs-fallback.sqlite'))};`,
+      `const opened = openSqlite(database, {driver: 'sql.js'});`,
+      `if (opened.driver.kind !== 'sql.js') throw new Error('fallback driver was not selected');`,
+      `opened.db.exec('CREATE TABLE probe (value TEXT)');`,
+      `opened.db.prepare('INSERT INTO probe (value) VALUES (?)').run('packaged');`,
+      `const row = opened.db.prepare('SELECT value FROM probe').get();`,
+      `if (row?.value !== 'packaged') throw new Error('packaged sql.js fallback did not persist a row');`,
+      `opened.db.close();`,
+    ].join('\n')], {cwd: output, encoding: 'utf8', env: {...process.env, TRACE_SQLITE_DRIVER: 'sql.js'}});
+    assert.equal(sqliteProbe.status, 0, `packaged sql.js fallback failed: ${sqliteProbe.stderr || sqliteProbe.stdout}`);
     assert.equal(manifest.files.some(file => file.path === 'docs/getting-started.md'), true);
     assert.equal(manifest.manifest_version, '0.2.0');
     assert.ok(['release-ready', 'development-dirty'].includes(manifest.distribution_eligibility));

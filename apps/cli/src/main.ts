@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {execFileSync} from 'node:child_process';
 import {discoverRuntimeRoot, TraceRuntime} from '../../../packages/core/runtime/src/index.js';
 import {CHANGE_KINDS, CHANGE_STATUSES, type ChangeKind, type ChangeStatus, type ChangeLineage, type Compatibility, type ScopeType, type Validation, ProtocolError} from '../../../packages/core/protocol/src/index.js';
 import {DATA_KINDS, type DataKind} from '../../../packages/core/data/src/index.js';
@@ -226,33 +225,15 @@ function userIdForProduct(parsed: Map<string, string[]>): string {
   return `local-${normalized || 'user'}`;
 }
 
-function findProjectContext(directory: string): ProductProjectContext | undefined {
-  let cursor = path.resolve(directory);
-  if (!fs.existsSync(cursor) || !fs.statSync(cursor).isDirectory()) return undefined;
-  while (true) {
-    const traceDir = path.join(cursor, '.trace');
-    const descriptorFile = path.join(traceDir, 'project.json');
-    if (fs.existsSync(descriptorFile)) {
-      let descriptor: ProjectInstanceDescriptor;
-      try { descriptor = validateProjectInstanceDescriptor(JSON.parse(fs.readFileSync(descriptorFile, 'utf8'))); }
-      catch (error) { throw new ProtocolError('PROJECT_INVALID', `Trace project descriptor is invalid: ${error instanceof Error ? error.message : String(error)}`); }
-      return {project_dir: cursor, trace_dir: traceDir, state_file: path.join(cursor, descriptor.state_file), descriptor};
-    }
-    const parent = path.dirname(cursor);
-    if (parent === cursor) return undefined;
-    cursor = parent;
-  }
-}
-
-function projectContext(parsed: Map<string, string[]>): ProductProjectContext {
+async function projectContext(parsed: Map<string, string[]>): Promise<ProductProjectContext> {
   const explicitProject = one(parsed, '--project-dir', false) ?? one(parsed, '--project', false);
   const requested = path.resolve(explicitProject ?? process.cwd());
   if (!fs.existsSync(requested) || !fs.statSync(requested).isDirectory()) throw new ProtocolError('INVALID_INPUT', `project directory does not exist: ${requested}`);
   // The upward descriptor walk is only a candidate lookup.  Product commands
-  // must pass the same cwd/Git/project-id checks as a routed host event before
+  // must pass the same descriptor/Git/worktree checks as a routed host event before
   // opening the project state file; a marker in an arbitrary parent directory
   // is not, by itself, an authoritative binding.
-  const binding = eventProjectContext({cwd: requested});
+  const binding = await eventProjectContext({cwd: requested});
   if (binding.status === 'personal') throw new ProtocolError('PROJECT_NOT_INITIALIZED', 'No verified .trace/project.json project was found. Run "trace init" in a Git project directory first.');
   if (binding.status !== 'resolved' || binding.context === undefined) {
     const diagnostic = binding.diagnostics[0];
@@ -262,7 +243,7 @@ function projectContext(parsed: Map<string, string[]>): ProductProjectContext {
 }
 
 type EventProjectBinding = {
-  status: 'resolved' | 'personal' | 'unresolved';
+  status: 'resolved' | 'personal' | 'unresolved' | 'conflict';
   project_ref: string | null;
   project_dir: string | null;
   project_id: string | null;
@@ -272,39 +253,13 @@ type EventProjectBinding = {
   context?: ProductProjectContext;
 };
 
-function cliPathKey(value: string): string {
-  const resolved = path.resolve(value);
-  try { return fs.realpathSync.native(resolved); } catch { return resolved; }
-}
-
-function cliInsidePath(child: string, parent: string): boolean {
-  const a = cliPathKey(child), b = cliPathKey(parent);
-  const left = process.platform === 'win32' ? a.toLowerCase() : a;
-  const right = process.platform === 'win32' ? b.toLowerCase() : b;
-  return left === right || left.startsWith(`${right}${path.sep}`);
-}
-
-function cliGitRoot(directory: string): string | null {
-  try {
-    const value = execFileSync('git', ['-C', directory, 'rev-parse', '--show-toplevel'], {encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'pipe']}).trim();
-    return value.length === 0 ? null : cliPathKey(value);
-  } catch { return null; }
-}
-
 /** Resolve a hook cwd without treating an upward .trace marker as authority. */
-function eventProjectContext(event: Record<string, unknown>): EventProjectBinding {
-  const rawCwd = event.cwd;
-  if (typeof rawCwd !== 'string' || !path.isAbsolute(rawCwd)) return {status: 'unresolved', project_ref: null, project_dir: null, project_id: null, cwd: typeof rawCwd === 'string' ? rawCwd : null, git_root: null, diagnostics: [{code: 'PROJECT_CWD_INVALID', message: 'Codex hook cwd must be an absolute directory', field: 'cwd'}]};
-  const cwd = cliPathKey(rawCwd);
-  if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) return {status: 'unresolved', project_ref: null, project_dir: null, project_id: null, cwd, git_root: null, diagnostics: [{code: 'PROJECT_CWD_NOT_FOUND', message: 'Codex hook cwd does not exist or is not a directory', field: 'cwd'}]};
-  let context: ProductProjectContext | undefined;
-  try { context = findProjectContext(cwd); }
-  catch (error) { return {status: 'unresolved', project_ref: null, project_dir: null, project_id: null, cwd, git_root: null, diagnostics: [{code: 'PROJECT_DESCRIPTOR_INVALID', message: error instanceof Error ? error.message : String(error), field: 'descriptor'}]}; }
-  if (context === undefined) return {status: 'personal', project_ref: null, project_dir: null, project_id: null, cwd, git_root: null, diagnostics: []};
-  const gitRoot = cliGitRoot(cwd);
-  if (gitRoot === null) return {status: 'unresolved', project_ref: context.project_dir, project_dir: context.project_dir, project_id: context.descriptor.project_id, cwd, git_root: null, diagnostics: [{code: 'GIT_ROOT_UNVERIFIABLE', message: 'Git repository root could not be verified', field: 'git_root'}]};
-  if (!cliInsidePath(context.project_dir, gitRoot)) return {status: 'unresolved', project_ref: context.project_dir, project_dir: context.project_dir, project_id: context.descriptor.project_id, cwd, git_root: gitRoot, diagnostics: [{code: 'PROJECT_GIT_ROOT_MISMATCH', message: 'Trace project descriptor is outside its Git repository root', field: 'git_root'}]};
-  return {status: 'resolved', project_ref: context.project_dir, project_dir: context.project_dir, project_id: context.descriptor.project_id, cwd, git_root: gitRoot, diagnostics: [], context};
+async function eventProjectContext(event: Record<string, unknown>): Promise<EventProjectBinding> {
+  const module = await productWorkspaceModule();
+  const value = module.resolveProjectBinding({cwd: event.cwd});
+  if (value.status !== 'resolved' || value.project_dir === null || value.descriptor === undefined) return value;
+  const traceDir = path.join(value.project_dir, '.trace');
+  return {...value, context: {project_dir: value.project_dir, trace_dir: traceDir, state_file: path.join(value.project_dir, value.descriptor.state_file), descriptor: value.descriptor}};
 }
 
 function sourceProfileForContext(context: ProductProjectContext): MyWikiSourceProfile {
@@ -520,10 +475,25 @@ async function sensemakingWorkerModule(): Promise<{createSensemakingWorker: (opt
 }
 
 /** Load the source Product Workspace adapter from both checkout and dist CLI. */
-async function productWorkspaceModule(): Promise<{createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}}> {
+type ProductWorkspaceModule = {
+  resolveProjectBinding: (input?: Record<string, unknown>) => EventProjectBinding & {descriptor?: ProjectInstanceDescriptor};
+  createProductWorkspace: (options: {file: string}) => {
+    hostSessions: {
+      attach: (input: Record<string, unknown>) => Record<string, unknown>;
+      pause: (input: Record<string, unknown>) => Record<string, unknown>;
+      detach: (input: Record<string, unknown>) => Record<string, unknown>;
+      ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>;
+      captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>;
+    };
+    hostWorkflow?: HostWorkflowPort;
+    close: () => void;
+  };
+};
+
+async function productWorkspaceModule(): Promise<ProductWorkspaceModule> {
   const root = validatedRuntimeRoot().root;
   const modulePath = path.join(root, 'packages', 'product', 'workspace', 'src', 'workspace.mjs');
-  if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}};
+  if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as ProductWorkspaceModule;
   throw new ProtocolError('IO_ERROR', 'Product Workspace adapter is unavailable; cannot receive a Codex host session');
 }
 
@@ -593,7 +563,7 @@ export async function run(argv: string[]): Promise<void> {
       ].join('\n'), {status: 'initialized', template_id: templateId, project: initialized.project_dir, trace_dir: initialized.trace_dir, source_mode: initialized.descriptor.source_mode, collaboration_model: {model_id: initialized.collaboration_model.model_id, version: initialized.collaboration_model.version}, source_activation: {manifest_id: initialized.source_activation.manifest_id, version: initialized.source_activation.version, entry_points: initialized.source_activation.entry_points.length}, next_actions: ['trace codex enable', 'trace profile', 'trace status']});
       return;
     }
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     if (group === 'source' && action === 'update') {
       if (one(parsed, '--confirm', false) !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'source update requires --confirm true');
       const file = one(parsed, '--file')!;
@@ -851,7 +821,7 @@ export async function run(argv: string[]): Promise<void> {
   if (group === 'review') {
     if (!action || action.startsWith('--')) throw new ProtocolError('INVALID_INPUT', 'trace review requires an inbox item ID');
     const parsed = args(rest);
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     const reviewed = productReview(context, action);
     const saveFile = one(parsed, '--save', false);
     if (saveFile !== undefined) {
@@ -883,7 +853,7 @@ export async function run(argv: string[]): Promise<void> {
   }
   if (group === 'codex' && (action === 'enable' || action === 'status')) {
     const parsed = args(rest);
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     const installer = new CodexHookInstaller(one(parsed, '--hooks-file', false));
     if (action === 'status') {
       const raw = fs.existsSync(installer.hooksFile) ? fs.readFileSync(installer.hooksFile, 'utf8') : '{}';
@@ -913,7 +883,7 @@ export async function run(argv: string[]): Promise<void> {
   }
   if (group === 'doctor' && (action === undefined || action.startsWith('--'))) {
     const parsed = args(action === undefined ? rest : [action, ...rest]);
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     const report = doctorSqlite(context.state_file);
     const errors = report.checks.filter(check => check.status === 'error').length;
     const warnings = report.checks.filter(check => check.status === 'warn').length;
@@ -922,7 +892,7 @@ export async function run(argv: string[]): Promise<void> {
   }
   if (group === 'backup' && (action === 'create' || action === 'restore') && ![...rest].includes('--sqlite-state-file')) {
     const parsed = args(rest);
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     if (action === 'create') {
       const fallback = path.join(context.trace_dir, 'backups', `trace-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
       const backup = backupSqlite(context.state_file, one(parsed, '--file', false) ?? fallback);
@@ -1218,8 +1188,8 @@ export async function run(argv: string[]): Promise<void> {
     const profilePath = one(parsed, '--source-profile', false);
     const explicitSqlite = one(parsed, '--sqlite-state-file', false);
     if (routeFromEventCwd && (profilePath !== undefined || explicitSqlite !== undefined)) throw new ProtocolError('INVALID_INPUT', '--route-from-event-cwd cannot be combined with static source or state paths');
-    const routedBinding = routeFromEventCwd ? eventProjectContext(hookEvent) : undefined;
-    const context = routeFromEventCwd ? routedBinding?.context : explicitSqlite === undefined ? projectContext(parsed) : undefined;
+    const routedBinding = routeFromEventCwd ? await eventProjectContext(hookEvent) : undefined;
+    const context = routeFromEventCwd ? routedBinding?.context : explicitSqlite === undefined ? await projectContext(parsed) : undefined;
     // A user-level Codex hook also sees non-Trace projects. It may still feed
     // an explicitly attached host session into the user Product Workspace;
     // without an existing web.sqlite (or an attached session row) this remains

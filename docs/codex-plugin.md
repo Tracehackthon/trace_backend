@@ -33,6 +33,8 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 2. 将该 marketplace 注册给 Codex，并安装 `trace-codex`；
 3. 为 MCP 写入当前 Trace runtime 的位置，使 Plugin 不依赖开发者电脑路径。
 
+安装器会先校验 `TRACE_RUNTIME_ROOT` 对应的 Trace runtime/package manifest、必需服务入口和（发行包）release-manifest 哈希；只有通过校验的 root 才会进入 dry-run、`--replace` 或写入 MCP 配置。MCP launcher 启动前也会复核同一身份，因此一个只含 `main.js` 的旧 checkout、半拷贝目录或其他 lookalike 目录会 fail-closed，而不会被当成当前 runtime。
+
 它**不会**创建 `.trace/`、读取任何认知源、改动已有项目、迁移 profile，或启用 Codex hooks。插件安装与项目状态是两条独立生命周期。
 
 如果只想检查安装方案，请始终先用 `--dry-run`。若更新 Plugin，先在 Codex 里确认当前项目没有未完成的变更，再显式运行相同命令并加入 `--replace`；它会备份旧 managed marketplace，并只刷新 `trace-codex@trace-runtime-local`，不会替任何项目做迁移。

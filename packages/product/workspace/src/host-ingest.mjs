@@ -137,10 +137,6 @@ function insidePath(child, parent) {
   return childValue === parentValue || childValue.startsWith(`${parentValue}${path.sep}`);
 }
 
-function projectSlug(value) {
-  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'project';
-}
-
 function bindingDiagnostic(code, message, field = undefined) {
   return {code, message, ...(field === undefined ? {} : {field})};
 }
@@ -180,7 +176,6 @@ function validateProjectDescriptor(root, file) {
   if (raw.protocol_id !== PROJECT_INSTANCE_PROTOCOL_ID) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_PROTOCOL', 'Trace project descriptor protocol is unsupported', 'protocol_id'));
   if (!PROJECT_INSTANCE_PROTOCOL_VERSIONS.has(raw.protocol_version)) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_VERSION', 'Trace project descriptor version is unsupported', 'protocol_version'));
   if (typeof raw.project_id !== 'string' || raw.project_id.trim().length === 0) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_PROJECT_ID', 'Trace project descriptor project_id is missing', 'project_id'));
-  else if (raw.project_id !== projectSlug(path.basename(root)) && (process.platform !== 'win32' || raw.project_id.toLowerCase() !== projectSlug(path.basename(root)).toLowerCase())) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_PROJECT_ID_MISMATCH', 'Trace project descriptor project_id does not identify this project directory', 'project_id'));
   for (const [field, label] of [['instance_id', 'instance identity'], ['template_id', 'template identity'], ['template_version', 'template version'], ['created_at', 'creation time']]) {
     if (typeof raw[field] !== 'string' || raw[field].trim().length === 0) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_FIELD', `Trace project descriptor ${label} is missing`, field));
   }

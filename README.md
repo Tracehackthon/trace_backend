@@ -135,7 +135,7 @@ Trace 的核心对象不是笔记、聊天或待办，而是：
 
 Trace 选择把未完成项写在 README，而不是用模糊的“即将上线”掩盖它们：
 
-- **线上 OAuth 回调尚未验收**：登记域名仍需要部署长驻 callback relay；静态页面返回不是授权成功。
+- **线上 OAuth 仍需运行态验收**：登记域名已经接入独立 callback relay，但每次部署或配置变更仍须核验真实回调、Cookie 与授权后读取；静态页面返回不能冒充授权成功。
 - **不是公网多用户服务**：本机 Web／OAuth 为单用户 loopback + same-origin 设计。
 - **源码合并不等于运行时已部署**：本仓库已包含 Host Session、sensemaking、路由/激活、Guard、隐私和能力治理的可验证本机闭环；本机安装版本、数据库迁移和远程运行服务仍必须按[运行手册](docs/local-runtime.md)逐项核验。
 - **仍未实现的远程边界**：云同步、ADrive、多租户、远程鉴权，以及真实供应商的质量验收，不由本机 runtime 或 Plugin 自动提供。

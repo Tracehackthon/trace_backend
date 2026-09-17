@@ -15,12 +15,12 @@ function git(directory, ...args) {
   return execFileSync('git', ['-C', directory, ...args], {encoding: 'utf8'}).trim();
 }
 
-function projectFixture(parent, name) {
+function projectFixture(parent, name, projectId = name) {
   const directory = path.join(parent, name);
   fs.mkdirSync(path.join(directory, '.trace'), {recursive: true});
   fs.writeFileSync(path.join(directory, '.trace', 'project.json'), JSON.stringify({
-    protocol_id: 'trace.project-instance', protocol_version: '0.2.0', project_id: name,
-    instance_id: `instance-${name}`, template_id: 'trace.codex-starter', template_version: '0.1.0',
+    protocol_id: 'trace.project-instance', protocol_version: '0.2.0', project_id: projectId,
+    instance_id: `instance-${projectId}`, template_id: 'trace.codex-starter', template_version: '0.1.0',
     source_mode: 'local', source_scope: 'project', state_file: '.trace/state/trace.sqlite',
     source_root: '.trace/source', created_at: new Date().toISOString(),
   }), 'utf8');
@@ -69,6 +69,10 @@ test('ProjectBindingResolver requires descriptor and repository evidence and rej
     assert.ok(nestedBinding.diagnostics.some(item => ['PROJECT_GIT_ROOT_MISMATCH', 'PROJECT_REPOSITORY_MISMATCH'].includes(item.code)));
     assert.equal(resolveProjectBinding({project_ref: path.join(sandbox, 'missing')}).status, 'unresolved');
     assert.equal(resolveProjectBinding({project_ref: left, cwd: sandbox}).status, 'conflict');
+    const renamed = projectFixture(path.join(sandbox, 'renamed-root'), 'new-directory-name', 'stable-project-id');
+    const renamedBinding = resolveProjectBinding({project_ref: renamed, cwd: renamed});
+    assert.equal(renamedBinding.status, 'resolved');
+    assert.equal(renamedBinding.project_id, 'stable-project-id', 'project_id is durable identity, not a basename assertion');
   } finally { fs.rmSync(sandbox, {recursive: true, force: true}); }
 });
 

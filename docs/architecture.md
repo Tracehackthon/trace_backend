@@ -107,11 +107,11 @@ Trace 的架构不是从“数据库、RAG 或 hook”倒推出来的，而是�
 
 ## 用户层
 
-用户看到的是项目、认知源、当前协作模型、来源地图、候选、能力、健康与恢复；更重要的是能知道：本轮发生了什么变化、什么只是候选、什么尚未保存、下一步怎样继续。默认 CLI 从最近的 `.trace/` 自动发现项目，避免重复填写 SQLite 路径、lineage 或 producer。`trace profile` 显示协作契约和地图；`trace sources` 显示宿主实际使用来源的 evidence。两者分别回答“应如何协作”和“实际做了什么”。
+用户看到的是项目、认知源、当前协作模型、来源地图、候选、能力、健康与恢复；更重要的是能知道：本轮发生了什么变化、什么只是候选、什么尚未保存、下一步怎样继续。默认 CLI 从最近的 `.trace/` 发现候选，并在 descriptor、Git root 与 worktree 核验通过后打开项目，避免重复填写 SQLite 路径、lineage 或 producer。`trace profile` 显示协作契约和地图；`trace sources` 显示宿主实际使用来源的 evidence。两者分别回答“应如何协作”和“实际做了什么”。
 
 ## 宿主层
 
-Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。Codex 的用户级 hook 不携带某个固定项目路径，而是按每个事件的 `cwd` 找到最近 `.trace/`，再加载该项目 profile 与状态库；非 Trace 项目通常成功 no-op。若用户已通过 Host Session Ingest 明确附着当前 session，生命周期事件可进入用户级 Product Workspace `web.sqlite`，但不绑定不存在的项目；未附着 session 仍不捕获 prompt。它们可以传递 event、引用、correlation 与 causation，但不能绕过 runtime 直接写 SQLite / JSONL。
+Codex hook、SDK 与未来桌面端使用 `trace internal ...` 或 RPC。Codex 的用户级 hook 不携带某个固定项目路径；每个事件的 `cwd` 只用于发现 `.trace/project.json` 候选，候选还必须通过 descriptor、Git root 与 worktree 一致性核验，才能加载项目 profile 与状态库。无候选是 personal/no-op；候选冲突或漂移则 fail closed。若用户已通过 Host Session Ingest 明确附着当前 session，生命周期事件可进入用户级 Product Workspace 数据库，但不绑定不存在的项目；未附着 session 仍不捕获 prompt。它们可以传递 event、引用、correlation 与 causation，但不能绕过 runtime 直接写 SQLite / JSONL。
 
 Host Session Ingest 是 Product Workspace 的独立事务边界：`attach` / `pause` / `detach` 控制会话，`UserPromptSubmit` 创建 `HostTurn(started)`，`Stop` / `Interrupt` / `SessionEnd` 封口；事件与控制命令各自使用 append-only receipt 表，幂等键覆盖 host、session、turn、event 和 tool identity，同键改内容会冲突。Host 表不参与产品 snapshot revision；不使用 `transcript_path`，也不写项目 `trace.sqlite` 或 Agent `agent.sqlite`。
 

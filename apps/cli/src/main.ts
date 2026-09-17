@@ -284,11 +284,6 @@ function cliInsidePath(child: string, parent: string): boolean {
   return left === right || left.startsWith(`${right}${path.sep}`);
 }
 
-function cliProjectSlug(value: string): string {
-  const slug = value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
-  return slug || 'project';
-}
-
 function cliGitRoot(directory: string): string | null {
   try {
     const value = execFileSync('git', ['-C', directory, 'rev-parse', '--show-toplevel'], {encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'pipe']}).trim();
@@ -306,8 +301,6 @@ function eventProjectContext(event: Record<string, unknown>): EventProjectBindin
   try { context = findProjectContext(cwd); }
   catch (error) { return {status: 'unresolved', project_ref: null, project_dir: null, project_id: null, cwd, git_root: null, diagnostics: [{code: 'PROJECT_DESCRIPTOR_INVALID', message: error instanceof Error ? error.message : String(error), field: 'descriptor'}]}; }
   if (context === undefined) return {status: 'personal', project_ref: null, project_dir: null, project_id: null, cwd, git_root: null, diagnostics: []};
-  const expectedProjectId = cliProjectSlug(path.basename(context.project_dir));
-  if (context.descriptor.project_id.toLowerCase() !== expectedProjectId.toLowerCase()) return {status: 'unresolved', project_ref: context.project_dir, project_dir: context.project_dir, project_id: context.descriptor.project_id, cwd, git_root: null, diagnostics: [{code: 'PROJECT_DESCRIPTOR_PROJECT_ID_MISMATCH', message: 'Trace project descriptor project_id does not identify this project directory', field: 'project_id'}]};
   const gitRoot = cliGitRoot(cwd);
   if (gitRoot === null) return {status: 'unresolved', project_ref: context.project_dir, project_dir: context.project_dir, project_id: context.descriptor.project_id, cwd, git_root: null, diagnostics: [{code: 'GIT_ROOT_UNVERIFIABLE', message: 'Git repository root could not be verified', field: 'git_root'}]};
   if (!cliInsidePath(context.project_dir, gitRoot)) return {status: 'unresolved', project_ref: context.project_dir, project_dir: context.project_dir, project_id: context.descriptor.project_id, cwd, git_root: gitRoot, diagnostics: [{code: 'PROJECT_GIT_ROOT_MISMATCH', message: 'Trace project descriptor is outside its Git repository root', field: 'git_root'}]};
@@ -485,18 +478,17 @@ function hostWebStateFile(parsed?: Map<string, string[]>): string | undefined {
   const configured = explicit ?? process.env.TRACE_WEB_STATE_FILE;
   if (configured === undefined || configured.length === 0) return undefined;
   if (!path.isAbsolute(configured)) throw new ProtocolError('INVALID_PATH', 'web state file must be absolute');
-  const resolved = path.resolve(configured);
-  if (path.basename(resolved).toLowerCase() === 'trace.sqlite') throw new ProtocolError('WRONG_DATABASE', 'Host session ingest must use Product Workspace web.sqlite, not project trace.sqlite');
-  return resolved;
+  // Database role is verified from the SQLite application/schema/identity
+  // metadata when it is opened. A filename is not an authority and a valid
+  // Product database remains valid after a harmless rename.
+  return path.resolve(configured);
 }
 
 function hostAgentStateFile(parsed?: Map<string, string[]>): string {
   const explicit = parsed === undefined ? undefined : one(parsed, '--agent-state-file', false);
   const configured = explicit ?? process.env.TRACE_AGENT_STATE_FILE;
   if (configured === undefined || configured.length === 0 || !path.isAbsolute(configured)) throw new ProtocolError('INVALID_PATH', 'agent state file must be absolute; use --agent-state-file ABS or TRACE_AGENT_STATE_FILE');
-  const resolved = path.resolve(configured);
-  if (['web.sqlite', 'trace.sqlite'].includes(path.basename(resolved).toLowerCase())) throw new ProtocolError('WRONG_DATABASE', 'Agent sensemaking state must use an independent agent.sqlite');
-  return resolved;
+  return path.resolve(configured);
 }
 
 type HostWorkflowPort = {
@@ -900,11 +892,11 @@ export async function run(argv: string[]): Promise<void> {
       const hasNativeEvidenceEvents = /"PreToolUse"\s*:/i.test(raw) && /"PostToolUse"\s*:/i.test(raw);
       const status = routedByEventCwd && hasNativeEvidenceEvents ? 'enabled' : hasTraceHook ? 'needs_reenable' : 'disabled';
       const message = status === 'enabled'
-        ? 'Trace 会按每次 Codex 事件的 cwd 找到当前项目；将版本化协作方式与认知源地图交给 Codex，Codex 自己检索/读取来源，Trace 只记录实际访问证据。完整 prompt 不会自动入库。'
+        ? 'Trace 会把每次 Codex 事件的 cwd 作为项目候选，并核对 descriptor、Git root 与 worktree 身份；只有验证通过才激活项目来源。Codex 自己检索/读取来源，Trace 只记录实际访问证据。完整 prompt 不会自动入库。'
         : status === 'needs_reenable'
           ? '发现旧版或不完整 hook。运行 trace codex enable，启用按事件 cwd 路由和宿主检索证据。'
           : '下一步：trace codex enable';
-      productResult(parsed, [`Codex：${status === 'enabled' ? '已启用' : status === 'needs_reenable' ? '需要升级' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, `路由：${routedByEventCwd ? '事件 cwd → 当前项目 .trace/' : hasTraceHook ? '旧版固定项目（不安全）' : '未配置'}`, `宿主检索证据：${hasNativeEvidenceEvents ? 'PreToolUse + PostToolUse 已配置' : '缺失，需升级'}`, message].join('\n'), {status, hooks_file: installer.hooksFile, project: context.project_dir, routing: routedByEventCwd ? 'event_cwd' : hasTraceHook ? 'legacy_project_binding' : 'none', host_retrieval_evidence: hasNativeEvidenceEvents});
+      productResult(parsed, [`Codex：${status === 'enabled' ? '已启用' : status === 'needs_reenable' ? '需要升级' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, `路由：${routedByEventCwd ? '事件 cwd 候选 → descriptor/Git/worktree 核验' : hasTraceHook ? '旧版固定项目（不安全）' : '未配置'}`, `宿主检索证据：${hasNativeEvidenceEvents ? 'PreToolUse + PostToolUse 已配置' : '缺失，需升级'}`, message].join('\n'), {status, hooks_file: installer.hooksFile, project: context.project_dir, routing: routedByEventCwd ? 'verified_event_binding' : hasTraceHook ? 'legacy_project_binding' : 'none', host_retrieval_evidence: hasNativeEvidenceEvents});
       return;
     }
     const command = productHookCommand();

@@ -309,19 +309,11 @@ export function createProductWorkspace({
   demand(typeof runtimeVersion === 'string' && runtimeVersion.length > 0 && runtimeVersion.length <= 128 && isSemver(runtimeVersion), 'INVALID_RUNTIME_VERSION', 'runtimeVersion 配置无效。', 500);
   demand(typeof allowLegacyIdentity === 'boolean' && typeof upgradeLegacyIdentity === 'boolean' && typeof adoptLegacyIdentity === 'boolean', 'INVALID_IDENTITY_POLICY', '数据库身份兼容策略无效。', 500);
   file = path.resolve(file);
-  // Keep the historical typo guard for a *new* path, while allowing an
-  // already verified Product database to be renamed (role metadata, not the
-  // filename, is authoritative).
-  demand(fs.existsSync(file) || path.basename(file).toLowerCase() !== 'trace.sqlite', 'WRONG_DATABASE', 'Web 状态不得新建为认知 trace.sqlite。');
   // Probe existing files read-only before WAL/schema pragmas can touch them.
   if (fs.existsSync(file)) {
     const probe = new DatabaseSync(file, { readOnly: true });
     try {
       const recognized = assertDatabase(probe, true);
-      // An existing, fully recognized Product DB may have been renamed from
-      // an old `trace.sqlite` path. A pre-created empty file is not evidence
-      // of that role and must not become a new Product owner by filename.
-      demand(recognized || path.basename(file).toLowerCase() !== 'trace.sqlite', 'WRONG_DATABASE', 'Web 状态不得新建为认知 trace.sqlite。');
       if (recognized) assertProductIdentityBinding(readDatabaseIdentity(probe), file, {workspaceId, installationId});
     } finally { probe.close(); }
   }

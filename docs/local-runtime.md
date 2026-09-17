@@ -16,6 +16,8 @@
 
 **看到 `Trace Web:` 才表示已监听成功。** 地址默认 `http://127.0.0.1:4173`。新入口沿用原数据位置：runtime 仓库的上一级目录下 `.trace/state/web.sqlite`。Host Session、WorkflowFinding、RoutingProposal、activation receipt、Guard journal、PublicationPolicy 和 CapabilityTrial 都由该 `web.sqlite` 负责；Agent 的 run/profile/event/result hash 另存相邻的 `agent.sqlite`。不要把换启动命令误当作迁移数据库。
 
+端口和文件名都只是发现线索，不是身份。客户端在读取或写入前必须调用 `GET /api/runtime/identity`，核验 `trace.runtime.identity@1`、Product service/database role、runtime version，以及不变的 `installation_id` / `workspace_id`；端口被其他服务或另一 Trace workspace 复用时应 fail closed。SQLite owner 由 application/schema 与库内 `trace_runtime_identity` 元数据确认，所以已验证数据库改名后仍可使用；复制到另一 workspace 会被拒绝。旧库会明确标记为 `legacy` 并保持只读，只有显式 identity upgrade 才重新开放写入，不会自动 reset。
+
 ## 只有选旧库或改端口时才配环境变量
 
 PowerShell 示例，路径必须替换为自己的真实产品库：

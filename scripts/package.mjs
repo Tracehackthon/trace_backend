@@ -45,6 +45,7 @@ function copy(relative, target = relative) {
 }
 
 copy('dist', 'dist');
+copy('runtime-identity.mjs', 'runtime-identity.mjs');
 copy('templates', 'templates');
 copy('profiles', 'profiles');
 copy('packages/bundle', 'bundle');

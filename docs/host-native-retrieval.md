@@ -12,7 +12,7 @@ Trace 不能把“根据 prompt 用自己的词法算法挑出两页”当作 Ag
 
 ```text
 用户 prompt（只留在 Codex 当轮）
-  → Trace UserPromptSubmit：按 event cwd 找到项目和 source profile
+  → Trace UserPromptSubmit：按 event cwd 发现候选，核验 descriptor/Git/worktree 后读取 source profile
   → 提供 source access lease：正式根、允许前缀、单轮读取预算、隐私规则
   → Codex 自己用 native Bash / 本地函数 / MCP 工具搜索、读取、推理、执行
   → Trace PreToolUse：对可识别的 formal-page read 检查单轮预算

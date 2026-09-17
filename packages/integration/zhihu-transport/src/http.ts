@@ -34,9 +34,35 @@ function cookie(req: IncomingMessage) {
   const values = (req.headers.cookie ?? '').split(';').map(x => x.trim()).filter(x => x.startsWith('trace_zhihu_oauth='));
   return values.length === 1 ? values[0]!.slice('trace_zhihu_oauth='.length) : undefined;
 }
+export interface ZhihuServiceIdentity {
+  protocol_version: number;
+  protocol: 'trace.runtime.identity@1';
+  product_id: 'trace';
+  service_id: 'trace-product-service';
+  service_role: 'product';
+  runtime_version: string;
+  installation_id: string | null;
+  workspace_id: string | null;
+  identity_state: 'verified' | 'legacy' | 'unverified';
+  database_role: 'product-web';
+  api_surface: Record<string, string[]>;
+}
+const ZHIHU_RUNTIME_API_SURFACE = Object.freeze({
+  runtime: ['/api/runtime/identity'],
+  zhihu: ['/api/zhihu/status', '/api/zhihu/oauth/start', '/api/zhihu/oauth/check', '/api/zhihu/oauth/disconnect', '/api/zhihu/oauth/connect', '/api/zhihu/oauth/result', '/api/zhihu/search', '/api/zhihu/user/read'],
+  search: ['/api/search/capabilities', '/api/search/zhihu', '/api/search/global'],
+});
+function defaultServiceIdentity(): ZhihuServiceIdentity {
+  const workspace = process.env.TRACE_WORKSPACE_ID;
+  const installation = process.env.TRACE_INSTALLATION_ID;
+  const verified = typeof workspace === 'string' && workspace.length > 0 && typeof installation === 'string' && installation.length > 0;
+  return {protocol_version: 1, protocol: 'trace.runtime.identity@1', product_id: 'trace', service_id: 'trace-product-service', service_role: 'product', runtime_version: process.env.TRACE_RUNTIME_VERSION || '0.7.1',
+    installation_id: verified ? installation! : null, workspace_id: verified ? workspace! : null, identity_state: verified ? 'verified' : 'unverified', database_role: 'product-web', api_surface: JSON.parse(JSON.stringify(ZHIHU_RUNTIME_API_SURFACE))};
+}
 /** Local-only broker, also used by MCP. Cloud multi-user hosting needs a separate
  * authenticated owner/session boundary; no wildcard CORS or remote proxy flags. */
-export function createZhihuHttp(provider: ZhihuProvider | null = null) {
+export function createZhihuHttp(provider: ZhihuProvider | null = null, options: {serviceIdentity?: ZhihuServiceIdentity} = {}) {
+  const serviceIdentity = options.serviceIdentity ?? defaultServiceIdentity();
   const callbackPath = provider?.oauth.redirectUri ? new URL(provider.oauth.redirectUri).pathname : '/api/zhihu/oauth/callback';
   const loopbackCallbackPath = '/api/zhihu/oauth/loopback-callback';
   let closed = false;
@@ -47,12 +73,16 @@ export function createZhihuHttp(provider: ZhihuProvider | null = null) {
       // Keep search as a first-class Web domain. `/api/zhihu/*` is reserved
       // for provider configuration, OAuth and explicitly authorized user data;
       // callers must not select an unrelated source with a body field.
-      if (!rawPath.startsWith('/api/zhihu/') && !rawPath.startsWith('/api/search/') && rawPath !== callbackPath) return false;
+      if (rawPath !== '/api/runtime/identity' && !rawPath.startsWith('/api/zhihu/') && !rawPath.startsWith('/api/search/') && rawPath !== callbackPath) return false;
       try {
         const origin = localOrigin(req, req.method === 'POST');
         const url = new URL(req.url!, origin);
         if (url.origin !== origin || closed) error('PROVIDER_CLOSED', 'The local provider is not available.');
         const pathname = url.pathname;
+        if (pathname === '/api/runtime/identity') {
+          if (req.method !== 'GET') {reply(res, 405, {error: {code: 'METHOD_NOT_ALLOWED'}}, {allow: 'GET'}); return true;}
+          reply(res, 200, serviceIdentity, {'x-trace-runtime-protocol': '1'}); return true;
+        }
         if (req.method === 'GET' && pathname === '/api/zhihu/status') {reply(res, 200, provider?.status() ?? {enabled: false, search_configured: false, oauth: {configured: false, status: 'not_authorized'}}); return true;}
         if (req.method === 'GET' && pathname === '/api/search/capabilities') {
           reply(res, 200, {protocol_version: 1, enabled: !!provider, provider: 'zhihu', content_mode: 'summary',

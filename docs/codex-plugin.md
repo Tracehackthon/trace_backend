@@ -48,7 +48,7 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 | `$trace-context 把我的上下文 Skill 包带进来` | 从当前 locked profile 编译并领取 task/project-bound 虚拟 `SKILL.md` | model/source map 版本、hash、来源是否可导航、activation receipt；不会全局安装 |
 | `$trace-work 接收我在 Trace 里准备的工作` | 领取用户确认的具体工作快照；完成后回传结果 | delivery/session/project/hash 回执与 Trace 复核状态 |
 | `$trace 我升级后需要做什么？` | 只读检查版本与 lock | 哪些项目没有变、哪些变化需要显式采用 |
-| `$trace 在 Codex 中启用接续` | 先预览 hooks 配置 | 用户级影响、备份、保留的无关 hooks、按 cwd 路由的范围 |
+| `$trace 在 Codex 中启用接续` | 先预览 hooks 配置 | 用户级影响、备份、保留的无关 hooks、cwd 候选与身份核验范围 |
 | `$trace 跟着这个任务` | 使用当前宿主身份 attach Host Session | 当前 session 已附着；不要求提供 session id，不回显隐私正文 |
 | `$trace 暂停跟随` / `$trace 结束跟随` | pause 或 detach 当前 Host Session | 后续事件停止接收；SessionEnd 仍正确封口 |
 | `$trace 记下这个流程改进：…` | 将明确动作关联当前 HostTurn，创建 captured finding | `scope=unknown`、`target_kind=unresolved`；不自动生成 Skill |

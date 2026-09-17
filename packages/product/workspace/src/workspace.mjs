@@ -14,6 +14,20 @@ import {
 } from './codex-bridge.mjs';
 import {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError} from './host-ingest.mjs';
 import {createHostWorkflowService, ensureHostWorkflowSchema, HOST_WORKFLOW_TABLES, HostWorkflowError, computeRepositoryPreflight} from './host-workflow.mjs';
+import {
+  DATABASE_IDENTITY_SCHEMA_VERSION,
+  DATABASE_IDENTITY_TABLE,
+  DATABASE_ROLES,
+  RUNTIME_IDENTITY_PROTOCOL_VERSION,
+  TRACE_PRODUCT_ID,
+  TRACE_PRODUCT_SERVICE_ID,
+  buildServiceIdentity,
+  databaseIdentityTemplate,
+  deriveDatabaseIdentity,
+  isSemver,
+  isSafeIdentity,
+  validateDatabaseIdentity,
+} from '../../../../runtime-identity.mjs';
 
 // The Node adapter is the public boundary for SQLite-backed host ingest. Keep
 // these exports out of the browser-safe `src/index.mjs` entrypoint.
@@ -27,6 +41,12 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_ENTITIES = 10000;
 const KINDS = ['host-meta', 'chain-meta', 'matter', 'source', 'chain-session', 'comparison', 'worksite-meta', 'work', 'worksite-session', 'work-guard'];
 const CORE_TABLES = ['web_workspace', 'web_snapshots', 'web_entities', 'web_commands'];
+const PRODUCT_RUNTIME_VERSION = process.env.TRACE_RUNTIME_VERSION || '0.7.1';
+const PRODUCT_API_SURFACE = Object.freeze({
+  runtime: ['/api/runtime/identity'],
+  product: ['/api/product/identity', '/api/product/workspace', '/api/product/commands', '/api/product/codex/receive', '/api/product/codex/return'],
+  host: ['/api/product/host/sessions', '/api/product/host/turns', '/api/product/host/findings', '/api/product/host/session/attach', '/api/product/host/session/pause', '/api/product/host/session/detach', '/api/product/host/event', '/api/product/host/finding', '/api/product/host/sensemaking/jobs', '/api/product/host/sensemaking/results', '/api/product/host/sensemaking/privacy', '/api/product/host/routing/proposals', '/api/product/host/routing/propose', '/api/product/host/routing/decide', '/api/product/host/activation/query', '/api/product/host/activation/history', '/api/product/host/activation/mark', '/api/product/host/repository/preflight', '/api/product/host/repository/apply', '/api/product/host/repository/recovery/preview', '/api/product/host/repository/recovery/reconcile', '/api/product/host/repository/recovery/status', '/api/product/host/publication-policies', '/api/product/host/publication-policy/preview', '/api/product/host/publication-policy/adopt', '/api/product/host/publication-policy/revoke', '/api/product/host/capability/orchestrations', '/api/product/host/capability/trials', '/api/product/host/capability/trial/create', '/api/product/host/capability/trial/complete', '/api/product/host/capability/stage', '/api/product/host/capability/validate', '/api/product/host/capability/publish', '/api/product/host/capability/rollback'],
+});
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -156,9 +176,79 @@ function assertDatabase(db, allowEmpty) {
   // Host ingest is an additive extension. Older v1 web databases are valid
   // and receive the extension in the startup transaction below; arbitrary
   // tables still fail closed so a ledger cannot be mistaken for web.sqlite.
-  const allowed = new Set([...CORE_TABLES, ...HOST_SESSION_TABLES, ...HOST_WORKFLOW_TABLES]);
+  const allowed = new Set([...CORE_TABLES, ...HOST_SESSION_TABLES, ...HOST_WORKFLOW_TABLES, DATABASE_IDENTITY_TABLE]);
   demand(CORE_TABLES.every(table => tables.includes(table)) && tables.every(table => allowed.has(table)), 'STORAGE_CORRUPT', '工作区数据表缺失或不一致，未重置。', 503);
+  // A database copied from another Trace role can have a superficially
+  // familiar filename and even a compatible SQLite header.  The durable
+  // identity row is the authoritative role check when present.  Old v1
+  // Product databases are accepted here and are upgraded to an explicit
+  // legacy/unverified identity by createProductWorkspace below.
+  if (tables.includes(DATABASE_IDENTITY_TABLE)) {
+    const columns = db.prepare(`PRAGMA table_info(${DATABASE_IDENTITY_TABLE})`).all().map(row => row.name);
+    const required = ['id', 'schema_version', 'product_id', 'service_id', 'role', 'protocol_version', 'runtime_version', 'installation_id', 'workspace_id', 'verification_state', 'created_at'];
+    demand(required.every(column => columns.includes(column)), 'DATABASE_IDENTITY_INVALID', '工作区身份元数据缺失或不完整，未写入。', 503);
+    demand(columns.every(column => required.includes(column)), 'DATABASE_IDENTITY_INVALID', '工作区身份元数据包含未知字段，未写入。', 503);
+    const row = db.prepare(`SELECT ${required.join(',')} FROM ${DATABASE_IDENTITY_TABLE} WHERE id=1`).get();
+    demand(row, 'DATABASE_IDENTITY_INVALID', '工作区身份元数据缺失，未写入。', 503);
+    try { validateDatabaseIdentity(row, {role: DATABASE_ROLES.product, serviceId: TRACE_PRODUCT_SERVICE_ID}); }
+    catch (error) { demand(false, error?.code === 'DATABASE_IDENTITY_MISMATCH' ? 'DATABASE_ROLE_MISMATCH' : 'DATABASE_IDENTITY_INVALID', '这不是 Trace Product Workspace 数据库，未写入。', 503); }
+  }
   return true;
+}
+
+const IDENTITY_COLUMNS = ['id', 'schema_version', 'product_id', 'service_id', 'role', 'protocol_version', 'runtime_version', 'installation_id', 'workspace_id', 'verification_state', 'created_at'];
+
+function readDatabaseIdentity(db) {
+  const exists = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name=?").get(DATABASE_IDENTITY_TABLE);
+  if (!exists) return null;
+  const row = db.prepare(`SELECT ${IDENTITY_COLUMNS.join(',')} FROM ${DATABASE_IDENTITY_TABLE} WHERE id=1`).get();
+  demand(row, 'DATABASE_IDENTITY_INVALID', '工作区身份元数据缺失，未写入。', 503);
+  try { validateDatabaseIdentity(row, {role: DATABASE_ROLES.product, serviceId: TRACE_PRODUCT_SERVICE_ID}); }
+  catch (error) { demand(false, error?.code === 'DATABASE_IDENTITY_MISMATCH' ? 'DATABASE_ROLE_MISMATCH' : 'DATABASE_IDENTITY_INVALID', '这不是 Trace Product Workspace 数据库，未写入。', 503); }
+  return row;
+}
+
+function createIdentityTable(db) {
+  db.exec(`CREATE TABLE ${DATABASE_IDENTITY_TABLE}(
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    schema_version INTEGER NOT NULL,
+    product_id TEXT NOT NULL,
+    service_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    protocol_version INTEGER NOT NULL,
+    runtime_version TEXT NOT NULL,
+    installation_id TEXT,
+    workspace_id TEXT,
+    verification_state TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+}
+
+function insertIdentity(db, value) {
+  db.prepare(`INSERT INTO ${DATABASE_IDENTITY_TABLE}(${IDENTITY_COLUMNS.join(',')}) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+    1, value.schema_version, value.product_id, value.service_id, value.role, value.protocol_version,
+    value.runtime_version, value.installation_id, value.workspace_id, value.verification_state, value.created_at,
+  );
+}
+
+function identityForProduct(file, options, legacy) {
+  if (legacy) return databaseIdentityTemplate({role: DATABASE_ROLES.product, serviceId: TRACE_PRODUCT_SERVICE_ID, runtimeVersion: options.runtimeVersion, verificationState: 'legacy'});
+  const derived = deriveDatabaseIdentity(file);
+  return databaseIdentityTemplate({role: DATABASE_ROLES.product, serviceId: TRACE_PRODUCT_SERVICE_ID, runtimeVersion: options.runtimeVersion,
+    workspaceId: options.workspaceId ?? derived.workspace_id, installationId: options.installationId ?? derived.installation_id});
+}
+
+function assertProductIdentityBinding(current, file, {workspaceId, installationId} = {}) {
+  if (current?.verification_state !== 'verified') return;
+  const expected = deriveDatabaseIdentity(file);
+  // Explicit IDs are the caller's durable installation/workspace binding;
+  // when omitted, bind the file to the directory-derived identity. In either
+  // case perform this check while the probe is read-only, before WAL/schema
+  // pragmas can mutate a copied or misrouted database.
+  demand(workspaceId === undefined || current.workspace_id === workspaceId, 'DATABASE_IDENTITY_MISMATCH', '工作区身份与已保存 Product 数据库不一致，未写入。', 503);
+  demand(installationId === undefined || current.installation_id === installationId, 'DATABASE_IDENTITY_MISMATCH', '安装身份与已保存 Product 数据库不一致，未写入。', 503);
+  demand(workspaceId !== undefined || current.workspace_id === expected.workspace_id, 'DATABASE_IDENTITY_MISMATCH', 'Product 数据库属于另一个 Trace 工作区，未写入。', 503);
+  demand(installationId !== undefined || current.installation_id === expected.installation_id, 'DATABASE_IDENTITY_MISMATCH', 'Product 数据库属于另一个 Trace 安装，未写入。', 503);
 }
 
 function reply(res, status, value, extra = {}) {
@@ -198,16 +288,42 @@ function readBody(req) {
  * retained; product command fingerprints are namespaced in the existing ledger. */
 /** Authoritative local Product Workspace: product entities, command CAS,
  * receipts and Codex delivery/return records share one transactional owner. */
-export function createProductWorkspace({ file, allowSnapshotWrites = false, desktopSnapshotToken, hostWorkflowFaultInjector = null } = {}) {
+export function createProductWorkspace({
+  file,
+  allowSnapshotWrites = false,
+  desktopSnapshotToken,
+  hostWorkflowFaultInjector = null,
+  workspaceId,
+  installationId,
+  runtimeVersion = PRODUCT_RUNTIME_VERSION,
+  allowLegacyIdentity = false,
+  upgradeLegacyIdentity = false,
+  adoptLegacyIdentity = false,
+} = {}) {
   demand(typeof file === 'string' && path.isAbsolute(file), 'INVALID_PATH', 'Web SQLite 路径必须明确为绝对路径。');
   demand(desktopSnapshotToken === undefined || typeof desktopSnapshotToken === 'string' && desktopSnapshotToken.length >= 32 && desktopSnapshotToken.length <= 256,
     'INVALID_DESKTOP_TOKEN', '桌面工作区令牌配置无效。');
+  demand(workspaceId === undefined || isSafeIdentity(workspaceId), 'INVALID_WORKSPACE_ID', 'workspaceId 必须是安全的本机工作区身份。', 500);
+  demand(installationId === undefined || isSafeIdentity(installationId), 'INVALID_INSTALLATION_ID', 'installationId 必须是安全的本机安装身份。', 500);
+  demand((workspaceId === undefined) === (installationId === undefined), 'IDENTITY_MISSING', 'workspaceId 和 installationId 必须同时提供。', 500);
+  demand(typeof runtimeVersion === 'string' && runtimeVersion.length > 0 && runtimeVersion.length <= 128 && isSemver(runtimeVersion), 'INVALID_RUNTIME_VERSION', 'runtimeVersion 配置无效。', 500);
+  demand(typeof allowLegacyIdentity === 'boolean' && typeof upgradeLegacyIdentity === 'boolean' && typeof adoptLegacyIdentity === 'boolean', 'INVALID_IDENTITY_POLICY', '数据库身份兼容策略无效。', 500);
   file = path.resolve(file);
-  demand(path.basename(file).toLowerCase() !== 'trace.sqlite', 'WRONG_DATABASE', 'Web 状态不得写入认知 trace.sqlite。');
+  // Keep the historical typo guard for a *new* path, while allowing an
+  // already verified Product database to be renamed (role metadata, not the
+  // filename, is authoritative).
+  demand(fs.existsSync(file) || path.basename(file).toLowerCase() !== 'trace.sqlite', 'WRONG_DATABASE', 'Web 状态不得新建为认知 trace.sqlite。');
   // Probe existing files read-only before WAL/schema pragmas can touch them.
   if (fs.existsSync(file)) {
     const probe = new DatabaseSync(file, { readOnly: true });
-    try { assertDatabase(probe, true); } finally { probe.close(); }
+    try {
+      const recognized = assertDatabase(probe, true);
+      // An existing, fully recognized Product DB may have been renamed from
+      // an old `trace.sqlite` path. A pre-created empty file is not evidence
+      // of that role and must not become a new Product owner by filename.
+      demand(recognized || path.basename(file).toLowerCase() !== 'trace.sqlite', 'WRONG_DATABASE', 'Web 状态不得新建为认知 trace.sqlite。');
+      if (recognized) assertProductIdentityBinding(readDatabaseIdentity(probe), file, {workspaceId, installationId});
+    } finally { probe.close(); }
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file); let closed = false;
@@ -255,6 +371,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     demand(row.latest === row.revision && row.snapshots === row.revision && row.commands === row.revision && row.committed === row.revision, 'STORAGE_CORRUPT', '工作区修订链或命令记录不一致，未回退到空状态。', 503);
     return rows[0].revision;
   }
+  let databaseIdentity;
   try {
     const exists = assertDatabase(db, true);
     db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
@@ -266,11 +383,51 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
         CREATE TABLE web_entities(workspace_revision INTEGER NOT NULL REFERENCES web_snapshots(revision),kind TEXT NOT NULL,object_id TEXT NOT NULL,ordinal INTEGER NOT NULL,payload TEXT NOT NULL,payload_sha256 TEXT NOT NULL,PRIMARY KEY(workspace_revision,kind,object_id));
         CREATE TABLE web_commands(command_id TEXT PRIMARY KEY,request_sha256 TEXT NOT NULL,committed_revision INTEGER NOT NULL REFERENCES web_snapshots(revision),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
       ensureHostSessionSchema(db);
+      createIdentityTable(db);
+      databaseIdentity = identityForProduct(file, {workspaceId, installationId, runtimeVersion}, false);
+      insertIdentity(db, databaseIdentity);
     });
-    else transaction(() => ensureHostSessionSchema(db));
+    else transaction(() => {
+      ensureHostSessionSchema(db);
+      const current = readDatabaseIdentity(db);
+      if (current === null) {
+        // Pre-identity v1 databases are not guessed into a workspace.  The
+        // additive marker makes the compatibility state visible to clients;
+        // reads remain available, writes require explicit opt-in or upgrade.
+        createIdentityTable(db);
+        databaseIdentity = identityForProduct(file, {runtimeVersion}, true);
+        insertIdentity(db, databaseIdentity);
+      } else {
+        databaseIdentity = current;
+        if (current.verification_state === 'verified') {
+          assertProductIdentityBinding(current, file, {workspaceId, installationId});
+        } else if (upgradeLegacyIdentity || adoptLegacyIdentity) {
+          demand(isSafeIdentity(workspaceId) && isSafeIdentity(installationId), 'LEGACY_IDENTITY_UPGRADE_REQUIRED', '旧 Product 数据库需要显式提供 workspaceId 和 installationId 才能升级。', 409);
+          databaseIdentity = databaseIdentityTemplate({role: DATABASE_ROLES.product, serviceId: TRACE_PRODUCT_SERVICE_ID, runtimeVersion,
+            workspaceId, installationId, verificationState: 'verified', createdAt: current.created_at});
+          db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET schema_version=?,product_id=?,service_id=?,role=?,protocol_version=?,runtime_version=?,installation_id=?,workspace_id=?,verification_state=?,created_at=? WHERE id=1`).run(
+            databaseIdentity.schema_version, databaseIdentity.product_id, databaseIdentity.service_id, databaseIdentity.role, databaseIdentity.protocol_version,
+            databaseIdentity.runtime_version, databaseIdentity.installation_id, databaseIdentity.workspace_id, databaseIdentity.verification_state, databaseIdentity.created_at,
+          );
+        }
+        // A compatible runtime upgrade keeps the durable owner IDs but records
+        // the code that currently owns the file. This is metadata-only and
+        // never turns a legacy/unverified database into a writable one.
+        if (databaseIdentity.runtime_version !== runtimeVersion) {
+          db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET runtime_version=? WHERE id=1`).run(runtimeVersion);
+          databaseIdentity = {...databaseIdentity, runtime_version: runtimeVersion};
+        }
+      }
+    });
     readSnapshot(currentRevision()); // A corrupt stored workspace must fail startup, not become empty.
   } catch (error) { db.close(); throw error; }
+  demand(databaseIdentity, 'DATABASE_IDENTITY_INVALID', 'Product 数据库身份不可用，未写入。', 503);
+  const legacyWritesAllowed = allowLegacyIdentity === true;
+  const assertWritableIdentity = () => {
+    demand(databaseIdentity.verification_state === 'verified' || legacyWritesAllowed, 'LEGACY_IDENTITY_UNVERIFIED', '旧 Product 数据库仅允许读取；请先显式升级 workspace/installation identity。', 503);
+  };
   function persist(host, fingerprint, commandId, revision) {
+    assertWritableIdentity();
     demand(revision < Number.MAX_SAFE_INTEGER, 'REVISION_EXHAUSTED', '工作区修订已达上限。', 503);
     const next = revision + 1, rows = splitHost(host), counts = Object.fromEntries(KINDS.map(kind => [kind, rows.filter(row => row.kind === kind).length]));
     db.prepare('INSERT INTO web_snapshots(revision,entity_counts) VALUES(?,?)').run(next, stableJson(counts));
@@ -281,6 +438,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     return { revision: next, host, storage };
   }
   function put(body) {
+    assertWritableIdentity();
     demand(plain(body) && Number.isSafeInteger(body.expectedRevision) && body.expectedRevision >= 0 && identity(body.commandId) && body.commandId.length <= 200, 'INVALID_COMMAND', '需要有效的 expectedRevision、commandId 和 host。', 400);
     demand(Object.keys(body).every(key => ['expectedRevision', 'host', 'commandId'].includes(key)), 'INVALID_COMMAND', '请求包含未支持的字段。', 400);
     const host = normalizeHost(body.host), fingerprint = sha(stableJson({ expectedRevision: body.expectedRevision, host }));
@@ -304,6 +462,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
         beforeRevision: after - 1, afterRevision: after, requestHash: known.request_sha256.slice('product-v1:'.length), hostDelivery: 'not_requested' } };
   }
   function executeProduct(body) {
+    assertWritableIdentity();
     validateProductCommand(body);
     const fingerprint = `product-v1:${sha(stableJson(body))}`;
     return transaction(() => {
@@ -330,6 +489,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     return result;
   }
   function applyAgentCandidate(candidate) {
+    assertWritableIdentity();
     demand(plain(candidate) && identity(candidate.commandId) && identity(candidate.runId) && identity(candidate.matterId)
       && Number.isSafeInteger(candidate.expectedRevision) && candidate.expectedRevision >= 0
       && Number.isSafeInteger(candidate.baseRevision) && candidate.baseRevision >= 0
@@ -382,6 +542,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     };
   }
   function executeCodex(kind, body) {
+    assertWritableIdentity();
     if (kind === 'receive') validateCodexReceiveRequest(body); else validateCodexReturnRequest(body);
     const fingerprint = codexRequestFingerprint(kind, body);
     return transaction(() => {
@@ -413,8 +574,9 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
   // Re-check unfinished Repository Guard journals on every Product Service
   // start.  This never mutates Git; ambiguous evidence is only marked in the
   // Product-owned journal for explicit recovery.
-  hostWorkflow.inspectRepositoryGuardJournals();
+  if (databaseIdentity.verification_state === 'verified' || legacyWritesAllowed) hostWorkflow.inspectRepositoryGuardJournals();
   function executeHost(kind, body) {
+    assertWritableIdentity();
     demand(plain(body), 'INVALID_HOST_COMMAND', '宿主接收请求必须是 JSON 对象。', 400);
     // The direct hook adapter does not need a protocol field, while HTTP/MCP
     // callers may include it. If present, it must select this version rather
@@ -443,8 +605,50 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     if (kind === 'capability-rollback') return {protocolVersion: 1, ...hostWorkflow.capabilityRollback(body)};
     throw new WebStoreError(404, 'NOT_FOUND', '没有这个宿主接收接口。');
   }
+  function upgradeIdentity(input = {}) {
+    demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503);
+    demand(databaseIdentity.verification_state !== 'verified', 'IDENTITY_ALREADY_VERIFIED', 'Product 数据库身份已经验证，无需升级。', 409);
+    demand(isSafeIdentity(input.workspaceId) && isSafeIdentity(input.installationId), 'LEGACY_IDENTITY_UPGRADE_REQUIRED', '升级旧 Product 数据库需要明确的 workspaceId 和 installationId。', 409);
+    return transaction(() => {
+      const upgraded = databaseIdentityTemplate({role: DATABASE_ROLES.product, serviceId: TRACE_PRODUCT_SERVICE_ID, runtimeVersion,
+        workspaceId: input.workspaceId, installationId: input.installationId, verificationState: 'verified', createdAt: databaseIdentity.created_at});
+      db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET schema_version=?,product_id=?,service_id=?,role=?,protocol_version=?,runtime_version=?,installation_id=?,workspace_id=?,verification_state=?,created_at=? WHERE id=1`).run(
+        upgraded.schema_version, upgraded.product_id, upgraded.service_id, upgraded.role, upgraded.protocol_version, upgraded.runtime_version,
+        upgraded.installation_id, upgraded.workspace_id, upgraded.verification_state, upgraded.created_at,
+      );
+      databaseIdentity = upgraded;
+      return structuredClone(databaseIdentity);
+    });
+  }
   async function handle(req, res) {
     const rawPath = String(req.url || '').split('?')[0];
+    // The workspace adapter is also used as a small standalone local HTTP
+    // owner in tests and integrations.  Expose the same identity handshake as
+    // the desktop host before routing Product paths, so a client never has to
+    // infer that this listener is Trace from its port or database filename.
+    if (rawPath === '/api/runtime/identity') {
+      try {
+        demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503);
+        checkOrigin(req, false);
+        if (req.method !== 'GET') { reply(res, 405, {error: {code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 身份握手。'}}, {allow: 'GET'}); return true; }
+        reply(res, 200, buildServiceIdentity({
+          serviceId: TRACE_PRODUCT_SERVICE_ID,
+          serviceRole: 'product',
+          runtimeVersion: databaseIdentity.runtime_version,
+          installationId: databaseIdentity.installation_id,
+          workspaceId: databaseIdentity.workspace_id,
+          identityState: databaseIdentity.verification_state,
+          databaseRole: DATABASE_ROLES.product,
+          apiSurface: PRODUCT_API_SURFACE,
+        }), {'x-trace-runtime-protocol': String(RUNTIME_IDENTITY_PROTOCOL_VERSION)});
+      } catch (cause) {
+        const error = databaseError(cause);
+        req.resume();
+        if (!res.headersSent) reply(res, error.status, {error: {code: error.code, message: error.message}, storage});
+        else if (!res.writableEnded) res.end();
+      }
+      return true;
+    }
     const product = rawPath === '/api/product' || rawPath.startsWith('/api/product/');
     if (!product && rawPath !== '/api/web' && !rawPath.startsWith('/api/web/')) return false;
     try {
@@ -481,7 +685,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
           || rawPath === '/api/product/host/repository/recovery/status'
           || rawPath === '/api/product/host/publication-policies' || rawPath === '/api/product/host/capability/orchestrations'
           || rawPath === '/api/product/host/capability/trials';
-        const methods = rawPath === '/api/product/workspace' || commandMatch || hostList ? ['GET'] : rawPath === '/api/product/commands' || codexKind || hostKind ? ['POST'] : null;
+        const methods = rawPath === '/api/product/workspace' || rawPath === '/api/product/identity' || commandMatch || hostList ? ['GET'] : rawPath === '/api/product/commands' || codexKind || hostKind ? ['POST'] : null;
         if (!methods) { reply(res, 404, {error:{code:'NOT_FOUND', message:'没有这个产品接口。'}}); return true; }
         if (!methods.includes(req.method)) { reply(res,405,{error:{code:'METHOD_NOT_ALLOWED',message:'不支持这个请求方法。'}},{allow:methods.join(', ')}); return true; }
         if (req.method === 'POST') {
@@ -489,6 +693,12 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
           demand(!req.headers['content-encoding'] || req.headers['content-encoding'] === 'identity', 'ENCODING_NOT_SUPPORTED', '不接受压缩命令。', 415);
           const body = await readBody(req);
           reply(res, 200, codexKind ? executeCodex(codexKind, body) : hostKind ? executeHost(hostKind, body) : executeProduct(body));
+        } else if (rawPath === '/api/product/identity') {
+          reply(res, 200, {protocolVersion: 1, ...structuredClone(databaseIdentity), ...buildServiceIdentity({
+            serviceId: TRACE_PRODUCT_SERVICE_ID, serviceRole: 'product', runtimeVersion: databaseIdentity.runtime_version,
+            installationId: databaseIdentity.installation_id, workspaceId: databaseIdentity.workspace_id,
+            identityState: databaseIdentity.verification_state, databaseRole: DATABASE_ROLES.product, apiSurface: PRODUCT_API_SURFACE,
+          })});
         } else if (commandMatch) {
           let commandId;
           try { commandId = decodeURIComponent(commandMatch[1]); } catch { throw new WebStoreError(400,'INVALID_COMMAND','命令 ID 编码无效。'); }
@@ -549,7 +759,11 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     }
     return true;
   }
-  return { file, handle,
+  return { file,
+    get identity() { return structuredClone(databaseIdentity); },
+    getIdentity() { return structuredClone(databaseIdentity); },
+    upgradeIdentity,
+    handle,
     // User-level Codex host stream. These methods share the Product Workspace
     // SQLite handle but use independent append-only tables/revisions.
     hostSessions,

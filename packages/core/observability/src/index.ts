@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {SQLITE_BUSY_TIMEOUT_MS, StorageError, openSqlite, type SqliteDatabase, type SqliteDriverInfo} from '../../storage/src/index.js';
+import {DATABASE_IDENTITY_COLUMNS, DATABASE_IDENTITY_TABLE, DATABASE_ROLES, SQLITE_BUSY_TIMEOUT_MS, StorageError, TRACE_PROJECT_SERVICE_ID, deriveDatabaseIdentity, openSqlite, type SqliteDatabase, type SqliteDriverInfo, type DatabaseIdentity, validateDatabaseIdentity} from '../../storage/src/index.js';
 import {ProtocolVersionRegistry, requireText, type ProtocolVersioned} from '../../protocol/src/index.js';
 
 export const TRACE_EVENT_PROTOCOL_ID = 'trace.runtime-event' as const;
@@ -158,33 +158,85 @@ function sqliteError(error: unknown): StorageError {
 
 export class SqliteTraceEventStore {
   private readonly db: SqliteDatabase;
+  private readonly target: string;
+  private expectedIdentity: {workspaceId: string; installationId: string} | undefined;
   readonly driver: SqliteDriverInfo;
+  private identity: DatabaseIdentity;
+  private readonly allowLegacyIdentity: boolean;
 
-  constructor(file: string) {
+  constructor(file: string, options: {allowLegacyIdentity?: boolean; workspaceId?: string; installationId?: string} = {}) {
     const target = absolute(file);
+    if ((options.workspaceId === undefined) !== (options.installationId === undefined)) throw new StorageError('IDENTITY_MISSING', 'workspaceId and installationId must be supplied together');
+    this.target = target;
+    this.expectedIdentity = options.workspaceId === undefined ? undefined : {workspaceId: options.workspaceId, installationId: options.installationId!};
     fs.mkdirSync(path.dirname(target), {recursive: true});
     const opened = openSqlite(target);
     this.db = opened.db;
     this.driver = opened.driver;
-    this.db.exec('PRAGMA journal_mode = WAL');
-    this.db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
-    this.db.exec(`CREATE TABLE IF NOT EXISTS trace_events (
-      event_id TEXT NOT NULL PRIMARY KEY,
-      occurred_at TEXT NOT NULL,
-      component TEXT NOT NULL,
-      operation TEXT NOT NULL,
-      outcome TEXT NOT NULL,
-      correlation_id TEXT NOT NULL,
-      causation_id TEXT NOT NULL,
-      thread_id TEXT,
-      record_refs TEXT NOT NULL,
-      duration_ms INTEGER,
-      error_code TEXT
-    )`);
-    this.db.exec('CREATE INDEX IF NOT EXISTS trace_events_correlation_at_idx ON trace_events(correlation_id, occurred_at, event_id)');
+    try {
+      this.db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+      this.identity = this.readIdentity(target, options);
+      this.allowLegacyIdentity = options.allowLegacyIdentity ?? false;
+      this.db.exec('PRAGMA journal_mode = WAL');
+      this.db.exec(`CREATE TABLE IF NOT EXISTS trace_events (
+        event_id TEXT NOT NULL PRIMARY KEY,
+        occurred_at TEXT NOT NULL,
+        component TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        correlation_id TEXT NOT NULL,
+        causation_id TEXT NOT NULL,
+        thread_id TEXT,
+        record_refs TEXT NOT NULL,
+        duration_ms INTEGER,
+        error_code TEXT
+      )`);
+      this.db.exec('CREATE INDEX IF NOT EXISTS trace_events_correlation_at_idx ON trace_events(correlation_id, occurred_at, event_id)');
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
+  }
+
+  private readIdentity(target: string, options: {workspaceId?: string; installationId?: string} = {}): DatabaseIdentity {
+    try {
+      const present = this.db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name=?").get(DATABASE_IDENTITY_TABLE);
+      if (!present) throw new StorageError('DATABASE_IDENTITY_INVALID', 'Trace event storage requires a project identity marker');
+      const columns = (this.db.prepare(`PRAGMA table_info(${DATABASE_IDENTITY_TABLE})`).all() as Array<{name?: unknown}>).map(row => row.name);
+      const required = [...DATABASE_IDENTITY_COLUMNS];
+      if (columns.length !== required.length || required.some(column => !columns.includes(column)) || columns.some(column => !required.includes(column as typeof required[number]))) throw new StorageError('DATABASE_IDENTITY_INVALID', 'Trace event storage identity schema is invalid');
+      const row = this.db.prepare(`SELECT ${required.join(',')} FROM ${DATABASE_IDENTITY_TABLE} WHERE id=1`).get() as Record<string, unknown> | undefined;
+      if (!row) throw new StorageError('DATABASE_IDENTITY_INVALID', 'Trace event storage project identity is missing');
+      const expected = options.workspaceId === undefined
+        ? deriveDatabaseIdentity(target)
+        : {workspaceId: options.workspaceId, installationId: options.installationId!};
+      return validateDatabaseIdentity(row, {role: DATABASE_ROLES.project, serviceId: TRACE_PROJECT_SERVICE_ID,
+        ...(row.verification_state === 'verified' ? expected : {})});
+    } catch (error) {
+      if (error instanceof StorageError) throw error;
+      throw new StorageError('DATABASE_IDENTITY_INVALID', `Trace event storage project identity could not be read: ${String(error)}`);
+    }
+  }
+
+  private assertCurrentIdentity(): void {
+    const current = this.readIdentity(this.target, this.expectedIdentity);
+    const same = current.id === this.identity.id && current.schema_version === this.identity.schema_version
+      && current.product_id === this.identity.product_id && current.service_id === this.identity.service_id
+      && current.role === this.identity.role && current.protocol_version === this.identity.protocol_version
+      && current.runtime_version === this.identity.runtime_version && current.installation_id === this.identity.installation_id
+      && current.workspace_id === this.identity.workspace_id && current.verification_state === this.identity.verification_state
+      && current.created_at === this.identity.created_at;
+    if (!same) throw new StorageError('DATABASE_IDENTITY_CHANGED', 'Trace event storage identity changed after this runtime opened it; reopen explicitly before writing');
+    if (current.verification_state !== 'verified' && !this.allowLegacyIdentity) throw new StorageError('LEGACY_IDENTITY_UNVERIFIED', 'Legacy SQLite state is read-only until its project identity is explicitly upgraded');
+  }
+
+  syncIdentity(identity: DatabaseIdentity): void {
+    this.identity = validateDatabaseIdentity(identity, {role: DATABASE_ROLES.project, serviceId: TRACE_PROJECT_SERVICE_ID});
+    if (this.identity.verification_state === 'verified') this.expectedIdentity = {workspaceId: this.identity.workspace_id!, installationId: this.identity.installation_id!};
   }
 
   record(input: CreateTraceEvent): TraceEvent {
+    this.assertCurrentIdentity();
     const event = buildTraceEvent(input);
     try {
       this.db.prepare('INSERT INTO trace_events(event_id, occurred_at, component, operation, outcome, correlation_id, causation_id, thread_id, record_refs, duration_ms, error_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {CODEX_PLUGIN_PROTOCOL_PROFILE, parseCodexVersion, validateCodexPluginProtocol} from '../native/codex-compatibility.mjs';
+import {CODEX_APP_SERVER_PROTOCOL_PROFILE, CODEX_PLUGIN_PROTOCOL_PROFILE, parseCodexAppServerVersion, parseCodexVersion, validateCodexAppServerVersion, validateCodexPluginProtocol} from '../native/codex-compatibility.mjs';
+import {createExecutorRegistry} from '../apps/agent/profiles.mjs';
 
 const help = `Manage Codex plugins\n\nCommands:\n  add\n  list\n  marketplace\n  remove\n`;
 
@@ -40,4 +41,22 @@ test('Codex protocol validation checks command and JSON boundaries separately', 
     pluginHelpOutput: help,
     marketplaceListOutput: 'not-json',
   }), /did not return JSON/);
+});
+
+test('Codex app-server accepts the current alpha and the separately evidenced legacy version only', () => {
+  assert.equal(parseCodexAppServerVersion('Codex Desktop/0.154.0-alpha.6.2 (Windows 10; x86_64)'), '0.154.0-alpha.6.2');
+  assert.equal(parseCodexAppServerVersion('codex_cli_rs/0.153.4 (Windows; x86_64)'), '0.153.4');
+  const current = validateCodexAppServerVersion('Codex Desktop/0.154.0-alpha.6.2 (Windows 10.0.26200; x86_64)');
+  assert.equal(current.protocol_id, 'codex-app-server-v1');
+  assert.deepEqual(current.verified_versions, [...CODEX_APP_SERVER_PROTOCOL_PROFILE.tested_versions]);
+  assert.throws(() => validateCodexAppServerVersion('Codex Desktop/0.154.0-alpha.6.3 (Windows; x86_64)'), /Unsupported Codex app-server version/);
+  assert.throws(() => validateCodexAppServerVersion('Codex Desktop/0.155.0 (Windows; x86_64)'), /Unsupported Codex app-server version/);
+  assert.throws(() => validateCodexAppServerVersion('other/0.154.0-alpha.6.2'), /Unsupported Codex app-server version/);
+});
+
+test('Agent capabilities report the same verified app-server allowlist used by the live adapter', () => {
+  const codex = createExecutorRegistry({env: {}}).describe().profiles.find(profile => profile.kind === 'codex');
+  assert.equal(codex.serviceIdentity, 'codex-app-server/0.154.0-alpha.6.2');
+  assert.equal(codex.verifiedRuntimeVersion, '0.154.0-alpha.6.2');
+  assert.deepEqual(codex.verifiedRuntimeVersions, [...CODEX_APP_SERVER_PROTOCOL_PROFILE.tested_versions]);
 });

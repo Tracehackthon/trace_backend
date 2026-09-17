@@ -5,10 +5,12 @@ import os from 'node:os';
 import { once } from 'node:events';
 import { AgentError, demand, plain, OUTPUT_SCHEMA, SENSEMAKING_OUTPUT_SCHEMA } from './protocol.mjs';
 import { contextManifest, createRunToolBridge, TRACE_AGENT_INSTRUCTIONS, TRACE_AGENT_RETRIEVAL_INSTRUCTIONS, TRACE_SENSEMAKING_INSTRUCTIONS } from './runtime.mjs';
+import { CODEX_APP_SERVER_PROTOCOL_PROFILE, validateCodexAppServerVersion } from '../../native/codex-compatibility.mjs';
 
 // This policy was exercised against the wire request of this exact runtime.
 // An unknown CLI must be requalified, not silently inherit new native tools.
-export const VERIFIED_CODEX_VERSION = '0.153.4';
+export const VERIFIED_CODEX_VERSION = CODEX_APP_SERVER_PROTOCOL_PROFILE.default_version;
+export const VERIFIED_CODEX_VERSIONS = CODEX_APP_SERVER_PROTOCOL_PROFILE.tested_versions;
 export const BOUNDED_CONFIG = Object.freeze({
   ...Object.fromEntries(['hooks', 'plugins', 'apps', 'memories', 'shell_tool', 'unified_exec', 'browser_use', 'browser_use_external',
     'computer_use', 'image_generation', 'view_image', 'multi_agent', 'multi_agent_v2', 'code_mode',
@@ -131,8 +133,9 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
     };
     try {
       const initialized = await connection.rpc('initialize', { clientInfo: { name: 'trace_agent', title: 'Trace Agent', version: '0.1.0' }, capabilities: { experimentalApi: true } });
-      const version = /^(?:trace_agent|Codex Desktop|codex_cli_rs|codex)\/(\d+\.\d+\.\d+)\b/i.exec(initialized.userAgent ?? '')?.[1];
-      demand(version === VERIFIED_CODEX_VERSION, 'CODEX_VERSION_UNVERIFIED', `当前仅验证 Codex ${VERIFIED_CODEX_VERSION}；其他版本须先运行协议隔离测试。`, 503);
+      let version;
+      try { version = validateCodexAppServerVersion(initialized.userAgent).verified_version; }
+      catch { demand(false, 'CODEX_VERSION_UNVERIFIED', `当前仅验证 Codex ${VERIFIED_CODEX_VERSIONS.join('、')}；其他版本须先运行协议隔离测试。`, 503); }
       connection.send({ method: 'initialized', params: {} });
       return { connection, cwd, dispose, version };
     } catch (error) { await dispose(); throw error; }

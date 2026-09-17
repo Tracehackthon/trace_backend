@@ -3,7 +3,7 @@ import path from 'node:path';
 import { AgentError, demand, hash, identity, integer, keys, text } from './protocol.mjs';
 import { assertExecutor } from './runtime.mjs';
 import { validateRemoteEndpoint } from './remote-http.mjs';
-import { createCodexAdapter, VERIFIED_CODEX_VERSION } from './codex.mjs';
+import { createCodexAdapter, VERIFIED_CODEX_VERSION, VERIFIED_CODEX_VERSIONS } from './codex.mjs';
 import { createModelAdapter } from './model.mjs';
 import { createExternalAgentAdapter, EXTERNAL_AGENT_PROTOCOL } from './external-agent.mjs';
 
@@ -104,7 +104,7 @@ function safeProfile(document, profile) {
   return { profileId: profile.id, label: profile.label ?? profile.id, kind: profile.kind, ownerId: document.ownerId,
     version: profile.version, revision: hash({ configVersion: document.configVersion, ownerId: document.ownerId, profile }), capabilities,
     serviceIdentity: profile.kind === 'model' ? 'openai-chat-completions-v1' : profile.kind === 'agent' ? EXTERNAL_AGENT_PROTOCOL : `codex-app-server/${VERIFIED_CODEX_VERSION}`,
-    ...(profile.kind === 'codex' ? { verifiedRuntimeVersion: VERIFIED_CODEX_VERSION } : {}),
+    ...(profile.kind === 'codex' ? { verifiedRuntimeVersion: VERIFIED_CODEX_VERSION, verifiedRuntimeVersions: [...VERIFIED_CODEX_VERSIONS] } : {}),
     ...(profile.kind === 'model' ? { model: profile.model } : {}),
     ...(profile.kind === 'agent' ? { protocol: profile.protocol } : {}),
     ...(profile.sensemaking === undefined ? {} : {sensemaking: structuredClone(profile.sensemaking)}) };

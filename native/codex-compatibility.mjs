@@ -13,6 +13,17 @@ export const CODEX_PLUGIN_PROTOCOL_PROFILE = Object.freeze({
   marketplace_manifest: '.agents/plugins/marketplace.json',
 });
 
+// The app-server handshake is a separate protocol boundary from the plugin
+// marketplace CLI.  0.153.4 has a recorded live wire/e2e run in
+// `artifacts/trace-agent-runtime-20260915`; 0.154.0-alpha.6.2 is the current
+// machine's isolated protocol check and live handshake target.  Do not turn
+// this into a semver range: an unknown Codex build must be requalified first.
+export const CODEX_APP_SERVER_PROTOCOL_PROFILE = Object.freeze({
+  id: 'codex-app-server-v1',
+  tested_versions: Object.freeze(['0.153.4', '0.154.0-alpha.6.2']),
+  default_version: '0.154.0-alpha.6.2',
+});
+
 function versionParts(value) {
   const match = String(value ?? '').match(/(?:^|\s)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s|$)/);
   if (!match) return null;
@@ -26,6 +37,24 @@ export function parseCodexVersion(value) {
   const parsed = versionParts(value);
   if (!parsed) throw new Error(`Unable to parse Codex CLI version: ${String(value ?? '').slice(0, 200)}`);
   return parsed;
+}
+
+export function parseCodexAppServerVersion(userAgent) {
+  const match = String(userAgent ?? '').match(/(?:trace_agent|Codex Desktop|codex_cli_rs|codex)\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?=\s|\(|$)/i);
+  return match?.[1] ?? null;
+}
+
+export function validateCodexAppServerVersion(userAgent) {
+  const version = parseCodexAppServerVersion(userAgent);
+  if (!version || !CODEX_APP_SERVER_PROTOCOL_PROFILE.tested_versions.includes(version)) {
+    throw new Error(`Unsupported Codex app-server version: ${version ?? 'unparseable'}`);
+  }
+  return {
+    protocol_id: CODEX_APP_SERVER_PROTOCOL_PROFILE.id,
+    status: 'compatible',
+    verified_version: version,
+    verified_versions: [...CODEX_APP_SERVER_PROTOCOL_PROFILE.tested_versions],
+  };
 }
 
 function hasCommand(help, command) {

@@ -1,4 +1,5 @@
 import {h} from './library.mjs';
+import {ensureRuntimeIdentity} from './runtime-identity.mjs';
 
 const terminal = ['succeeded', 'failed', 'cancelled', 'stale', 'timed_out', 'interrupted'];
 const purposeLabels = {discuss:'一起分清', explain:'解释这一处', compare:'比较不同条件', revise:'建议修改选中部分'};
@@ -26,7 +27,8 @@ export function mountAgentPanel(root, {workspace, matterId, selection = null, so
   const form = find('[data-agent-form]'), submit = form.querySelector('[type=submit]'), cancel = find('[data-cancel-run]');
   function setBusy(value) { busy=value; submit.disabled=value || !capabilities?.enabled; cancel.hidden=!value; for (const field of form.querySelectorAll('select,input,textarea')) field.disabled=value || field.dataset.unavailable==='true' || field.name==='profile'&&!capabilities?.enabled; }
   async function request(path, body) {
-    const response = await fetch(path, {method:body===undefined?'GET':'POST', cache:'no-store', headers:body===undefined?{}:{'content-type':'application/json'}, ...(body===undefined?{}:{body:JSON.stringify(body)})});
+    await ensureRuntimeIdentity(path.split('?')[0]);
+    const response = await fetch(path, {method:body===undefined?'GET':'POST', cache:'no-store', headers:{'x-trace-runtime-protocol':'1', ...(body===undefined?{}:{'content-type':'application/json', origin: location.origin, 'sec-fetch-site':'same-origin'})}, ...(body===undefined?{}:{body:JSON.stringify(body)})});
     let value; try { value=await response.json(); } catch { throw Error(`Agent Runtime 返回了无法读取的响应（${response.status}）。`); }
     if (!response.ok) throw Error(value.error?.message || `Agent Runtime 请求失败（${response.status}）。`);
     return value;

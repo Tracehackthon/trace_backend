@@ -62,14 +62,33 @@ export interface TraceCapabilityTrialInput {
   evidenceRefs?: string[];
 }
 
-interface ProductClientOptions {
+export interface ProductClientOptions {
   baseUrl?: string;
   sessionId?: string;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Optional caller-pinned identities; omitted values still receive strict
+   * service/product/protocol/runtime validation from the handshake. */
+  workspaceId?: string;
+  installationId?: string;
+  runtimeVersion?: string;
+  requireVerifiedIdentity?: boolean;
 }
 
 interface ProductErrorBody { error?: {code?: unknown; message?: unknown}; }
+
+export interface TraceServiceIdentity {
+  protocol_version?: unknown;
+  product_id?: unknown;
+  service_id?: unknown;
+  service_role?: unknown;
+  runtime_version?: unknown;
+  installation_id?: unknown;
+  workspace_id?: unknown;
+  identity_state?: unknown;
+  api_surface?: unknown;
+  [key: string]: unknown;
+}
 
 export class TraceProductClientError extends Error {
   readonly code: string;
@@ -79,6 +98,95 @@ export class TraceProductClientError extends Error {
     this.code = code;
     if (status !== undefined) this.status = status;
   }
+}
+
+const TRACE_PRODUCT_ID = 'trace';
+const TRACE_PRODUCT_SERVICE_ID = 'trace-product-service';
+const RUNTIME_IDENTITY_PROTOCOL = 'trace.runtime.identity@1';
+const RUNTIME_IDENTITY_PROTOCOL_VERSION = 1;
+const IDENTITY_PATTERN = /^[^\x00-\x1f\x7f]{1,256}$/;
+const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const validIdentity = (value: unknown): value is string => typeof value === 'string' && IDENTITY_PATTERN.test(value) && value.trim() === value && !['__proto__', 'constructor', 'prototype'].includes(value);
+
+function identityFailure(code: string, message: string, status = 502): never {
+  throw new TraceProductClientError(code, message, status);
+}
+
+function advertisedRoutes(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.values(value as Record<string, unknown>).flatMap(item => advertisedRoutes(item));
+}
+
+function routeMatches(advertised: string, requested: string): boolean {
+  if (advertised === requested) return true;
+  const left = advertised.split('/'); const right = requested.split('/');
+  return left.length === right.length && left.every((part, index) => part.startsWith(':') || part === right[index]);
+}
+
+/** Validate the response before a Product read or write is attempted. */
+export function validateProductServiceIdentity(value: unknown, expected: {
+  workspaceId?: string;
+  installationId?: string;
+  runtimeVersion?: string;
+  requiredRoute?: string;
+  requireVerified?: boolean;
+} = {}): TraceServiceIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return identityFailure('SERVICE_IDENTITY_INVALID', 'Trace endpoint did not return a service identity');
+  const identity = value as TraceServiceIdentity;
+  if (identity.protocol_version !== RUNTIME_IDENTITY_PROTOCOL_VERSION || identity.protocol !== RUNTIME_IDENTITY_PROTOCOL) return identityFailure('PROTOCOL_MISMATCH', 'Trace service protocol is not supported');
+  if (identity.product_id !== TRACE_PRODUCT_ID || identity.service_id !== TRACE_PRODUCT_SERVICE_ID) return identityFailure('SERVICE_IDENTITY_MISMATCH', 'The endpoint is not the Trace Product service');
+  if (identity.service_role !== 'product' || identity.database_role !== 'product-web') return identityFailure('SERVICE_IDENTITY_MISMATCH', 'The endpoint does not own the Trace Product database');
+  if (typeof identity.runtime_version !== 'string' || !SEMVER_PATTERN.test(identity.runtime_version)) return identityFailure('RUNTIME_VERSION_INVALID', 'Trace service did not provide a valid runtime version');
+  if (expected.runtimeVersion !== undefined && identity.runtime_version !== expected.runtimeVersion) return identityFailure('RUNTIME_VERSION_MISMATCH', 'Trace service runtime version does not match the caller', 409);
+  const requireVerified = expected.requireVerified ?? true;
+  if (!['verified', 'legacy', 'unverified'].includes(String(identity.identity_state))) return identityFailure('SERVICE_IDENTITY_INVALID', 'Trace service returned an unknown identity state');
+  if (requireVerified && identity.identity_state !== 'verified') return identityFailure('IDENTITY_UNVERIFIED', 'Trace Product identity is legacy or unverified; no state access was performed', 503);
+  if (identity.identity_state === 'verified') {
+    if (!validIdentity(identity.workspace_id) || !validIdentity(identity.installation_id)) return identityFailure('IDENTITY_MISSING', 'Trace service did not provide installation/workspace identity');
+    if (expected.workspaceId !== undefined && identity.workspace_id !== expected.workspaceId) return identityFailure('IDENTITY_MISMATCH', 'Trace workspace identity does not match the caller', 409);
+    if (expected.installationId !== undefined && identity.installation_id !== expected.installationId) return identityFailure('IDENTITY_MISMATCH', 'Trace installation identity does not match the caller', 409);
+  }
+  if (identity.identity_state !== 'verified' && (identity.workspace_id !== null || identity.installation_id !== null)) return identityFailure('SERVICE_IDENTITY_INVALID', 'Trace service returned IDs for an unverified identity');
+  if (expected.requiredRoute !== undefined && !advertisedRoutes(identity.api_surface).some(route => routeMatches(route, expected.requiredRoute!))) return identityFailure('SERVICE_API_MISMATCH', 'Trace Product service does not advertise the requested route');
+  return identity;
+}
+
+/** Shared handshake for clients that call a non-Product domain mounted by the
+ * same desktop service (for example the Zhihu provider). */
+export async function fetchProductServiceIdentity(baseUrl: string, options: {
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  workspaceId?: string;
+  installationId?: string;
+  runtimeVersion?: string;
+  requiredRoute?: string;
+  requireVerified?: boolean;
+} = {}): Promise<TraceServiceIdentity> {
+  const origin = resolveBaseUrl(baseUrl);
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = Math.max(250, Math.min(30_000, Math.floor(options.timeoutMs ?? 5_000)));
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs); timer.unref?.();
+  let response: Response;
+  try { response = await fetchImpl(`${origin}/api/runtime/identity`, {method: 'GET', redirect: 'error', headers: {'accept': 'application/json', origin, 'x-trace-runtime-protocol': String(RUNTIME_IDENTITY_PROTOCOL_VERSION)}, signal: controller.signal}); }
+  catch (error) {
+    const timedOut = error instanceof Error && error.name === 'AbortError';
+    throw new TraceProductClientError(timedOut ? 'PRODUCT_TIMEOUT' : 'PRODUCT_UNAVAILABLE', timedOut ? 'Trace product service did not respond before the local timeout' : 'Trace product service is not reachable; start or restart the local Trace desktop service');
+  } finally { clearTimeout(timer); }
+  let value: unknown;
+  try { value = JSON.parse(await response.text()); } catch { throw new TraceProductClientError('SERVICE_IDENTITY_INVALID', 'Trace endpoint returned invalid identity JSON', response.status); }
+  if (!response.ok) throw new TraceProductClientError('SERVICE_HANDSHAKE_REQUIRED', `Trace Product service identity handshake failed (${response.status})`, response.status);
+  const workspaceId = options.workspaceId ?? process.env.TRACE_WORKSPACE_ID;
+  const installationId = options.installationId ?? process.env.TRACE_INSTALLATION_ID;
+  const runtimeVersion = options.runtimeVersion ?? process.env.TRACE_EXPECTED_RUNTIME_VERSION;
+  if ((workspaceId === undefined) !== (installationId === undefined)) throw new TraceProductClientError('INVALID_EXPECTED_IDENTITY', 'workspaceId and installationId must be supplied together');
+  return validateProductServiceIdentity(value, {
+    ...(workspaceId === undefined ? {} : {workspaceId}),
+    ...(installationId === undefined ? {} : {installationId}),
+    ...(runtimeVersion === undefined ? {} : {runtimeVersion}),
+    ...(options.requiredRoute === undefined ? {} : {requiredRoute: options.requiredRoute}),
+    ...(options.requireVerified === undefined ? {} : {requireVerified: options.requireVerified}),
+  });
 }
 
 export function resolveBaseUrl(value: string): string {
@@ -113,16 +221,80 @@ export class TraceProductClient {
   readonly baseUrl: string;
   readonly sessionId: string;
   readonly timeoutMs: number;
+  readonly expectedWorkspaceId: string | undefined;
+  readonly expectedInstallationId: string | undefined;
+  readonly expectedRuntimeVersion: string | undefined;
+  readonly requireVerifiedIdentity: boolean;
   private readonly fetchImpl: typeof fetch;
+  private handshakePromise: Promise<TraceServiceIdentity> | undefined;
+  // When the caller did not provide durable IDs, bind this client to the
+  // first verified service identity it sees. This keeps a long-lived MCP
+  // process from following a restarted port into another Trace workspace.
+  private discoveredWorkspaceId: string | undefined;
+  private discoveredInstallationId: string | undefined;
 
   constructor(options: ProductClientOptions = {}) {
     this.baseUrl = resolveBaseUrl(options.baseUrl ?? process.env.TRACE_PRODUCT_URL ?? 'http://127.0.0.1:4173');
     this.sessionId = options.sessionId ?? currentCodexSessionId();
     this.timeoutMs = Math.max(250, Math.min(30_000, Math.floor(options.timeoutMs ?? 5_000)));
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.expectedWorkspaceId = options.workspaceId ?? process.env.TRACE_WORKSPACE_ID;
+    this.expectedInstallationId = options.installationId ?? process.env.TRACE_INSTALLATION_ID;
+    this.expectedRuntimeVersion = options.runtimeVersion ?? process.env.TRACE_EXPECTED_RUNTIME_VERSION;
+    this.requireVerifiedIdentity = options.requireVerifiedIdentity ?? true;
+    if ((this.expectedWorkspaceId === undefined) !== (this.expectedInstallationId === undefined)) throw new TraceProductClientError('INVALID_EXPECTED_IDENTITY', 'workspaceId and installationId must be supplied together');
+    for (const [label, value] of [['workspaceId', this.expectedWorkspaceId], ['installationId', this.expectedInstallationId], ['runtimeVersion', this.expectedRuntimeVersion] as const]) {
+      if (value !== undefined && (label === 'runtimeVersion' ? typeof value !== 'string' || !SEMVER_PATTERN.test(value) : !validIdentity(value))) throw new TraceProductClientError('INVALID_EXPECTED_IDENTITY', `${label} is not a usable expected identity`);
+    }
   }
 
+  private async ensureHandshake(requiredRoute?: string): Promise<TraceServiceIdentity> {
+    if (this.handshakePromise === undefined) {
+      const pending = (async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs); timer.unref?.();
+        let response: Response;
+        try {
+          response = await this.fetchImpl(`${this.baseUrl}/api/runtime/identity`, {method: 'GET', redirect: 'error', headers: {'accept': 'application/json', origin: this.baseUrl, 'x-trace-runtime-protocol': String(RUNTIME_IDENTITY_PROTOCOL_VERSION)}, signal: controller.signal});
+        } catch (error) {
+          const timedOut = error instanceof Error && error.name === 'AbortError';
+          throw new TraceProductClientError(timedOut ? 'PRODUCT_TIMEOUT' : 'PRODUCT_UNAVAILABLE', timedOut ? 'Trace product service did not respond before the local timeout' : 'Trace product service is not reachable; start or restart the local Trace desktop service');
+        } finally { clearTimeout(timer); }
+        let value: unknown;
+        try { value = JSON.parse(await response.text()); } catch { throw new TraceProductClientError('SERVICE_IDENTITY_INVALID', 'Trace endpoint returned invalid identity JSON', response.status); }
+        if (!response.ok) throw new TraceProductClientError('SERVICE_HANDSHAKE_REQUIRED', `Trace Product service identity handshake failed (${response.status})`, response.status);
+        const workspaceId = this.expectedWorkspaceId ?? this.discoveredWorkspaceId;
+        const installationId = this.expectedInstallationId ?? this.discoveredInstallationId;
+        const identity = validateProductServiceIdentity(value, {
+          ...(workspaceId === undefined ? {} : {workspaceId}),
+          ...(installationId === undefined ? {} : {installationId}),
+          ...(this.expectedRuntimeVersion === undefined ? {} : {runtimeVersion: this.expectedRuntimeVersion}),
+          requireVerified: this.requireVerifiedIdentity,
+        });
+        if (this.expectedWorkspaceId === undefined && this.expectedInstallationId === undefined && identity.identity_state === 'verified') {
+          this.discoveredWorkspaceId = identity.workspace_id as string;
+          this.discoveredInstallationId = identity.installation_id as string;
+        }
+        return identity;
+      })();
+      // Coalesce simultaneous operations, but do not retain a successful
+      // handshake forever. A long-lived MCP process must re-check the service
+      // before each read/write so a restarted port cannot silently point at a
+      // different Trace workspace.
+      let settled!: Promise<TraceServiceIdentity>;
+      settled = pending.finally(() => { if (this.handshakePromise === settled) this.handshakePromise = undefined; });
+      this.handshakePromise = settled;
+    }
+    const identity = await this.handshakePromise;
+    if (requiredRoute !== undefined && !advertisedRoutes(identity.api_surface).some(route => routeMatches(route, requiredRoute))) throw new TraceProductClientError('SERVICE_API_MISMATCH', 'Trace Product service does not advertise the requested route', 502);
+    return identity;
+  }
+
+  /** Explicitly validate and return the cached Product service identity. */
+  serviceIdentity(): Promise<TraceServiceIdentity> { return this.ensureHandshake(); }
+
   private async request(route: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    await this.ensureHandshake(route);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     timer.unref?.();
@@ -130,7 +302,7 @@ export class TraceProductClient {
     try {
       response = await this.fetchImpl(`${this.baseUrl}${route}`, {
         method: 'POST',
-        headers: {'content-type': 'application/json', origin: this.baseUrl, 'x-trace-host': 'codex-mcp'},
+        headers: {'content-type': 'application/json', origin: this.baseUrl, 'x-trace-host': 'codex-mcp', 'x-trace-runtime-protocol': String(RUNTIME_IDENTITY_PROTOCOL_VERSION)},
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -186,13 +358,14 @@ export class TraceProductClient {
   }
 
   private async read(route: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<Record<string, unknown>> {
+    await this.ensureHandshake(route);
     const url = new URL(`${this.baseUrl}${route}`);
     for (const [key, value] of Object.entries(query)) if (value !== undefined) url.searchParams.set(key, String(value));
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs); timer.unref?.();
     let response: Response;
     try {
-      response = await this.fetchImpl(url, {method: 'GET', headers: {'accept': 'application/json', origin: this.baseUrl, 'x-trace-host': 'codex-mcp'}, signal: controller.signal});
+      response = await this.fetchImpl(url, {method: 'GET', headers: {'accept': 'application/json', origin: this.baseUrl, 'x-trace-host': 'codex-mcp', 'x-trace-runtime-protocol': String(RUNTIME_IDENTITY_PROTOCOL_VERSION)}, signal: controller.signal});
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'AbortError';
       throw new TraceProductClientError(timedOut ? 'PRODUCT_TIMEOUT' : 'PRODUCT_UNAVAILABLE', timedOut ? 'Trace product service did not respond before the local timeout' : 'Trace product service is not reachable; start or restart the local Trace desktop service');

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
-import {TraceRuntime} from '../../../packages/core/runtime/src/index.js';
+import {discoverRuntimeRoot, TraceRuntime} from '../../../packages/core/runtime/src/index.js';
 import {CHANGE_KINDS, CHANGE_STATUSES, type ChangeKind, type ChangeStatus, type ChangeLineage, type Compatibility, type ScopeType, type Validation, ProtocolError} from '../../../packages/core/protocol/src/index.js';
 import {DATA_KINDS, type DataKind} from '../../../packages/core/data/src/index.js';
 import {StorageError} from '../../../packages/core/storage/src/index.js';
@@ -178,21 +178,17 @@ function manifestFor(parsed: Map<string, string[]>): {manifest: ReturnType<typeo
 function runtimeVersionFor(parsed: Map<string, string[]>): string {
   const explicit = one(parsed, '--runtime-version', false);
   if (explicit !== undefined) return explicit;
-  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
-  const roots = [
-    runtimeRoot === undefined ? undefined : path.resolve(runtimeRoot, 'runtime.json'),
-    path.resolve(process.cwd(), 'package.json'),
-    path.resolve(process.cwd(), 'runtime.json'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../package.json'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../runtime.json'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../../package.json'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../../runtime.json'),
-  ].filter((value): value is string => value !== undefined);
-  for (const candidate of roots) {
-    if (!fs.existsSync(candidate)) continue;
-    try { const value = JSON.parse(fs.readFileSync(candidate, 'utf8')) as {version?: unknown; runtime_version?: unknown}; const version = value.version ?? value.runtime_version; if (typeof version === 'string' && version.length > 0) return version; } catch { /* keep looking */ }
+  return validatedRuntimeRoot().runtime_version!;
+}
+
+function validatedRuntimeRoot() {
+  const explicit = process.env.TRACE_RUNTIME_ROOT;
+  if (explicit !== undefined && !path.isAbsolute(explicit)) throw new ProtocolError('INVALID_INPUT', 'TRACE_RUNTIME_ROOT must be an absolute directory');
+  try {
+    return discoverRuntimeRoot(explicit === undefined ? [process.cwd(), path.dirname(process.argv[1] ?? process.cwd())] : [explicit], explicit !== undefined);
+  } catch (error) {
+    throw new ProtocolError('INVALID_INPUT', `cannot validate Trace runtime root: ${error instanceof Error ? error.message : String(error)}`);
   }
-  throw new ProtocolError('INVALID_INPUT', 'cannot resolve runtime version; pass --runtime-version VERSION');
 }
 
 function defaultInstanceId(projectDir: string): string { return `trace-${path.basename(path.resolve(projectDir)).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'project'}`; }
@@ -525,39 +521,17 @@ type HostWorkflowPort = {
 };
 
 async function sensemakingWorkerModule(): Promise<{createSensemakingWorker: (options: {webFile: string; agentFile: string}) => {once: () => unknown; drain: (options: {limit?: number}) => unknown; health?: () => unknown; close: () => void}}> {
-  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
-  const candidates = [runtimeRoot, process.cwd(), path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../'), path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../..')]
-    .filter((value): value is string => typeof value === 'string' && path.isAbsolute(value));
-  for (const initial of candidates) {
-    let cursor = path.resolve(initial);
-    for (let steps = 0; steps < 10; steps += 1) {
-      const modulePath = path.join(cursor, 'apps', 'agent', 'sensemaking-worker.mjs');
-      if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createSensemakingWorker: (options: {webFile: string; agentFile: string}) => {once: () => unknown; drain: (options: {limit?: number}) => unknown; health?: () => unknown; close: () => void}};
-      const parent = path.dirname(cursor); if (parent === cursor) break; cursor = parent;
-    }
-  }
+  const root = validatedRuntimeRoot().root;
+  const modulePath = path.join(root, 'apps', 'agent', 'sensemaking-worker.mjs');
+  if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createSensemakingWorker: (options: {webFile: string; agentFile: string}) => {once: () => unknown; drain: (options: {limit?: number}) => unknown; health?: () => unknown; close: () => void}};
   throw new ProtocolError('IO_ERROR', 'Sensemaking worker module is unavailable; cannot drain local jobs');
 }
 
 /** Load the source Product Workspace adapter from both checkout and dist CLI. */
 async function productWorkspaceModule(): Promise<{createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}}> {
-  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
-  const candidates = [
-    runtimeRoot,
-    process.cwd(),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../..'),
-  ].filter((value): value is string => typeof value === 'string' && path.isAbsolute(value));
-  for (const initial of candidates) {
-    let cursor = path.resolve(initial);
-    for (let steps = 0; steps < 10; steps += 1) {
-      const modulePath = path.join(cursor, 'packages', 'product', 'workspace', 'src', 'workspace.mjs');
-      if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}};
-      const parent = path.dirname(cursor);
-      if (parent === cursor) break;
-      cursor = parent;
-    }
-  }
+  const root = validatedRuntimeRoot().root;
+  const modulePath = path.join(root, 'packages', 'product', 'workspace', 'src', 'workspace.mjs');
+  if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}};
   throw new ProtocolError('IO_ERROR', 'Product Workspace adapter is unavailable; cannot receive a Codex host session');
 }
 

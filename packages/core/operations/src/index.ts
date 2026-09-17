@@ -5,7 +5,7 @@ import {ProtocolError, validateChangeSet} from '../../protocol/src/index.js';
 import {validateDataEnvelope} from '../../data/src/index.js';
 import {validateContinuityEnvelope} from '../../continuity/src/index.js';
 import {traceEventFromSqliteRow, type TraceEvent} from '../../observability/src/index.js';
-import {openSqlite, type SqliteDatabase, type SqliteDriverInfo} from '../../storage/src/index.js';
+import {DATABASE_IDENTITY_COLUMNS, DATABASE_IDENTITY_TABLE, DATABASE_ROLES, TRACE_PROJECT_SERVICE_ID, deriveDatabaseIdentity, openSqlite, type SqliteDatabase, type SqliteDriverInfo, validateDatabaseIdentity} from '../../storage/src/index.js';
 
 export const BACKUP_PROTOCOL_ID = 'trace.backup' as const;
 export const BACKUP_PROTOCOL_VERSION = '0.1.0' as const;
@@ -52,6 +52,37 @@ function validateTraceRows(db: SqliteDatabase): DoctorCheck {
   }
 }
 
+/**
+ * A backup restore is an explicit user action, but the bytes may come from a
+ * different workspace. Preserve the role while quarantining the ownership
+ * claim; the restored runtime remains readable and must be explicitly adopted
+ * before any write. A raw file copy never gets this compatibility treatment.
+ */
+function quarantineRestoredIdentity(file: string, target: string): void {
+  const opened = openSqlite(file);
+  const db = opened.db;
+  try {
+    const present = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name=?").get(DATABASE_IDENTITY_TABLE);
+    if (!present) return;
+    const columns = (db.prepare(`PRAGMA table_info(${DATABASE_IDENTITY_TABLE})`).all() as Array<{name?: unknown}>).map(row => row.name);
+    const required = [...DATABASE_IDENTITY_COLUMNS];
+    if (columns.length !== required.length || required.some(column => !columns.includes(column)) || columns.some(column => !required.includes(column as typeof required[number]))) return;
+    const row = db.prepare(`SELECT ${required.join(',')} FROM ${DATABASE_IDENTITY_TABLE} WHERE id=1`).get();
+    const identity = validateDatabaseIdentity(row);
+    if (identity.verification_state !== 'verified') return;
+    const expected = deriveDatabaseIdentity(target);
+    if (identity.workspace_id === expected.workspace_id && identity.installation_id === expected.installation_id) return;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET installation_id=NULL,workspace_id=NULL,verification_state='legacy' WHERE id=1`).run();
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* preserve original error */ }
+      throw error;
+    }
+  } finally { db.close(); }
+}
+
 export function doctorSqlite(databaseFile: string, options: {correlation_id?: string} = {}): DoctorReport {
   const database = absolute(databaseFile, 'database'); const checks: DoctorCheck[] = [];
   if (!fs.existsSync(database)) return {status: 'failed', database, node: process.version, checks: [{name: 'database-exists', status: 'error', detail: 'database file does not exist'}], created_at: new Date().toISOString()};
@@ -65,6 +96,20 @@ export function doctorSqlite(databaseFile: string, options: {correlation_id?: st
     const integrity = db.prepare('PRAGMA integrity_check').get() as Record<string, unknown>;
     checks.push({name: 'sqlite-integrity', status: integrity.integrity_check === 'ok' ? 'pass' : 'error', detail: String(integrity.integrity_check)});
     const tables = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{name: string}>).map(row => row.name));
+    if (!tables.has(DATABASE_IDENTITY_TABLE)) {
+      checks.push({name: 'database-identity', status: 'warn', detail: 'legacy state has no Trace owner metadata; opening it through Trace Runtime will keep it read-only until explicit adoption'});
+    } else {
+      try {
+        const columns = (db.prepare(`PRAGMA table_info(${DATABASE_IDENTITY_TABLE})`).all() as Array<{name?: unknown}>).map(row => row.name);
+        const required = [...DATABASE_IDENTITY_COLUMNS];
+        if (columns.length !== required.length || required.some(column => !columns.includes(column)) || columns.some(column => !required.includes(column as typeof required[number]))) throw new Error('unsupported identity schema');
+        const row = db.prepare(`SELECT ${required.join(',')} FROM ${DATABASE_IDENTITY_TABLE} WHERE id=1`).get();
+        const identity = validateDatabaseIdentity(row, {role: DATABASE_ROLES.project, serviceId: TRACE_PROJECT_SERVICE_ID});
+        checks.push({name: 'database-identity', status: identity.verification_state === 'verified' ? 'pass' : 'warn', detail: identity.verification_state === 'verified' ? 'verified project owner metadata' : 'legacy project owner metadata; writes require explicit adoption'});
+      } catch (error) {
+        checks.push({name: 'database-identity', status: 'error', detail: String(error)});
+      }
+    }
     for (const table of ['change_sets', 'data_records', 'continuity_records']) {
       if (!tables.has(table)) { checks.push({name: `table:${table}`, status: table === 'continuity_records' ? 'warn' : 'error', detail: 'table is missing'}); continue; }
       const rows = tableRows(db, table); checks.push({name: `table:${table}`, status: 'pass', detail: `${rows.length} revisions`, count: rows.length}); checks.push(...revisionCheck(rows)); checks.push(validateRows(table, rows));
@@ -118,6 +163,7 @@ export function restoreSqlite(backupFile: string, databaseFile: string, replace 
   if (fs.existsSync(database) && !replace) throw new ProtocolError('TARGET_EXISTS', `Database exists; use replace=true explicitly: ${database}`);
   const staging = `${database}.restore-staging-${process.pid}`; if (fs.existsSync(staging)) throw new ProtocolError('TARGET_BUSY', `Restore staging exists: ${staging}`);
   fs.mkdirSync(path.dirname(database), {recursive: true}); fs.copyFileSync(backup, staging);
+  quarantineRestoredIdentity(staging, database);
   const check = doctorSqlite(staging); if (check.status === 'failed') { fs.rmSync(staging, {force: true}); throw new ProtocolError('RESTORE_VERIFY_FAILED', 'Restored staging database failed doctor'); }
   let previous: string | undefined;
   if (fs.existsSync(database)) { previous = `${database}.pre-restore-${Date.now()}`; fs.renameSync(database, previous); }

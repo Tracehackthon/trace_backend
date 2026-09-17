@@ -2,8 +2,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {StorageError, recordIdentity, type VersionedRecord, type VersionedStore} from './jsonl.js';
 import {openSqlite, type SqliteDatabase, type SqliteDriverInfo} from './sqlite-driver.js';
+import {
+  DATABASE_IDENTITY_COLUMNS,
+  DATABASE_IDENTITY_TABLE,
+  DATABASE_ROLES,
+  RUNTIME_IDENTITY_PROTOCOL_VERSION,
+  TRACE_PRODUCT_ID,
+  TRACE_PROJECT_SERVICE_ID,
+  databaseIdentityTemplate,
+  deriveDatabaseIdentity,
+  type DatabaseIdentity,
+  type DatabaseIdentityOptions,
+  validateDatabaseIdentity,
+} from './identity.js';
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+/** TRC1. Product and Agent use different application IDs and are rejected. */
+export const PROJECT_APPLICATION_ID = 0x54524331;
+export const PROJECT_SCHEMA_VERSION = 1;
+const PRODUCT_APPLICATION_ID = 0x54525731; // TRW1
+const AGENT_APPLICATION_ID = 0x54524131; // TRA1
 
 function absolute(file: string): string {
   if (!path.isAbsolute(file)) throw new StorageError('INVALID_PATH', 'SQLite state file must be an absolute path');
@@ -29,6 +47,105 @@ function writeError(error: unknown): StorageError {
   return new StorageError('SQLITE_WRITE_FAILED', message);
 }
 
+function userTables(db: SqliteDatabase): string[] {
+  return (db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as Array<{name?: unknown}>)
+    .map(row => typeof row.name === 'string' ? row.name : '').filter(Boolean);
+}
+
+/**
+ * Before the identity marker existed, project ledgers were recognized only by
+ * the table that the caller happened to request.  Keep that migration path
+ * narrow: a marker-less file may contain only the known project ledger tables
+ * (or the requested versioned table), never an arbitrary SQLite table that was
+ * merely renamed to `trace.sqlite`.
+ */
+function legacyProjectTables(db: SqliteDatabase, requestedTable: string, allowRequestedTable: boolean): boolean {
+  const tables = userTables(db);
+  if (tables.length === 0) return true;
+  const allowed = new Set(['change_sets', 'data_records', 'continuity_records']);
+  if (allowRequestedTable) allowed.add(requestedTable);
+  if (tables.some(table => !allowed.has(table))) return false;
+  // A legacy runtime may have opened only one of the three ledgers. The next
+  // store is allowed to add its own table, but any table already carrying the
+  // requested name must still have the versioned-store schema.
+  for (const table of tables) {
+    const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{name?: unknown}>)
+      .map(row => row.name).filter((value): value is string => typeof value === 'string');
+    if (columns.length !== 4 || !['identity', 'revision', 'payload', 'created_at'].every(column => columns.includes(column))) return false;
+  }
+  return tables.length > 0;
+}
+
+function databaseApplicationId(db: SqliteDatabase): number {
+  const row = db.prepare('PRAGMA application_id').get() as {application_id?: unknown} | undefined;
+  return Number(row?.application_id ?? 0);
+}
+
+function identityTableExists(db: SqliteDatabase): boolean {
+  return Boolean(db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name=?").get(DATABASE_IDENTITY_TABLE));
+}
+
+function readDatabaseIdentity(db: SqliteDatabase): DatabaseIdentity {
+  try {
+    const columns = (db.prepare(`PRAGMA table_info(${DATABASE_IDENTITY_TABLE})`).all() as Array<{name?: unknown}>)
+      .map(row => row.name).filter((value): value is string => typeof value === 'string');
+    const required = [...DATABASE_IDENTITY_COLUMNS];
+    if (columns.length !== required.length || required.some(column => !columns.includes(column)) || columns.some(column => !required.includes(column as typeof required[number]))) {
+      throw new StorageError('DATABASE_IDENTITY_INVALID', 'SQLite state identity metadata has an unsupported schema');
+    }
+    const row = db.prepare(`SELECT ${required.join(',')} FROM ${DATABASE_IDENTITY_TABLE} WHERE id=1`).get();
+    if (!row) throw new StorageError('DATABASE_IDENTITY_INVALID', 'SQLite state identity metadata is missing');
+    return validateDatabaseIdentity(row, {role: DATABASE_ROLES.project, serviceId: TRACE_PROJECT_SERVICE_ID});
+  } catch (error) {
+    if (error instanceof StorageError) throw error;
+    throw new StorageError('DATABASE_IDENTITY_INVALID', `SQLite state identity metadata could not be read: ${String(error)}`);
+  }
+}
+
+function createIdentityTable(db: SqliteDatabase): void {
+  db.exec(`CREATE TABLE ${DATABASE_IDENTITY_TABLE}(
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    schema_version INTEGER NOT NULL,
+    product_id TEXT NOT NULL,
+    service_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    protocol_version INTEGER NOT NULL,
+    runtime_version TEXT NOT NULL,
+    installation_id TEXT,
+    workspace_id TEXT,
+    verification_state TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+}
+
+function insertIdentity(db: SqliteDatabase, value: DatabaseIdentity): void {
+  db.prepare(`INSERT INTO ${DATABASE_IDENTITY_TABLE}(${DATABASE_IDENTITY_COLUMNS.join(',')}) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+    value.id, value.schema_version, value.product_id, value.service_id, value.role,
+    value.protocol_version, value.runtime_version, value.installation_id,
+    value.workspace_id, value.verification_state, value.created_at,
+  );
+}
+
+function sameDatabaseIdentity(left: DatabaseIdentity, right: DatabaseIdentity): boolean {
+  return left.id === right.id && left.schema_version === right.schema_version && left.product_id === right.product_id
+    && left.service_id === right.service_id && left.role === right.role && left.protocol_version === right.protocol_version
+    && left.runtime_version === right.runtime_version && left.installation_id === right.installation_id
+    && left.workspace_id === right.workspace_id && left.verification_state === right.verification_state
+    && left.created_at === right.created_at;
+}
+
+function projectIdentity(file: string, options: DatabaseIdentityOptions, verificationState: 'verified' | 'legacy'): DatabaseIdentity {
+  return databaseIdentityTemplate({
+    role: DATABASE_ROLES.project,
+    serviceId: TRACE_PROJECT_SERVICE_ID,
+    file,
+    ...(options.workspaceId === undefined ? {} : {workspaceId: options.workspaceId}),
+    ...(options.installationId === undefined ? {} : {installationId: options.installationId}),
+    ...(options.runtimeVersion === undefined ? {} : {runtimeVersion: options.runtimeVersion}),
+    verificationState,
+  });
+}
+
 /**
  * SQLite implementation of the same append-only versioned-store seam used by
  * JSONL. The database is a local product state store; protocol validation stays
@@ -38,27 +155,183 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
   private readonly db: SqliteDatabase;
   private readonly table: string;
   readonly driver: SqliteDriverInfo;
+  private databaseIdentity: DatabaseIdentity;
+  private readonly allowLegacyIdentity: boolean;
 
-  constructor(file: string, table: string) {
+  constructor(file: string, table: string, options: DatabaseIdentityOptions & {upgradeLegacyIdentity?: boolean} = {}) {
     const target = absolute(file);
     fs.mkdirSync(path.dirname(target), {recursive: true});
     const opened = openSqlite(target);
     this.db = opened.db;
     this.driver = opened.driver;
     this.table = tableName(table);
-    this.db.exec('PRAGMA journal_mode = WAL');
-    // WAL only allows readers to proceed while a writer holds the lock. A
-    // bounded busy timeout makes independent Codex/CLI processes wait for that
-    // writer instead of failing immediately with SQLITE_BUSY.
-    this.db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
-    this.db.exec(`CREATE TABLE IF NOT EXISTS ${this.table} (
-      identity TEXT NOT NULL,
-      revision INTEGER NOT NULL,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (identity, revision)
-    )`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS ${this.table}_identity_idx ON ${this.table}(identity, revision)`);
+    this.allowLegacyIdentity = options.allowLegacyIdentity ?? false;
+    try {
+      // WAL only allows readers to proceed while a writer holds the lock. A
+      // bounded busy timeout makes independent Codex/CLI processes wait for that
+      // writer instead of failing immediately with SQLITE_BUSY.  Set the
+      // connection-local timeout before the identity probe, but defer the
+      // file-mutating journal-mode pragma until after role/owner validation.
+      this.db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+      this.databaseIdentity = this.ensureDatabaseIdentity(target, options);
+      this.db.exec('PRAGMA journal_mode = WAL');
+      this.db.exec(`CREATE TABLE IF NOT EXISTS ${this.table} (
+        identity TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (identity, revision)
+      )`);
+      this.db.exec(`CREATE INDEX IF NOT EXISTS ${this.table}_identity_idx ON ${this.table}(identity, revision)`);
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
+  }
+
+  /**
+   * Establish the project owner before creating the requested record table.
+   * Product and Agent application IDs are checked even for old databases that
+   * predate the identity table, so a renamed state file cannot change roles.
+   */
+  private ensureDatabaseIdentity(target: string, options: DatabaseIdentityOptions & {upgradeLegacyIdentity?: boolean}): DatabaseIdentity {
+    const present = identityTableExists(this.db);
+    if (present) {
+      const existing = readDatabaseIdentity(this.db);
+      this.assertExpectedIdentity(existing, target, options);
+      if (existing.verification_state !== 'verified' && options.upgradeLegacyIdentity) {
+        return this.upgradeIdentityRow(existing, options);
+      }
+      return options.runtimeVersion !== undefined && existing.runtime_version !== options.runtimeVersion
+        ? this.refreshRuntimeVersion(existing, options.runtimeVersion) : existing;
+    }
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      // The initial probe is intentionally outside the lock for cheap reads,
+      // but another process may have created the marker while we waited. The
+      // locked/reloaded view is authoritative and must be rechecked before
+      // issuing CREATE TABLE (the sql.js fallback otherwise races on CREATE).
+      if (identityTableExists(this.db)) {
+        const existing = readDatabaseIdentity(this.db);
+        this.assertExpectedIdentity(existing, target, options);
+        this.db.exec('COMMIT');
+        if (existing.verification_state !== 'verified' && options.upgradeLegacyIdentity) return this.upgradeIdentityRow(existing, options);
+        return options.runtimeVersion !== undefined && existing.runtime_version !== options.runtimeVersion
+          ? this.refreshRuntimeVersion(existing, options.runtimeVersion) : existing;
+      }
+      const appId = databaseApplicationId(this.db);
+      if (appId === PRODUCT_APPLICATION_ID || appId === AGENT_APPLICATION_ID) {
+        throw new StorageError('DATABASE_ROLE_MISMATCH', 'The requested project runtime cannot open a Product or Agent database');
+      }
+      if (appId !== 0 && appId !== PROJECT_APPLICATION_ID) {
+        throw new StorageError('WRONG_DATABASE', 'The SQLite state file is not a recognized Trace database');
+      }
+      const existingTables = userTables(this.db);
+      if (existingTables.length > 0 && !legacyProjectTables(this.db, this.table, appId === PROJECT_APPLICATION_ID)) {
+        throw new StorageError('WRONG_DATABASE', 'The marker-less SQLite state is not a recognized Trace project ledger');
+      }
+      const state: 'verified' | 'legacy' = existingTables.length === 0 ? 'verified' : 'legacy';
+      const identity = projectIdentity(target, options, state);
+      // Mark both newly-created and migrated legacy project files.  The
+      // metadata row remains the authority, while the application id gives
+      // old callers a cheap role fingerprint before they inspect the table.
+      this.db.exec(`PRAGMA application_id=${PROJECT_APPLICATION_ID}`);
+      this.db.exec(`PRAGMA user_version=${PROJECT_SCHEMA_VERSION}`);
+      createIdentityTable(this.db);
+      insertIdentity(this.db, identity);
+      this.db.exec('COMMIT');
+      return identity;
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch { /* preserve original error */ }
+      throw error;
+    }
+  }
+
+  private refreshRuntimeVersion(existing: DatabaseIdentity, runtimeVersion: string): DatabaseIdentity {
+    const refreshed = databaseIdentityTemplate({role: DATABASE_ROLES.project, serviceId: TRACE_PROJECT_SERVICE_ID,
+      runtimeVersion, verificationState: existing.verification_state,
+      ...(existing.workspace_id === null ? {} : {workspaceId: existing.workspace_id}),
+      ...(existing.installation_id === null ? {} : {installationId: existing.installation_id}),
+      createdAt: existing.created_at});
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET runtime_version=? WHERE id=1`).run(refreshed.runtime_version);
+      this.db.exec('COMMIT');
+      return refreshed;
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch { /* preserve original error */ }
+      throw error;
+    }
+  }
+
+  private assertExpectedIdentity(identity: DatabaseIdentity, target: string, options: DatabaseIdentityOptions): void {
+    if ((options.workspaceId !== undefined) !== (options.installationId !== undefined)) {
+      throw new StorageError('IDENTITY_MISSING', 'workspaceId and installationId must be supplied together');
+    }
+    if (identity.verification_state !== 'verified') {
+      return;
+    }
+    const derived = deriveDatabaseIdentity(target);
+    const expected = options.workspaceId !== undefined || options.installationId !== undefined
+      ? {workspaceId: options.workspaceId!, installationId: options.installationId!}
+      : {workspaceId: derived.workspace_id, installationId: derived.installation_id};
+    validateDatabaseIdentity(identity, expected);
+  }
+
+  private upgradeIdentityRow(existing: DatabaseIdentity, options: DatabaseIdentityOptions & {upgradeLegacyIdentity?: boolean}): DatabaseIdentity {
+    if (options.workspaceId === undefined || options.installationId === undefined) {
+      throw new StorageError('IDENTITY_UPGRADE_REQUIRED', 'Upgrading a legacy SQLite state requires explicit workspaceId and installationId');
+    }
+    const upgraded = databaseIdentityTemplate({
+      role: DATABASE_ROLES.project,
+      serviceId: TRACE_PROJECT_SERVICE_ID,
+      workspaceId: options.workspaceId,
+      installationId: options.installationId,
+      ...(options.runtimeVersion === undefined ? {runtimeVersion: existing.runtime_version} : {runtimeVersion: options.runtimeVersion}),
+      verificationState: 'verified',
+      createdAt: existing.created_at,
+    });
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET schema_version=?,product_id=?,service_id=?,role=?,protocol_version=?,runtime_version=?,installation_id=?,workspace_id=?,verification_state=? WHERE id=1`)
+        .run(upgraded.schema_version, upgraded.product_id, upgraded.service_id, upgraded.role, upgraded.protocol_version,
+          upgraded.runtime_version, upgraded.installation_id, upgraded.workspace_id, upgraded.verification_state);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch { /* preserve original error */ }
+      throw error;
+    }
+    return upgraded;
+  }
+
+  private assertWritableIdentity(): void {
+    if (this.databaseIdentity.verification_state !== 'verified' && !this.allowLegacyIdentity) {
+      throw new StorageError('LEGACY_IDENTITY_UNVERIFIED', 'Legacy SQLite state is read-only until it is explicitly upgraded with workspace and installation identity');
+    }
+  }
+
+  private assertCurrentWritableIdentity(): void {
+    const current = readDatabaseIdentity(this.db);
+    if (!sameDatabaseIdentity(current, this.databaseIdentity)) throw new StorageError('DATABASE_IDENTITY_CHANGED', 'SQLite state identity changed after this runtime opened it; reopen explicitly before writing');
+    this.assertWritableIdentity();
+  }
+
+  get identity(): DatabaseIdentity { return structuredClone(this.databaseIdentity); }
+  getIdentity(): DatabaseIdentity { return structuredClone(this.databaseIdentity); }
+
+  /** Explicit, reversible adoption path for old project databases. */
+  upgradeIdentity(input: {workspaceId: string; installationId: string; runtimeVersion?: string}): DatabaseIdentity {
+    if (this.databaseIdentity.verification_state === 'verified') {
+      validateDatabaseIdentity(this.databaseIdentity, {workspaceId: input.workspaceId, installationId: input.installationId});
+      return this.identity;
+    }
+    const upgraded = this.upgradeIdentityRow(this.databaseIdentity, {
+      workspaceId: input.workspaceId,
+      installationId: input.installationId,
+      ...(input.runtimeVersion === undefined ? {} : {runtimeVersion: input.runtimeVersion}),
+    });
+    this.databaseIdentity = upgraded;
+    return this.identity;
   }
 
   all(): T[] {
@@ -109,6 +382,7 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
   private withWrite<TValue>(fn: () => TValue): TValue {
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      this.assertCurrentWritableIdentity();
       const value = fn();
       this.db.exec('COMMIT');
       return value;
@@ -126,6 +400,7 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
   }
 
   append(record: T): void {
+    this.assertWritableIdentity();
     try {
       this.withWrite(() => this.appendUnsafe(record));
     } catch (error) {
@@ -134,6 +409,7 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
   }
 
   appendIfAbsent(record: T): {record: T; inserted: boolean} {
+    this.assertWritableIdentity();
     try {
       return this.withWrite(() => {
         const id = recordIdentity(record);
@@ -148,6 +424,7 @@ export class SqliteVersionedStore<T extends VersionedRecord> implements Versione
   }
 
   compareAndSwap(recordId: string, expectedRevision: number, update: (current: T) => T): T {
+    this.assertWritableIdentity();
     try {
       return this.withWrite(() => {
         const current = this.read(recordId);

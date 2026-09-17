@@ -1,6 +1,7 @@
 import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
+import {resolveRuntimeRoot} from '../runtime-identity.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const help = `Trace 本机后端（源码工作区）
@@ -39,6 +40,9 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help')) { console.log(help); return; }
   const config = configuration(args, process.env);
+  const configuredRoot = process.env.TRACE_RUNTIME_ROOT;
+  if (configuredRoot !== undefined && !path.isAbsolute(configuredRoot)) throw new Error('TRACE_RUNTIME_ROOT 必须是绝对路径；不会猜测运行时。');
+  const validatedRoot = resolveRuntimeRoot(configuredRoot ?? root, {explicit: configuredRoot !== undefined}).root;
   await checkPort(config.port);
   console.log(`本机地址：http://127.0.0.1:${config.port}`);
   console.log(`产品数据：${config.state}`);
@@ -48,6 +52,7 @@ async function main() {
     return;
   }
   process.env.TRACE_WEB_STATE_FILE = config.state;
+  process.env.TRACE_RUNTIME_ROOT = validatedRoot;
   process.env.TRACE_DESKTOP_PORT = String(config.port);
   process.env.TRACE_AGENT_ENABLED = config.agent ? '1' : '0';
   // Keep the existing host and its shutdown handlers in this process. No shell,

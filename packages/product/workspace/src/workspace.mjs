@@ -12,12 +12,12 @@ import {
   validateCodexReceiveRequest,
   validateCodexReturnRequest,
 } from './codex-bridge.mjs';
-import {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError} from './host-ingest.mjs';
+import {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError, resolveProjectBinding, verifyHostSessionProjectBinding} from './host-ingest.mjs';
 import {createHostWorkflowService, ensureHostWorkflowSchema, HOST_WORKFLOW_TABLES, HostWorkflowError, computeRepositoryPreflight} from './host-workflow.mjs';
 
 // The Node adapter is the public boundary for SQLite-backed host ingest. Keep
 // these exports out of the browser-safe `src/index.mjs` entrypoint.
-export {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError, createHostWorkflowService, ensureHostWorkflowSchema, HOST_WORKFLOW_TABLES, HostWorkflowError, computeRepositoryPreflight};
+export {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError, resolveProjectBinding, verifyHostSessionProjectBinding, createHostWorkflowService, ensureHostWorkflowSchema, HOST_WORKFLOW_TABLES, HostWorkflowError, computeRepositoryPreflight};
 
 // This database is deliberately independent of the cognitive/adopted ledgers.
 // The caller owns TRACE_WEB_STATE_FILE and chooses an explicit absolute path.
@@ -544,7 +544,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     } catch (cause) {
       const error = databaseError(cause);
       req.resume();
-      if (!res.headersSent) reply(res, error.status, { error: { code: error.code, message: error.message }, ...(error.revision === undefined ? {} : { revision: error.revision }), storage });
+      if (!res.headersSent) reply(res, error.status, { error: { code: error.code, message: error.message, ...((error instanceof HostIngestError && error.details !== undefined) ? {details: error.details} : {}) }, ...(error.revision === undefined ? {} : { revision: error.revision }), storage });
       else if (!res.writableEnded) res.end();
     }
     return true;

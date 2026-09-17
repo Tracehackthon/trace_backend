@@ -13,7 +13,10 @@ function tmp(prefix = 'trace-host-workflow-') { return fs.mkdtempSync(path.join(
 function setup() {
   const dir = tmp(); const web = path.join(dir, 'web.sqlite'); const agent = path.join(dir, 'agent.sqlite');
   const store = createProductWorkspace({file: web});
-  store.hostSessions.attach({host: 'codex', sessionId: 'session-1', commandId: 'attach-1', projectRef: path.join(dir, 'project')});
+  // This fixture covers Host Workflow persistence.  Keep it user-level rather
+  // than passing a synthetic project_ref that cannot satisfy the verified
+  // descriptor/repository binding contract.
+  store.hostSessions.attach({host: 'codex', sessionId: 'session-1', commandId: 'attach-1', projectRef: null});
   store.hostSessions.ingestEvent({host: 'codex', sessionId: 'session-1', turnId: 'turn-1', hook_event_name: 'UserPromptSubmit', prompt: '请在发布前检查 git 分支，确保有人承接流程，并说明当前项目约定与脏工作区处理方式'});
   store.hostSessions.ingestEvent({host: 'codex', sessionId: 'session-1', turnId: 'turn-1', hook_event_name: 'Stop', last_assistant_message: '已完成，等待下一步'});
   return {dir, web, agent, store};

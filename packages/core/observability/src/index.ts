@@ -163,6 +163,7 @@ export class SqliteTraceEventStore {
   readonly driver: SqliteDriverInfo;
   private identity: DatabaseIdentity;
   private readonly allowLegacyIdentity: boolean;
+  private eventSchemaAvailable = false;
 
   constructor(file: string, options: {allowLegacyIdentity?: boolean; workspaceId?: string; installationId?: string} = {}) {
     const target = absolute(file);
@@ -177,21 +178,14 @@ export class SqliteTraceEventStore {
       this.db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
       this.identity = this.readIdentity(target, options);
       this.allowLegacyIdentity = options.allowLegacyIdentity ?? false;
-      this.db.exec('PRAGMA journal_mode = WAL');
-      this.db.exec(`CREATE TABLE IF NOT EXISTS trace_events (
-        event_id TEXT NOT NULL PRIMARY KEY,
-        occurred_at TEXT NOT NULL,
-        component TEXT NOT NULL,
-        operation TEXT NOT NULL,
-        outcome TEXT NOT NULL,
-        correlation_id TEXT NOT NULL,
-        causation_id TEXT NOT NULL,
-        thread_id TEXT,
-        record_refs TEXT NOT NULL,
-        duration_ms INTEGER,
-        error_code TEXT
-      )`);
-      this.db.exec('CREATE INDEX IF NOT EXISTS trace_events_correlation_at_idx ON trace_events(correlation_id, occurred_at, event_id)');
+      // Legacy project state is inspectable but read-only until explicit
+      // identity adoption.  WAL and the event-table/index migration both
+      // modify the file, so defer them for verified/explicitly opted-in state.
+      if (this.identity.verification_state === 'verified' || this.allowLegacyIdentity) {
+        this.ensureEventSchema();
+      } else {
+        this.eventSchemaAvailable = this.hasEventSchema();
+      }
     } catch (error) {
       this.db.close();
       throw error;
@@ -219,6 +213,11 @@ export class SqliteTraceEventStore {
   }
 
   private assertCurrentIdentity(): void {
+    this.assertDurableIdentity();
+    if (this.identity.verification_state !== 'verified' && !this.allowLegacyIdentity) throw new StorageError('LEGACY_IDENTITY_UNVERIFIED', 'Legacy SQLite state is read-only until its project identity is explicitly upgraded');
+  }
+
+  private assertDurableIdentity(): void {
     const current = this.readIdentity(this.target, this.expectedIdentity);
     const same = current.id === this.identity.id && current.schema_version === this.identity.schema_version
       && current.product_id === this.identity.product_id && current.service_id === this.identity.service_id
@@ -227,16 +226,74 @@ export class SqliteTraceEventStore {
       && current.workspace_id === this.identity.workspace_id && current.verification_state === this.identity.verification_state
       && current.created_at === this.identity.created_at;
     if (!same) throw new StorageError('DATABASE_IDENTITY_CHANGED', 'Trace event storage identity changed after this runtime opened it; reopen explicitly before writing');
-    if (current.verification_state !== 'verified' && !this.allowLegacyIdentity) throw new StorageError('LEGACY_IDENTITY_UNVERIFIED', 'Legacy SQLite state is read-only until its project identity is explicitly upgraded');
+  }
+
+  private hasEventSchema(): boolean {
+    return Boolean(this.db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='trace_events'").get());
+  }
+
+  private assertEventSchema(): void {
+    if (!this.eventSchemaAvailable) throw new StorageError('TRACE_EVENTS_UNAVAILABLE', 'Trace event storage is not available in this legacy database; explicitly upgrade its project identity first');
   }
 
   syncIdentity(identity: DatabaseIdentity): void {
-    this.identity = validateDatabaseIdentity(identity, {role: DATABASE_ROLES.project, serviceId: TRACE_PROJECT_SERVICE_ID});
+    const next = validateDatabaseIdentity(identity, {role: DATABASE_ROLES.project, serviceId: TRACE_PROJECT_SERVICE_ID});
+    if (next.verification_state === 'verified' || this.allowLegacyIdentity) {
+      // Sync is used after an explicit project identity upgrade. Re-read the
+      // durable marker before creating a missing event table; trusting a caller
+      // supplied object alone would let an uncommitted/fabricated identity
+      // reopen writes on a legacy file.
+      // Keep the marker check and additive table creation under one SQLite
+      // write lock.  Otherwise a second process could replace the marker
+      // between the read and CREATE TABLE, reopening events for the wrong
+      // owner.  journal_mode=WAL is intentionally changed only after commit.
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const current = this.readIdentity(this.target, {
+          workspaceId: next.workspace_id!,
+          installationId: next.installation_id!,
+        });
+        const same = current.id === next.id && current.schema_version === next.schema_version
+          && current.product_id === next.product_id && current.service_id === next.service_id
+          && current.role === next.role && current.protocol_version === next.protocol_version
+          && current.runtime_version === next.runtime_version && current.installation_id === next.installation_id
+          && current.workspace_id === next.workspace_id && current.verification_state === next.verification_state
+          && current.created_at === next.created_at;
+        if (!same) throw new StorageError('DATABASE_IDENTITY_CHANGED', 'Trace event storage identity changed before synchronization; reopen explicitly');
+        this.ensureEventSchema({journalMode: false});
+        this.db.exec('COMMIT');
+      } catch (error) {
+        try { this.db.exec('ROLLBACK'); } catch { /* preserve original error */ }
+        throw error;
+      }
+      this.db.exec('PRAGMA journal_mode = WAL');
+    }
+    this.identity = next;
     if (this.identity.verification_state === 'verified') this.expectedIdentity = {workspaceId: this.identity.workspace_id!, installationId: this.identity.installation_id!};
+  }
+
+  private ensureEventSchema({journalMode = true}: {journalMode?: boolean} = {}): void {
+    if (journalMode) this.db.exec('PRAGMA journal_mode = WAL');
+    this.db.exec(`CREATE TABLE IF NOT EXISTS trace_events (
+      event_id TEXT NOT NULL PRIMARY KEY,
+      occurred_at TEXT NOT NULL,
+      component TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      correlation_id TEXT NOT NULL,
+      causation_id TEXT NOT NULL,
+      thread_id TEXT,
+      record_refs TEXT NOT NULL,
+      duration_ms INTEGER,
+      error_code TEXT
+    )`);
+    this.db.exec('CREATE INDEX IF NOT EXISTS trace_events_correlation_at_idx ON trace_events(correlation_id, occurred_at, event_id)');
+    this.eventSchemaAvailable = true;
   }
 
   record(input: CreateTraceEvent): TraceEvent {
     this.assertCurrentIdentity();
+    this.assertEventSchema();
     const event = buildTraceEvent(input);
     try {
       this.db.prepare('INSERT INTO trace_events(event_id, occurred_at, component, operation, outcome, correlation_id, causation_id, thread_id, record_refs, duration_ms, error_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -249,6 +306,8 @@ export class SqliteTraceEventStore {
 
   byCorrelation(correlationId: string): TraceEvent[] {
     const correlation = eventText(correlationId, 'correlation_id');
+    this.assertDurableIdentity();
+    this.assertEventSchema();
     try {
       const rows = this.db.prepare('SELECT event_id, occurred_at, component, operation, outcome, correlation_id, causation_id, thread_id, record_refs, duration_ms, error_code FROM trace_events WHERE correlation_id = ? ORDER BY occurred_at, event_id').all(correlation) as Array<Record<string, unknown>>;
       return rows.map(traceEventFromSqliteRow);

@@ -20,7 +20,13 @@ export function createAgentBackend({ productWorkspace, env = process.env, retrie
   if (env.TRACE_AGENT_ENABLED !== '1') return createAgentHttp();
   const file = path.resolve(env.TRACE_AGENT_STATE_FILE || path.join(path.dirname(productWorkspace.file), 'agent.sqlite'));
   demand(file.toLowerCase() !== path.resolve(productWorkspace.file).toLowerCase(), 'INVALID_AGENT_DB', 'Agent 数据库不能覆盖产品数据库。', 500);
-  const productIdentity = typeof productWorkspace.getIdentity === 'function' ? productWorkspace.getIdentity() : productWorkspace.identity;
+  // Read the durable marker at the hand-off boundary.  A long-lived Product
+  // adapter may have detected an identity replacement since its cached
+  // startup snapshot; starting Agent from that stale object would bind a new
+  // Agent ledger to an owner the Product service has already rejected.
+  const productIdentity = typeof productWorkspace.getLiveIdentity === 'function'
+    ? productWorkspace.getLiveIdentity()
+    : typeof productWorkspace.getIdentity === 'function' ? productWorkspace.getIdentity() : productWorkspace.identity;
   demand(productIdentity && productIdentity.verification_state === 'verified', 'PRODUCT_IDENTITY_UNVERIFIED', 'Product 数据库身份未验证；Agent 不会在未绑定的工作区启动。', 503);
   const timeoutMs = Number(env.TRACE_AGENT_TIMEOUT_MS || 180000);
   demand(Number.isInteger(timeoutMs) && timeoutMs >= 1000 && timeoutMs <= 600000, 'INVALID_CONFIG', 'TRACE_AGENT_TIMEOUT_MS 需为 1000—600000。', 500);
@@ -40,12 +46,15 @@ export function createAgentBackend({ productWorkspace, env = process.env, retrie
         pollMs: Number(env.TRACE_SENSEMAKING_POLL_MS || 1000)});
       sensemakingWorker.start({pollMs: Number(env.TRACE_SENSEMAKING_POLL_MS || 1000), maxConcurrent: 1});
     }
-    const agentDatabaseIdentity = typeof store.getIdentity === 'function' ? store.getIdentity() : store.identity;
-    const serviceIdentity = buildServiceIdentity({serviceId: TRACE_AGENT_SERVICE_ID, serviceRole: 'agent', runtimeVersion: agentDatabaseIdentity?.runtime_version ?? productIdentity.runtime_version,
-      ...(agentDatabaseIdentity?.installation_id === null || agentDatabaseIdentity?.installation_id === undefined ? {} : {installationId: agentDatabaseIdentity.installation_id}),
-      ...(agentDatabaseIdentity?.workspace_id === null || agentDatabaseIdentity?.workspace_id === undefined ? {} : {workspaceId: agentDatabaseIdentity.workspace_id}),
-      identityState: agentDatabaseIdentity?.verification_state ?? 'unverified',
-      databaseRole: DATABASE_ROLES.agent, apiSurface: AGENT_API_SURFACE});
+    const serviceIdentity = () => {
+      const agentDatabaseIdentity = typeof store.getLiveIdentity === 'function' ? store.getLiveIdentity() : store.getIdentity?.() ?? store.identity;
+      const currentProductIdentity = typeof productWorkspace.getLiveIdentity === 'function' ? productWorkspace.getLiveIdentity() : productWorkspace.getIdentity?.() ?? productWorkspace.identity;
+      return buildServiceIdentity({serviceId: TRACE_AGENT_SERVICE_ID, serviceRole: 'agent', runtimeVersion: agentDatabaseIdentity?.runtime_version ?? currentProductIdentity.runtime_version,
+        ...(agentDatabaseIdentity?.installation_id === null || agentDatabaseIdentity?.installation_id === undefined ? {} : {installationId: agentDatabaseIdentity.installation_id}),
+        ...(agentDatabaseIdentity?.workspace_id === null || agentDatabaseIdentity?.workspace_id === undefined ? {} : {workspaceId: agentDatabaseIdentity.workspace_id}),
+        identityState: agentDatabaseIdentity?.verification_state ?? 'unverified',
+        databaseRole: DATABASE_ROLES.agent, apiSurface: AGENT_API_SURFACE});
+    };
     return createAgentHttp({ sensemakingWorker, serviceIdentity, service: createAgentService({ store, readWorkspace: productWorkspace.read,
       executeProduct: productWorkspace.execute, adoptCandidate: productWorkspace.adoptAgentCandidate,
       executorRegistry, timeoutMs, retrievalProvider }) });

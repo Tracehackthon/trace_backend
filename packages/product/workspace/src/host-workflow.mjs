@@ -102,7 +102,12 @@ function addColumn(db, table, column, declaration) {
 }
 
 /** Create the append-only workflow extension and safely migrate stage-one DBs. */
-export function ensureHostWorkflowSchema(db) {
+export function ensureHostWorkflowSchema(db, {allowSchemaMigration = true} = {}) {
+  // Legacy Product databases remain inspectable without silently acquiring
+  // new workflow tables/indexes.  Explicit identity adoption (or the
+  // library-only legacy write opt-in) passes true and performs the additive
+  // migration in the owner's transaction.
+  if (!allowSchemaMigration) return false;
   // Stage one created workflow_findings with only the capture columns.  Additive
   // columns keep those databases readable without recreating or copying the
   // authoritative table.
@@ -352,6 +357,7 @@ export function ensureHostWorkflowSchema(db) {
   addColumn(db, 'sensemaking_jobs', 'redaction_json', 'TEXT');
   addColumn(db, 'sensemaking_jobs', 'overlap_json', 'TEXT');
   addColumn(db, 'repository_guard_journal', 'request_hash', "TEXT NOT NULL DEFAULT ''");
+  return true;
 }
 
 function decodeRow(row, jsonFields = []) {
@@ -575,9 +581,9 @@ function heuristicRoute(finding) {
   };
 }
 
-export function createHostWorkflowService({db, transaction, faultInjector = null}) {
+export function createHostWorkflowService({db, transaction, faultInjector = null, allowSchemaMigration = true}) {
   if (!db || typeof db.prepare !== 'function' || typeof transaction !== 'function') throw new TypeError('createHostWorkflowService requires db and transaction');
-  ensureHostWorkflowSchema(db);
+  ensureHostWorkflowSchema(db, {allowSchemaMigration});
 
   function listSensemakingJobs({host, sessionId, session_id: snakeSessionId, status} = {}) {
     const resolvedSessionId = sessionId ?? snakeSessionId;

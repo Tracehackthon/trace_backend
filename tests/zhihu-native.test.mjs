@@ -257,3 +257,29 @@ test('local HTTP + real MCP stdio: bounded search tools, explicit auth check and
   assert.equal((await call('trace_zhihu_login_check')).ok, true);
   assert.ok(!JSON.stringify(found).includes('fixture-access'));
 });
+
+test('real MCP stdio refuses a verified Zhihu provider after its workspace identity changes', async t => {
+  let upstreamCalls = 0;
+  const provider = new ZhihuProvider({access_secret: 'fixture-access', fetch_impl: async () => { upstreamCalls += 1; return response({Items: [item]}); }});
+  const serviceIdentity = {
+    protocol_version: 1, protocol: 'trace.runtime.identity@1', product_id: 'trace', service_id: 'trace-product-service',
+    service_role: 'product', runtime_version: '0.7.1', installation_id: 'native-installation', workspace_id: 'native-workspace',
+    identity_state: 'verified', database_role: 'product-web', api_surface: {
+      runtime: ['/api/runtime/identity'],
+      zhihu: ['/api/zhihu/status', '/api/zhihu/oauth/start', '/api/zhihu/oauth/check', '/api/zhihu/oauth/disconnect', '/api/zhihu/user/read'],
+      search: ['/api/search/zhihu', '/api/search/global'],
+    },
+  };
+  const origin = await serve(t, createZhihuHttp(provider, {serviceIdentity}));
+  const transport = new StdioClientTransport({command: process.execPath, args: ['dist/apps/mcp/src/main.js'], stderr: 'pipe', env: {
+    ...process.env, TRACE_PRODUCT_URL: origin, TRACE_WORKSPACE_ID: serviceIdentity.workspace_id, TRACE_INSTALLATION_ID: serviceIdentity.installation_id,
+  }});
+  const client = new Client({name: 'zhihu-identity-test', version: '1.0.0'}); await client.connect(transport); t.after(() => client.close());
+  const call = async (name, args = {}) => JSON.parse((await client.callTool({name, arguments: args})).content.find(x => x.type === 'text').text);
+  assert.equal((await call('trace_zhihu_search', {query: '第一次'})).ok, true);
+  serviceIdentity.workspace_id = 'native-restarted-workspace';
+  const switched = await call('trace_zhihu_search', {query: '不应发送'});
+  assert.equal(switched.ok, false);
+  assert.equal(switched.error.code, 'IDENTITY_MISMATCH');
+  assert.equal(upstreamCalls, 1, 'identity mismatch must stop before the provider request');
+});

@@ -383,6 +383,12 @@ export class TraceProductClient {
       protocolVersion: 1,
       commandId: hostCommandId('attach', this.sessionId, {projectRef: projectRef ?? null}),
       host: 'codex', sessionId: this.sessionId,
+      // The backend requires the host cwd to cross-check an explicit project
+      // ref against the repository actually running this MCP process.  Sending
+      // cwd even for an unbound personal attach lets a later re-attach prove
+      // the original project binding without turning the personal row into a
+      // project session (projectRef remains omitted).
+      cwd: path.resolve(process.cwd()),
       ...(projectRef === undefined ? {} : {projectRef}),
     });
   }
@@ -411,6 +417,7 @@ export class TraceProductClient {
       protocolVersion: 1,
       commandId: hostCommandId('finding', this.sessionId, {turnId: turnId ?? null, observation: input.observation, desiredBehavior: input.desiredBehavior ?? null}),
       host: 'codex', sessionId: this.sessionId, ...(turnId === undefined ? {} : {turnId}),
+      cwd: path.resolve(process.cwd()),
       observation: input.observation,
       ...(input.desiredBehavior === undefined ? {} : {desiredBehavior: input.desiredBehavior}),
     }).then(value => {

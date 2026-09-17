@@ -63,7 +63,8 @@ export function mountHostSession({root, onBack = () => {}} = {}) {
         const operation = button.dataset.hostAction; const host = button.dataset.host; const sessionId = button.dataset.session;
         const session = state.sessions.find(item => item.host === host && item.session_id === sessionId);
         const route = operation === 'attach' ? 'attach' : operation === 'pause' ? 'pause' : 'detach';
-        await post(`/api/product/host/session/${route}`, {commandId: `desktop-${operation}-${id()}`, host, sessionId, ...(operation === 'attach' && session?.project_ref ? {projectRef: session.project_ref} : {})});
+        await post(`/api/product/host/session/${route}`, {commandId: `desktop-${operation}-${id()}`, host, sessionId,
+          ...(operation === 'attach' && session?.project_ref ? {projectRef: session.project_ref, cwd: session.project_ref} : {})});
         await load(); return;
       }
       if (button.dataset.routeAction) {

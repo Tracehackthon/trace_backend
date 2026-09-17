@@ -51,6 +51,7 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
     catch { throw new AgentError('AGENT_STORE_IN_USE', '另一服务已取得 Agent 记录锁。', 503); }
   }
   let db, closed = false;
+  let sensemakingSchemaAvailable = false;
   const release = () => { try { if (fs.readFileSync(lock, 'utf8') === owner) fs.unlinkSync(lock); } catch {} };
   function verify(database, allowEmpty = false) {
     const appId = database.prepare('PRAGMA application_id').get().application_id;
@@ -90,7 +91,14 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
   function transaction(fn) {
     demand(!closed, 'AGENT_CLOSED', 'Agent 记录已关闭。', 503);
     db.exec('BEGIN IMMEDIATE');
-    try { const result = fn(); db.exec('COMMIT'); return result; }
+    try {
+      // Startup transactions run before the owner marker is loaded. Every
+      // later transaction re-reads it while holding the SQLite write lock so
+      // an external replacement cannot pass a stale startup probe and then
+      // mutate this Agent database.
+      if (databaseIdentity !== undefined) assertCurrentIdentity();
+      const result = fn(); db.exec('COMMIT'); return result;
+    }
     catch (e) { db.exec('ROLLBACK'); throw e; }
   }
   function decode(row) {
@@ -143,6 +151,10 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
         PRIMARY KEY(run_id,sequence)
       );
     `);
+    sensemakingSchemaAvailable = true;
+  }
+  function assertSensemakingSchema() {
+    demand(sensemakingSchemaAvailable, 'AGENT_SENSEMAKING_UNAVAILABLE', '当前 Agent 旧库未启用 sensemaking 表；请先显式升级数据库身份。', 503);
   }
   function createIdentityTable() {
     db.exec(`CREATE TABLE ${DATABASE_IDENTITY_TABLE}(
@@ -184,7 +196,21 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
     catch { demand(false, 'WRONG_AGENT_DB', '不是受支持的 Trace Agent 数据库，未修改。', 503); }
     return row;
   }
+  function sameDatabaseIdentity(left, right) {
+    return left?.id === right?.id && left?.schema_version === right?.schema_version
+      && left?.product_id === right?.product_id && left?.service_id === right?.service_id
+      && left?.role === right?.role && left?.protocol_version === right?.protocol_version
+      && left?.runtime_version === right?.runtime_version && left?.installation_id === right?.installation_id
+      && left?.workspace_id === right?.workspace_id && left?.verification_state === right?.verification_state
+      && left?.created_at === right?.created_at;
+  }
   let databaseIdentity;
+  function assertCurrentIdentity() {
+    demand(!closed, 'AGENT_CLOSED', 'Agent 记录已关闭。', 503);
+    const current = readIdentity();
+    demand(current && databaseIdentity && sameDatabaseIdentity(current, databaseIdentity), 'AGENT_IDENTITY_CHANGED', 'Agent 数据库身份在运行期间发生变化；请重新打开服务。', 503);
+    return current;
+  }
   let writableIdentity;
   try {
     if (fs.existsSync(file)) {
@@ -204,7 +230,10 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
       demand(legacyKey === workspaceKey || legacyKey === legacyWorkspaceKey, 'AGENT_WORKSPACE_MISMATCH', 'Agent 记录绑定了不同工作区。', 503);
       assertAgentIdentityBinding(db);
     }
-    db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
+    // Connection-local settings are safe before identity confirmation.  WAL
+    // changes the database header/journal and must wait until the existing
+    // Agent role and workspace identity have been accepted below.
+    db.exec('PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
     if (!exists) transaction(() => {
       db.exec(`PRAGMA application_id=${APP_ID}; PRAGMA user_version=1;
         CREATE TABLE agent_meta(id INTEGER PRIMARY KEY CHECK(id=1),workspace_key TEXT NOT NULL);
@@ -216,7 +245,6 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
       insertIdentity(identityForAgent('verified'));
     });
     if (exists) transaction(() => {
-      ensureSensemakingTables();
       const current = readIdentity();
       if (current === null) {
         // Existing Agent v1 ledgers are retained as explicitly legacy until
@@ -229,14 +257,33 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
         demand(databaseIdentity.workspace_id === expectedWorkspace, 'AGENT_WORKSPACE_MISMATCH', 'Agent 记录绑定了不同工作区。', 503);
         demand(databaseIdentity.installation_id === expectedInstallation, 'AGENT_INSTALLATION_MISMATCH', 'Agent 记录绑定了不同安装。', 503);
       }
-      if (databaseIdentity.runtime_version !== runtimeVersion) {
+      // Legacy Agent ledgers are read-only until an explicit identity
+      // upgrade/legacy opt-in; changing only runtime_version is still a write.
+      if (databaseIdentity.runtime_version !== runtimeVersion &&
+          (databaseIdentity.verification_state === 'verified' || allowLegacyIdentity)) {
         db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET runtime_version=? WHERE id=1`).run(runtimeVersion);
         databaseIdentity = {...databaseIdentity, runtime_version: runtimeVersion};
       }
+      // Add optional tables only after the durable owner marker has been read
+      // or created. A legacy/misrouted file must not receive schema writes
+      // before its identity decision is complete, and an unverified legacy
+      // file remains read-only even after that decision.
+      if (databaseIdentity.verification_state === 'verified' || allowLegacyIdentity) ensureSensemakingTables();
     });
+    // Only an identity-checked/writable database is allowed to switch journal
+    // mode. WAL changes the file header and is not a read-only compatibility
+    // operation for legacy databases.
+    if (databaseIdentity?.verification_state === 'verified' || allowLegacyIdentity) db.exec('PRAGMA journal_mode=WAL');
     if (!exists) databaseIdentity = readIdentity();
-    writableIdentity = () => demand(databaseIdentity?.verification_state === 'verified' || allowLegacyIdentity,
-      'LEGACY_IDENTITY_UNVERIFIED', '旧 Agent 数据库仅允许读取；请先升级 Product/Agent identity。', 503);
+    if (!sensemakingSchemaAvailable) {
+      const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('sensemaking_events','sensemaking_runs')").all().map(row => row.name);
+      sensemakingSchemaAvailable = SENSEMAKING_TABLES.every(table => tables.includes(table));
+    }
+    writableIdentity = () => {
+      const current = assertCurrentIdentity();
+      demand(current.verification_state === 'verified' || allowLegacyIdentity,
+        'LEGACY_IDENTITY_UNVERIFIED', '旧 Agent 数据库仅允许读取；请先升级 Product/Agent identity。', 503);
+    };
     // A restart recovery is a state mutation. Do not mutate an unverified
     // legacy ledger merely because it was opened for inspection.
     if (databaseIdentity?.verification_state === 'verified' || allowLegacyIdentity) transaction(() => {
@@ -257,18 +304,28 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
     demand(input.workspaceId === expectedWorkspace && input.installationId === expectedInstallation, 'AGENT_IDENTITY_MISMATCH', 'Agent identity 必须与当前 Product workspace identity 一致。', 409);
     const upgraded = databaseIdentityTemplate({role: DATABASE_ROLES.agent, serviceId: TRACE_AGENT_SERVICE_ID, runtimeVersion,
       workspaceId: input.workspaceId, installationId: input.installationId, verificationState: 'verified', createdAt: databaseIdentity.created_at});
-    transaction(() => { updateIdentity(upgraded); });
+    transaction(() => {
+      updateIdentity(upgraded);
+      // Legacy startup intentionally skipped the optional sensemaking tables.
+      // Identity adoption is the explicit authority that reopens Agent writes,
+      // so restore that schema atomically before reporting success.
+      ensureSensemakingTables();
+    });
     databaseIdentity = upgraded;
+    // journal_mode changes the file and cannot run inside the identity
+    // transaction; it is safe only after the verified upgrade committed.
+    db.exec('PRAGMA journal_mode=WAL');
     return structuredClone(databaseIdentity);
   }
   return {
     file,
     get identity() { return databaseIdentity ? structuredClone(databaseIdentity) : null; },
     getIdentity() { return databaseIdentity ? structuredClone(databaseIdentity) : null; },
+    getLiveIdentity() { return structuredClone(assertCurrentIdentity()); },
     upgradeIdentity,
-    get,
-    find(requestId) { return decode(db.prepare('SELECT payload,payload_hash FROM agent_runs WHERE request_id=?').get(requestId)); },
-    count() { return db.prepare('SELECT COUNT(*) AS n FROM agent_runs').get().n; },
+    get(id) { assertCurrentIdentity(); return get(id); },
+    find(requestId) { assertCurrentIdentity(); return decode(db.prepare('SELECT payload,payload_hash FROM agent_runs WHERE request_id=?').get(requestId)); },
+    count() { assertCurrentIdentity(); return db.prepare('SELECT COUNT(*) AS n FROM agent_runs').get().n; },
     create(request, context, profile = { profileId: request.profileId ?? 'legacy', kind: 'codex', ownerId: 'local-user', version: 1, revision: 'legacy' }) {
       writableIdentity();
       return transaction(() => {
@@ -302,14 +359,18 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
       });
     },
     events(id, after = 0, limit = 512) {
+      assertCurrentIdentity();
       return db.prepare('SELECT payload,payload_hash FROM agent_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(decode);
     },
     findSensemaking(jobId) {
       demand(typeof jobId === 'string' && jobId.length > 0, 'INVALID_SENSEMAKING_JOB', 'job_id 无效。', 400);
+      assertCurrentIdentity();
+      assertSensemakingSchema();
       return decodeSense(db.prepare('SELECT payload,payload_hash FROM sensemaking_runs WHERE job_id=?').get(jobId));
     },
     createSensemaking(job) {
       writableIdentity();
+      assertSensemakingSchema();
       demand(job && typeof job.jobId === 'string' && job.jobId.length > 0 && typeof job.host === 'string'
         && typeof job.sessionId === 'string' && typeof job.turnId === 'string' && typeof job.inputHash === 'string',
       'INVALID_SENSEMAKING_JOB', 'Sensemaking run 身份或输入哈希无效。', 400);
@@ -327,6 +388,7 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
     },
     updateSensemaking(id, patch, type = 'sensemaking.updated', data = {}) {
       writableIdentity();
+      assertSensemakingSchema();
       return transaction(() => {
         const run = getSense(id); demand(run, 'SENSEMAKING_RUN_NOT_FOUND', '没有这个 Sensemaking run。', 404);
         Object.assign(run, patch, {updatedAt: new Date().toISOString()});
@@ -334,6 +396,8 @@ export function createAgentStore({ file, workspaceKey, workspaceIdentity, legacy
       });
     },
     sensemakingEvents(id, after = 0, limit = 512) {
+      assertCurrentIdentity();
+      assertSensemakingSchema();
       return db.prepare('SELECT payload,payload_hash FROM sensemaking_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(decodeSense);
     },
     close() { if (closed) return; closed = true; db.close(); release(); },

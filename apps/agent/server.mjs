@@ -2,8 +2,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createProductWorkspace } from '../../packages/product/workspace/src/workspace.mjs';
-import { AGENT_API_SURFACE, createAgentBackend } from './backend.mjs';
-import { buildServiceIdentity, DATABASE_ROLES, TRACE_AGENT_SERVICE_ID, resolveRuntimeRoot } from '../../runtime-identity.mjs';
+import { createAgentBackend } from './backend.mjs';
+import { resolveRuntimeRoot } from '../../runtime-identity.mjs';
 import { loadRuntimeIdentity } from '../desktop/runtime-identity.mjs';
 
 // Standalone local API: explicitly select the same product DB as the Web host.
@@ -26,35 +26,7 @@ const productWorkspace = createProductWorkspace({ file: process.env.TRACE_WEB_ST
 });
 let agent;
 try { agent = createAgentBackend({ productWorkspace }); } catch (error) { productWorkspace.close(); throw error; }
-const fallbackAgentIdentity = buildServiceIdentity({serviceId: TRACE_AGENT_SERVICE_ID, serviceRole: 'agent', runtimeVersion: runtime.runtime_version,
-  installationId: productWorkspace.identity.installation_id, workspaceId: productWorkspace.identity.workspace_id,
-  identityState: productWorkspace.identity.verification_state, databaseRole: DATABASE_ROLES.agent, apiSurface: AGENT_API_SURFACE});
-const agentIdentity = agent.serviceIdentity ?? fallbackAgentIdentity;
-function rejectIdentityRequest(req, res) {
-  const host = req.headers.host;
-  const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
-  if (!loopback || typeof host !== 'string' || !/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i.test(host)) {
-    res.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'});
-    res.end(JSON.stringify({error: {code: 'LOCAL_ONLY', message: 'Agent identity handshake only accepts loopback hosts.'}})); return true;
-  }
-  const expected = `${req.socket.encrypted ? 'https' : 'http'}://${host}`;
-  if (req.headers.origin !== undefined && req.headers.origin !== expected) {
-    res.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'});
-    res.end(JSON.stringify({error: {code: 'ORIGIN_REQUIRED', message: 'Agent identity handshake must use the local same-origin endpoint.'}})); return true;
-  }
-  const site = req.headers['sec-fetch-site'];
-  if (site !== undefined && site !== 'same-origin' && site !== 'none') {
-    res.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'});
-    res.end(JSON.stringify({error: {code: 'CROSS_SITE_REQUEST', message: 'Agent identity handshake rejects cross-site requests.'}})); return true;
-  }
-  return false;
-}
 const server = http.createServer(async (req, res) => {
-  if (req.url?.split('?')[0] === '/api/runtime/identity') {
-    if (rejectIdentityRequest(req, res)) return;
-    if (req.method !== 'GET') { res.writeHead(405, {'content-type': 'application/json; charset=utf-8', allow: 'GET'}); res.end(JSON.stringify({error: {code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 身份握手。'}})); return; }
-    res.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-trace-runtime-protocol': '1'}); res.end(JSON.stringify(agentIdentity)); return;
-  }
   if (await agent.handle(req, res)) return;
   if (await productWorkspace.handle(req, res)) return;
   res.writeHead(404, { 'content-type': 'application/json' }); res.end('{}');

@@ -34,9 +34,10 @@ async function readBody(req) {
 /** Reusable Node HTTP middleware; no UI dependency, CORS wildcard, shell/cwd,
  * auth-token, arbitrary model, or arbitrary provider override in request bodies. */
 export function createAgentHttp({ service = null, sensemakingWorker = null, serviceIdentity = null, maxStreams = 16 } = {}) {
+  const getServiceIdentity = () => typeof serviceIdentity === 'function' ? serviceIdentity() : serviceIdentity;
   const streams = new Set(); let checking = false, closed = false;
   return {
-    serviceIdentity,
+    get serviceIdentity() { return getServiceIdentity(); },
     async handle(req, res) {
       const pathname = String(req.url ?? '').split('?')[0];
       // The standalone Agent adapter can be mounted without the desktop
@@ -48,8 +49,9 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, serv
           origin(req, false);
           if (req.method !== 'GET') { reply(res, 405, {error: {code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 身份握手。'}}, {allow: 'GET'}); return true; }
           demand(!closed, 'AGENT_CLOSED', 'Agent 接口已关闭。', 503);
-          demand(serviceIdentity, 'AGENT_IDENTITY_UNAVAILABLE', 'Agent 服务身份尚未绑定到已验证工作区。', 503);
-          reply(res, 200, serviceIdentity, {'x-trace-runtime-protocol': '1'});
+          const identityValue = getServiceIdentity();
+          demand(identityValue, 'AGENT_IDENTITY_UNAVAILABLE', 'Agent 服务身份尚未绑定到已验证工作区。', 503);
+          reply(res, 200, identityValue, {'x-trace-runtime-protocol': '1'});
         } catch (cause) {
           req.resume(); const error = cause instanceof AgentError ? cause : new AgentError('AGENT_UNAVAILABLE', 'Agent 后端暂不可用，未读取或写入状态。', 503);
           if (!res.headersSent) reply(res, error.status, {error: {code: error.code, message: error.message}}); else if (!res.writableEnded) res.end();
@@ -60,10 +62,11 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, serv
       try {
         origin(req, req.method !== 'GET');
         demand(!closed, 'AGENT_CLOSED', 'Agent 接口已关闭。', 503);
+        const identityValue = getServiceIdentity();
         if (pathname === '/api/agent/capabilities' && req.method === 'GET') {
           const executors = service?.executorCapabilities ?? { defaultProfileId: null, profiles: [] };
           reply(res, 200, { protocolVersion: 1, enabled: !!service, runtime: 'trace-agent-runtime', ...executors,
-            ...(serviceIdentity === null ? {} : {serviceIdentity}),
+            ...(identityValue === null ? {} : {serviceIdentity: identityValue}),
             purposes: PURPOSES, contextTools: ['trace_context_read', 'trace_context_search'], streaming: 'sse',
             cancellation: true, externalRetrieval: (service?.searchSources.length ?? 0) > 0, searchSources: service?.searchSources ?? [],
             retrievalDefault: 'disabled', fileExecution: false, autoApply: false, authenticationChecked: false,

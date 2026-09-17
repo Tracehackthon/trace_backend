@@ -68,11 +68,36 @@ test('ProjectBindingResolver requires descriptor and repository evidence and rej
     assert.equal(nestedBinding.status, 'conflict');
     assert.ok(nestedBinding.diagnostics.some(item => ['PROJECT_GIT_ROOT_MISMATCH', 'PROJECT_REPOSITORY_MISMATCH'].includes(item.code)));
     assert.equal(resolveProjectBinding({project_ref: path.join(sandbox, 'missing')}).status, 'unresolved');
+    const deleted = path.join(sandbox, 'deleted-project');
+    fs.mkdirSync(deleted, {recursive: true});
+    fs.rmSync(deleted, {recursive: true, force: true});
+    const deletedBinding = resolveProjectBinding({project_ref: deleted, cwd: deleted});
+    assert.equal(deletedBinding.status, 'unresolved');
+    assert.ok(deletedBinding.diagnostics.some(item => item.code === 'PROJECT_PATH_NOT_FOUND'));
     assert.equal(resolveProjectBinding({project_ref: left, cwd: sandbox}).status, 'conflict');
     const renamed = projectFixture(path.join(sandbox, 'renamed-root'), 'new-directory-name', 'stable-project-id');
     const renamedBinding = resolveProjectBinding({project_ref: renamed, cwd: renamed});
     assert.equal(renamedBinding.status, 'resolved');
     assert.equal(renamedBinding.project_id, 'stable-project-id', 'project_id is durable identity, not a basename assertion');
+
+    // A path can look like a Trace project while its marker is redirected to a
+    // different repository.  The resolver must not follow that symlink/junction
+    // and combine the foreign descriptor with the current Git root.
+    const redirected = projectFixture(path.join(sandbox, 'redirected-root'), 'redirected-project');
+    const foreign = projectFixture(path.join(sandbox, 'foreign-root'), 'foreign-project');
+    const redirectedTrace = path.join(redirected, '.trace');
+    fs.rmSync(redirectedTrace, {recursive: true, force: true});
+    try {
+      fs.symlinkSync(path.join(foreign, '.trace'), redirectedTrace, 'junction');
+      const redirectedBinding = resolveProjectBinding({project_ref: redirected, cwd: redirected});
+      assert.equal(redirectedBinding.status, 'unresolved');
+      assert.ok(redirectedBinding.diagnostics.some(item => item.code === 'PROJECT_SYMLINK_UNSAFE'));
+    } catch (error) {
+      // Windows developer-mode/symlink policy can disable junction creation;
+      // keep the cross-platform resolver test useful without weakening runtime
+      // behavior when the fixture cannot be created.
+      if (!['EPERM', 'EACCES', '操作が許可されていません'].includes(error?.code) && !String(error?.message || '').match(/symbolic link|junction|権限|permission/i)) throw error;
+    }
   } finally { fs.rmSync(sandbox, {recursive: true, force: true}); }
 });
 
@@ -83,15 +108,25 @@ test('Host attach validates project identity, retains personal sessions, and blo
     const left = projectFixture(sandbox, 'project-left');
     const right = projectFixture(sandbox, 'project-right');
     assert.throws(() => store.hostSessions.attach({host: 'codex', sessionId: 'bad', commandId: 'bad', projectRef: path.join(sandbox, 'missing')}), error => error.code === 'HOST_PROJECT_BINDING_UNRESOLVED');
+    assert.throws(() => store.hostSessions.attach({host: 'codex', sessionId: 'missing-cwd', commandId: 'missing-cwd', projectRef: left}), error => {
+      assert.equal(error.code, 'HOST_PROJECT_BINDING_UNRESOLVED');
+      return error.details?.diagnostics?.some(item => item.code === 'PROJECT_CWD_REQUIRED');
+    });
+    assert.equal(store.hostSessions.getSession({host: 'codex', session_id: 'missing-cwd'}), null, 'a project attach without cwd must not create a durable row');
 
     const personal = store.hostSessions.attach({host: 'codex', sessionId: 'personal', commandId: 'personal', cwd: left});
     assert.equal(personal.session.project_ref, null);
+    assert.equal(personal.project_binding.cwd, null, 'personal attach must not echo or persist an arbitrary cwd');
     const personalEvent = store.hostSessions.ingestEvent({host: 'codex', session_id: 'personal', turn_id: 'personal-turn', hook_event_name: 'UserPromptSubmit', cwd: right, prompt: 'personal capture'});
     assert.equal(personalEvent.status, 'captured');
     assert.equal(personalEvent.project_binding.status, 'personal');
+    assert.equal(personalEvent.project_binding.cwd, null, 'personal events must not echo or persist an arbitrary cwd');
 
     const attached = store.hostSessions.attach({host: 'codex', sessionId: 'bound', commandId: 'bound', projectRef: left, cwd: left});
     assert.equal(attached.project_binding.status, 'resolved');
+    assert.equal(attached.session.project_id, 'project-left');
+    assert.equal(attached.session.git_root, path.resolve(left));
+    assert.ok(attached.session.git_common_dir, 'a verified non-bare repository must have a durable worktree identity');
     const drift = store.hostSessions.ingestEvent({host: 'codex', session_id: 'bound', turn_id: 'drift-turn', hook_event_name: 'UserPromptSubmit', cwd: right, prompt: 'must not capture'});
     assert.equal(drift.status, 'ignored');
     assert.equal(drift.reason, 'project_binding_conflict');
@@ -102,6 +137,17 @@ test('Host attach validates project identity, retains personal sessions, and blo
     assert.equal(missingCwd.reason, 'project_binding_unresolved');
     assert.equal(missingCwd.project_binding.diagnostics[0].code, 'PROJECT_CWD_REQUIRED');
     assert.equal(store.hostSessions.listTurns({session_id: 'bound'}).length, 0);
+
+    const descriptorFile = path.join(left, '.trace', 'project.json');
+    const descriptor = JSON.parse(fs.readFileSync(descriptorFile, 'utf8'));
+    descriptor.project_id = 'project-left-replaced';
+    fs.writeFileSync(descriptorFile, JSON.stringify(descriptor), 'utf8');
+    const descriptorDrift = store.hostSessions.ingestEvent({host: 'codex', session_id: 'bound', turn_id: 'descriptor-drift-turn', hook_event_name: 'UserPromptSubmit', cwd: left, prompt: 'must not capture after descriptor replacement'});
+    assert.equal(descriptorDrift.status, 'ignored');
+    assert.equal(descriptorDrift.reason, 'project_binding_conflict');
+    assert.equal(descriptorDrift.project_binding.diagnostics[0].code, 'PROJECT_ID_MISMATCH');
+    assert.throws(() => store.hostSessions.attach({host: 'codex', sessionId: 'bound', commandId: 'descriptor-drift-attach', projectRef: left, cwd: left}), error => error.code === 'HOST_PROJECT_BINDING_CONFLICT');
+    fs.writeFileSync(descriptorFile, JSON.stringify({...descriptor, project_id: 'project-left'}), 'utf8');
 
     const recovered = store.hostSessions.ingestEvent({host: 'codex', session_id: 'bound', turn_id: 'bound-turn', hook_event_name: 'UserPromptSubmit', cwd: left, prompt: 'capture after returning'});
     assert.equal(recovered.status, 'captured');

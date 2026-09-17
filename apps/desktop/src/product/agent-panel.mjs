@@ -53,8 +53,11 @@ export function mountAgentPanel(root, {workspace, matterId, selection = null, so
     if(actions.children.length)card.append(actions); result.append(card);
   }
   async function loadRun(id) { const current=await request(`/api/agent/runs/${encodeURIComponent(id)}`); if(closed)return; setBusy(false); status.textContent=terminal.includes(current.status)?`本次运行：${current.status}`:'仍在运行…'; renderResult(current); }
-  function follow(id) {
-    events?.close(); events=new EventSource(`/api/agent/runs/${encodeURIComponent(id)}/events`);
+  async function follow(id) {
+    const eventPath=`/api/agent/runs/${encodeURIComponent(id)}/events`;
+    await ensureRuntimeIdentity(eventPath);
+    if (closed) return;
+    events?.close(); events=new EventSource(eventPath);
     for(const state of terminal)events.addEventListener(`run.${state}`,()=>{events.close();void loadRun(id).catch(error=>{setBusy(false);status.textContent=error.message;});});
     events.addEventListener('runtime.connected',()=>{status.textContent='Agent 已连接，正在处理…';});
     events.addEventListener('tool.completed',()=>{status.textContent='Agent 已读取本次允许的材料，正在形成结果…';});
@@ -67,7 +70,7 @@ export function mountAgentPanel(root, {workspace, matterId, selection = null, so
       contextMode:session.contextMode,contextEpoch:session.contextEpoch,purpose,input:String(data.get('input')||'').trim(),
       profileId:String(data.get('profile')||''),...(sourceIds.length?{sourceIds:sourceIds.slice(0,8)}:{}),
       ...(purpose==='revise'&&selection?{selection}:{}),...(retrieval.length?{retrieval:{sources:retrieval}}:{})};
-    try { const created=await request('/api/agent/runs',body); if(closed)return; run=created.run; status.textContent='请求已保存，等待 Agent…'; follow(run.runId); if(terminal.includes(run.status))await loadRun(run.runId); }
+    try { const created=await request('/api/agent/runs',body); if(closed)return; run=created.run; status.textContent='请求已保存，等待 Agent…'; void follow(run.runId).catch(error=>{if(!closed)status.textContent=error.message;}); if(terminal.includes(run.status))await loadRun(run.runId); }
     catch(error){setBusy(false);status.textContent=error.message;}
   };
   cancel.onclick=async()=>{if(!run||!busy)return;cancel.disabled=true;try{await request(`/api/agent/runs/${encodeURIComponent(run.runId)}/cancel`,{});await loadRun(run.runId);}catch(error){status.textContent=error.message;}finally{cancel.disabled=false;}};

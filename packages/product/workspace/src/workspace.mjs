@@ -44,7 +44,7 @@ const CORE_TABLES = ['web_workspace', 'web_snapshots', 'web_entities', 'web_comm
 const PRODUCT_RUNTIME_VERSION = process.env.TRACE_RUNTIME_VERSION || '0.7.1';
 const PRODUCT_API_SURFACE = Object.freeze({
   runtime: ['/api/runtime/identity'],
-  product: ['/api/product/identity', '/api/product/workspace', '/api/product/commands', '/api/product/codex/receive', '/api/product/codex/return'],
+  product: ['/api/product/identity', '/api/product/workspace', '/api/product/commands', '/api/product/codex/receive', '/api/product/codex/return', '/api/web/export'],
   host: ['/api/product/host/sessions', '/api/product/host/turns', '/api/product/host/findings', '/api/product/host/session/attach', '/api/product/host/session/pause', '/api/product/host/session/detach', '/api/product/host/event', '/api/product/host/finding', '/api/product/host/sensemaking/jobs', '/api/product/host/sensemaking/results', '/api/product/host/sensemaking/privacy', '/api/product/host/routing/proposals', '/api/product/host/routing/propose', '/api/product/host/routing/decide', '/api/product/host/activation/query', '/api/product/host/activation/history', '/api/product/host/activation/mark', '/api/product/host/repository/preflight', '/api/product/host/repository/apply', '/api/product/host/repository/recovery/preview', '/api/product/host/repository/recovery/reconcile', '/api/product/host/repository/recovery/status', '/api/product/host/publication-policies', '/api/product/host/publication-policy/preview', '/api/product/host/publication-policy/adopt', '/api/product/host/publication-policy/revoke', '/api/product/host/capability/orchestrations', '/api/product/host/capability/trials', '/api/product/host/capability/trial/create', '/api/product/host/capability/trial/complete', '/api/product/host/capability/stage', '/api/product/host/capability/validate', '/api/product/host/capability/publish', '/api/product/host/capability/rollback'],
 });
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -208,6 +208,15 @@ function readDatabaseIdentity(db) {
   return row;
 }
 
+function sameDatabaseIdentity(left, right) {
+  return left?.id === right?.id && left?.schema_version === right?.schema_version
+    && left?.product_id === right?.product_id && left?.service_id === right?.service_id
+    && left?.role === right?.role && left?.protocol_version === right?.protocol_version
+    && left?.runtime_version === right?.runtime_version && left?.installation_id === right?.installation_id
+    && left?.workspace_id === right?.workspace_id && left?.verification_state === right?.verification_state
+    && left?.created_at === right?.created_at;
+}
+
 function createIdentityTable(db) {
   db.exec(`CREATE TABLE ${DATABASE_IDENTITY_TABLE}(
     id INTEGER PRIMARY KEY CHECK(id=1),
@@ -322,7 +331,14 @@ export function createProductWorkspace({
   const storage = { kind: 'sqlite', location: file };
   function transaction(fn) {
     db.exec('BEGIN IMMEDIATE');
-    try { const result = fn(); db.exec('COMMIT'); return result; }
+    try {
+      // Startup transactions run before the marker is loaded. Every later
+      // transaction re-reads the durable owner while holding the SQLite write
+      // lock so an external replacement/identity edit cannot pass a stale
+      // preflight and then mutate this Product database.
+      if (databaseIdentity !== undefined) assertCurrentDatabaseIdentity();
+      const result = fn(); db.exec('COMMIT'); return result;
+    }
     catch (error) { try { db.exec('ROLLBACK'); } catch { /* original failure wins */ } throw error; }
   }
   function readSnapshot(revision) {
@@ -364,9 +380,19 @@ export function createProductWorkspace({
     return rows[0].revision;
   }
   let databaseIdentity;
+  let schemaMigrationsAllowed = true;
+  function assertCurrentDatabaseIdentity() {
+    demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503);
+    const current = readDatabaseIdentity(db);
+    demand(current && databaseIdentity && sameDatabaseIdentity(current, databaseIdentity), 'DATABASE_IDENTITY_CHANGED', 'Product 数据库身份在运行期间发生变化；已停止读取或写入，请重新打开服务。', 503);
+    return current;
+  }
   try {
     const exists = assertDatabase(db, true);
-    db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
+    // Connection-local settings are safe before the owner marker is read. WAL
+    // changes the database header and therefore must wait until the existing
+    // Product role/identity has been accepted (or the new marker is committed).
+    db.exec('PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
     if (!exists) transaction(() => {
       db.exec(`PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=${SCHEMA_VERSION};
         CREATE TABLE web_workspace(singleton INTEGER PRIMARY KEY CHECK(singleton=1),revision INTEGER NOT NULL CHECK(revision>=0));
@@ -380,8 +406,11 @@ export function createProductWorkspace({
       insertIdentity(db, databaseIdentity);
     });
     else transaction(() => {
-      ensureHostSessionSchema(db);
       const current = readDatabaseIdentity(db);
+      // The read-only probe happens before opening the writable handle. Repeat
+      // the caller/file identity check under the write lock to close that
+      // replacement window before any legacy marker/schema migration.
+      if (current?.verification_state === 'verified') assertProductIdentityBinding(current, file, {workspaceId, installationId});
       if (current === null) {
         // Pre-identity v1 databases are not guessed into a workspace.  The
         // additive marker makes the compatibility state visible to clients;
@@ -405,18 +434,34 @@ export function createProductWorkspace({
         // A compatible runtime upgrade keeps the durable owner IDs but records
         // the code that currently owns the file. This is metadata-only and
         // never turns a legacy/unverified database into a writable one.
-        if (databaseIdentity.runtime_version !== runtimeVersion) {
+        // Keep legacy databases read-only.  Even refreshing a runtime version
+        // is a durable write and therefore must wait for explicit identity
+        // adoption (or the caller's explicit legacy-write opt-in).
+        if (databaseIdentity.runtime_version !== runtimeVersion &&
+            (databaseIdentity.verification_state === 'verified' || allowLegacyIdentity)) {
           db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET runtime_version=? WHERE id=1`).run(runtimeVersion);
           databaseIdentity = {...databaseIdentity, runtime_version: runtimeVersion};
         }
       }
+      // Existing v1 databases receive additive host tables only after the
+      // Product identity has been read/created inside this same transaction.
+      // An unverified legacy owner is read-only: do not let merely opening it
+      // create workflow/session tables or indexes. Explicit adoption (or the
+      // library-only legacy write opt-in) is the migration authority.
+      schemaMigrationsAllowed = databaseIdentity.verification_state === 'verified' || allowLegacyIdentity;
+      if (schemaMigrationsAllowed) ensureHostSessionSchema(db);
     });
+    // Only an identity-checked/writable database is allowed to switch journal
+    // mode. WAL changes the file header and is not a read-only compatibility
+    // operation for legacy databases.
+    if (schemaMigrationsAllowed) db.exec('PRAGMA journal_mode=WAL');
     readSnapshot(currentRevision()); // A corrupt stored workspace must fail startup, not become empty.
   } catch (error) { db.close(); throw error; }
   demand(databaseIdentity, 'DATABASE_IDENTITY_INVALID', 'Product 数据库身份不可用，未写入。', 503);
   const legacyWritesAllowed = allowLegacyIdentity === true;
   const assertWritableIdentity = () => {
-    demand(databaseIdentity.verification_state === 'verified' || legacyWritesAllowed, 'LEGACY_IDENTITY_UNVERIFIED', '旧 Product 数据库仅允许读取；请先显式升级 workspace/installation identity。', 503);
+    const current = assertCurrentDatabaseIdentity();
+    demand(current.verification_state === 'verified' || legacyWritesAllowed, 'LEGACY_IDENTITY_UNVERIFIED', '旧 Product 数据库仅允许读取；请先显式升级 workspace/installation identity。', 503);
   };
   function persist(host, fingerprint, commandId, revision) {
     assertWritableIdentity();
@@ -561,8 +606,38 @@ export function createProductWorkspace({
   // Host-session receipts use their own append-only command table and never
   // call persist(), so attaching or receiving a Codex turn cannot advance the
   // Product Workspace snapshot revision.
-  const hostSessions = createHostSessionIngest({db, transaction});
-  const hostWorkflow = createHostWorkflowService({db, transaction, faultInjector: hostWorkflowFaultInjector});
+  // The HTTP/direct command seam calls assertWritableIdentity() before it
+  // reaches these services, but Product also exposes the service objects to
+  // library callers.  Do not let that public seam bypass the legacy database
+  // write lock: otherwise an unverified database could still append host
+  // receipts (or activation offers) despite execute()/HTTP being read-only.
+  function guardServiceAccess(service, methods) {
+    const writes = new Set(methods);
+    // The service factories return frozen objects.  A Proxy cannot substitute
+    // a method on a frozen, non-configurable data property, so expose a
+    // frozen facade with guarded function values instead of trapping gets.
+    // Read methods need the same live owner check as writes: a library caller
+    // must not inspect stale host rows after another process has replaced the
+    // Product identity marker behind this long-lived workspace object.
+    return Object.freeze(Object.fromEntries(Object.entries(service).map(([property, value]) => [
+      property,
+      writes.has(property) && typeof value === 'function'
+        ? (...args) => { assertWritableIdentity(); return Reflect.apply(value, service, args); }
+        : typeof value === 'function'
+          ? (...args) => { assertCurrentDatabaseIdentity(); return Reflect.apply(value, service, args); }
+        : value,
+    ])));
+  }
+  const hostSessions = guardServiceAccess(createHostSessionIngest({db, transaction, allowSchemaMigration: schemaMigrationsAllowed}), [
+    'attach', 'pause', 'detach', 'ingestEvent', 'captureWorkflowFinding',
+  ]);
+  const hostWorkflow = guardServiceAccess(createHostWorkflowService({db, transaction, faultInjector: hostWorkflowFaultInjector, allowSchemaMigration: schemaMigrationsAllowed}), [
+    'claimSensemakingJob', 'renewSensemakingJob', 'finishSensemakingJob', 'failSensemakingJob', 'recordSensemakingPrivacy',
+    'createRoutingProposal', 'decideRouting', 'queryActivation', 'markActivation',
+    'publicationPolicyAdopt', 'publicationPolicyRevoke',
+    'capabilityTrialCreate', 'capabilityTrialComplete', 'capabilityStage', 'capabilityValidate', 'capabilityPublish', 'capabilityRollback',
+    'repositoryPreflight', 'repositoryGuardReconcile', 'repositoryGuardApply', 'inspectRepositoryGuardJournals',
+  ]);
   // Re-check unfinished Repository Guard journals on every Product Service
   // start.  This never mutates Git; ambiguous evidence is only marked in the
   // Product-owned journal for explicit recovery.
@@ -601,16 +676,27 @@ export function createProductWorkspace({
     demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503);
     demand(databaseIdentity.verification_state !== 'verified', 'IDENTITY_ALREADY_VERIFIED', 'Product 数据库身份已经验证，无需升级。', 409);
     demand(isSafeIdentity(input.workspaceId) && isSafeIdentity(input.installationId), 'LEGACY_IDENTITY_UPGRADE_REQUIRED', '升级旧 Product 数据库需要明确的 workspaceId 和 installationId。', 409);
-    return transaction(() => {
-      const upgraded = databaseIdentityTemplate({role: DATABASE_ROLES.product, serviceId: TRACE_PRODUCT_SERVICE_ID, runtimeVersion,
-        workspaceId: input.workspaceId, installationId: input.installationId, verificationState: 'verified', createdAt: databaseIdentity.created_at});
+    const nextIdentity = databaseIdentityTemplate({role: DATABASE_ROLES.product, serviceId: TRACE_PRODUCT_SERVICE_ID, runtimeVersion,
+      workspaceId: input.workspaceId, installationId: input.installationId, verificationState: 'verified', createdAt: databaseIdentity.created_at});
+    const upgraded = transaction(() => {
       db.prepare(`UPDATE ${DATABASE_IDENTITY_TABLE} SET schema_version=?,product_id=?,service_id=?,role=?,protocol_version=?,runtime_version=?,installation_id=?,workspace_id=?,verification_state=?,created_at=? WHERE id=1`).run(
-        upgraded.schema_version, upgraded.product_id, upgraded.service_id, upgraded.role, upgraded.protocol_version, upgraded.runtime_version,
-        upgraded.installation_id, upgraded.workspace_id, upgraded.verification_state, upgraded.created_at,
+        nextIdentity.schema_version, nextIdentity.product_id, nextIdentity.service_id, nextIdentity.role, nextIdentity.protocol_version, nextIdentity.runtime_version,
+        nextIdentity.installation_id, nextIdentity.workspace_id, nextIdentity.verification_state, nextIdentity.created_at,
       );
-      databaseIdentity = upgraded;
-      return structuredClone(databaseIdentity);
+      // The startup path intentionally left legacy databases without the
+      // optional host/workflow extension.  Identity adoption is the explicit
+      // authority that reopens writes, so migrate that extension in the same
+      // owner transaction rather than leaving the already-created service
+      // objects permanently unusable after a successful upgrade.
+      ensureHostSessionSchema(db);
+      return structuredClone(nextIdentity);
     });
+    databaseIdentity = upgraded;
+    schemaMigrationsAllowed = true;
+    // journal_mode cannot be changed from inside the identity transaction;
+    // perform this file mutation only after the upgrade committed.
+    db.exec('PRAGMA journal_mode=WAL');
+    return upgraded;
   }
   async function handle(req, res) {
     const rawPath = String(req.url || '').split('?')[0];
@@ -621,15 +707,16 @@ export function createProductWorkspace({
     if (rawPath === '/api/runtime/identity') {
       try {
         demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503);
+        const currentIdentity = assertCurrentDatabaseIdentity();
         checkOrigin(req, false);
         if (req.method !== 'GET') { reply(res, 405, {error: {code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 身份握手。'}}, {allow: 'GET'}); return true; }
         reply(res, 200, buildServiceIdentity({
           serviceId: TRACE_PRODUCT_SERVICE_ID,
           serviceRole: 'product',
-          runtimeVersion: databaseIdentity.runtime_version,
-          installationId: databaseIdentity.installation_id,
-          workspaceId: databaseIdentity.workspace_id,
-          identityState: databaseIdentity.verification_state,
+          runtimeVersion: currentIdentity.runtime_version,
+          installationId: currentIdentity.installation_id,
+          workspaceId: currentIdentity.workspace_id,
+          identityState: currentIdentity.verification_state,
           databaseRole: DATABASE_ROLES.product,
           apiSurface: PRODUCT_API_SURFACE,
         }), {'x-trace-runtime-protocol': String(RUNTIME_IDENTITY_PROTOCOL_VERSION)});
@@ -646,6 +733,9 @@ export function createProductWorkspace({
     try {
       if (closed) throw new WebStoreError(503, 'STORE_CLOSED', '工作区存储已关闭。');
       checkOrigin(req, ['PUT', 'POST'].includes(req.method));
+      // Do not let a long-lived service keep serving a database file whose
+      // durable owner identity was replaced behind its cached startup copy.
+      assertCurrentDatabaseIdentity();
       if (product) {
         const commandMatch = /^\/api\/product\/commands\/([^/]+)$/.exec(rawPath);
         const codexKind = rawPath === '/api/product/codex/receive' ? 'receive' : rawPath === '/api/product/codex/return' ? 'return' : null;
@@ -754,6 +844,9 @@ export function createProductWorkspace({
   return { file,
     get identity() { return structuredClone(databaseIdentity); },
     getIdentity() { return structuredClone(databaseIdentity); },
+    // The desktop runtime handshake must not serve a stale startup snapshot
+    // when another owner has replaced or edited the durable identity row.
+    getLiveIdentity() { return structuredClone(assertCurrentDatabaseIdentity()); },
     upgradeIdentity,
     handle,
     // User-level Codex host stream. These methods share the Product Workspace
@@ -761,7 +854,7 @@ export function createProductWorkspace({
     hostSessions,
     hostWorkflow,
     // Read-only application seam for the Agent backend. No whole-host write API.
-    read() { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return readSnapshot(currentRevision()); },
+    read() { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); assertCurrentDatabaseIdentity(); return readSnapshot(currentRevision()); },
     execute(command) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return executeProduct(command); },
     adoptAgentCandidate(candidate) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return applyAgentCandidate(candidate); },
     close() { if (closed) return; closed = true; db.close(); } };

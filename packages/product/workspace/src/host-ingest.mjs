@@ -126,15 +126,52 @@ function pathKey(value) {
 }
 
 function samePath(left, right) {
-  const a = pathKey(left), b = pathKey(right);
-  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  if (typeof left !== 'string' || typeof right !== 'string') return false;
+  try {
+    const a = pathKey(left), b = pathKey(right);
+    return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  } catch { return false; }
 }
 
 function insidePath(child, parent) {
-  const childKey = pathKey(child), parentKey = pathKey(parent);
-  const childValue = process.platform === 'win32' ? childKey.toLowerCase() : childKey;
-  const parentValue = process.platform === 'win32' ? parentKey.toLowerCase() : parentKey;
-  return childValue === parentValue || childValue.startsWith(`${parentValue}${path.sep}`);
+  if (typeof child !== 'string' || typeof parent !== 'string') return false;
+  try {
+    const childKey = pathKey(child), parentKey = pathKey(parent);
+    const childValue = process.platform === 'win32' ? childKey.toLowerCase() : childKey;
+    const parentValue = process.platform === 'win32' ? parentKey.toLowerCase() : parentKey;
+    if (childValue === parentValue) return true;
+    // Keep a single component separator for filesystem roots (for example
+    // `C:\\` or `/`). Prefix matching is intentionally component-aware.
+    const prefix = parentValue.endsWith(path.sep) ? parentValue : `${parentValue}${path.sep}`;
+    return childValue.startsWith(prefix);
+  } catch { return false; }
+}
+
+function markerDiagnostic(root, traceDir, descriptorFile) {
+  try {
+    // A project marker is not authoritative when `.trace` or its descriptor is
+    // redirected outside the canonical project.  Reject both POSIX symlinks
+    // and Windows junctions/reparse redirects rather than following another
+    // workspace's identity through the same path.
+    let traceStat;
+    try { traceStat = fs.lstatSync(traceDir); }
+    catch (error) { if (error?.code === 'ENOENT') return null; return bindingDiagnostic('PROJECT_DESCRIPTOR_INVALID', 'Trace project marker could not be inspected', 'descriptor'); }
+    if (traceStat.isSymbolicLink()) return bindingDiagnostic('PROJECT_SYMLINK_UNSAFE', 'Trace project marker or descriptor is redirected through a symlink/junction', 'descriptor');
+    if (!traceStat.isDirectory()) return bindingDiagnostic('PROJECT_DESCRIPTOR_INVALID', 'Trace project marker is not a directory', 'descriptor');
+    let descriptorStat;
+    try { descriptorStat = fs.lstatSync(descriptorFile); }
+    catch (error) { if (error?.code === 'ENOENT') return null; return bindingDiagnostic('PROJECT_DESCRIPTOR_INVALID', 'Trace project descriptor could not be inspected', 'descriptor'); }
+    if (descriptorStat.isSymbolicLink()) return bindingDiagnostic('PROJECT_SYMLINK_UNSAFE', 'Trace project marker or descriptor is redirected through a symlink/junction', 'descriptor');
+    if (!descriptorStat.isFile()) return bindingDiagnostic('PROJECT_DESCRIPTOR_INVALID', 'Trace project descriptor is not a regular file', 'descriptor');
+    const traceTarget = pathKey(traceDir);
+    const descriptorTarget = pathKey(descriptorFile);
+    if (!insidePath(traceTarget, root) || !insidePath(descriptorTarget, traceTarget)) {
+      return bindingDiagnostic('PROJECT_SYMLINK_UNSAFE', 'Trace project marker or descriptor is redirected through a symlink/junction', 'descriptor');
+    }
+  } catch {
+    return bindingDiagnostic('PROJECT_DESCRIPTOR_INVALID', 'Trace project marker or descriptor could not be inspected', 'descriptor');
+  }
+  return null;
 }
 
 function bindingDiagnostic(code, message, field = undefined) {
@@ -202,11 +239,18 @@ function validateProjectDescriptor(root, file) {
 function discoverProjectCandidate(directory, {explicit = false} = {}) {
   if (typeof directory !== 'string' || !path.isAbsolute(directory)) return {candidate: null, diagnostics: [bindingDiagnostic('PROJECT_PATH_NOT_ABSOLUTE', 'Project path must be absolute', explicit ? 'project_ref' : 'cwd')]};
   const resolved = pathKey(directory);
-  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) return {candidate: null, diagnostics: [bindingDiagnostic('PROJECT_PATH_NOT_FOUND', 'Project path does not exist or is not a directory', explicit ? 'project_ref' : 'cwd')]};
+  try {
+    if (!fs.statSync(resolved).isDirectory()) return {candidate: null, diagnostics: [bindingDiagnostic('PROJECT_PATH_NOT_FOUND', 'Project path does not exist or is not a directory', explicit ? 'project_ref' : 'cwd')]};
+  } catch (error) {
+    const code = error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? 'PROJECT_PATH_NOT_FOUND' : 'PROJECT_PATH_UNREADABLE';
+    return {candidate: null, diagnostics: [bindingDiagnostic(code, code === 'PROJECT_PATH_NOT_FOUND' ? 'Project path does not exist or is not a directory' : 'Project path could not be inspected', explicit ? 'project_ref' : 'cwd')]};
+  }
   let cursor = resolved;
   while (true) {
     const traceDir = path.join(cursor, '.trace');
     const descriptorFile = path.join(traceDir, 'project.json');
+    const redirectDiagnostic = markerDiagnostic(cursor, traceDir, descriptorFile);
+    if (redirectDiagnostic !== null) return {candidate: null, root: cursor, descriptor: null, diagnostics: [redirectDiagnostic]};
     if (fs.existsSync(descriptorFile)) {
       const descriptorResult = validateProjectDescriptor(cursor, descriptorFile);
       if (descriptorResult.descriptor === null) return {candidate: null, root: cursor, descriptor: null, diagnostics: descriptorResult.diagnostics};
@@ -315,10 +359,31 @@ export function verifyHostSessionProjectBinding(input = {}) {
   const projectRef = input?.project_ref ?? input?.projectRef;
   if (projectRef === undefined || projectRef === null || projectRef === '') return {
     status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null,
-    cwd: input?.cwd ?? null, git_root: null, repository: null, diagnostics: [],
+    // Personal sessions deliberately have no filesystem binding.  Do not
+    // reflect an arbitrary caller-supplied cwd into a durable receipt.
+    cwd: null, git_root: null, repository: null, diagnostics: [],
   };
   if (input?.cwd === undefined) return unresolvedBinding([bindingDiagnostic('PROJECT_CWD_REQUIRED', 'A project-bound host event must include its absolute cwd', 'cwd')], {project_ref: projectRef});
-  return resolveProjectBinding({project_ref: projectRef, ...(input?.cwd === undefined ? {} : {cwd: input.cwd})});
+  const binding = resolveProjectBinding({project_ref: projectRef, cwd: input.cwd});
+  if (binding.status !== 'resolved') return binding;
+  // The path is only one part of a project identity.  Persisted sessions pin
+  // the descriptor project_id and both Git roots when available, so replacing
+  // a descriptor or moving a session onto another worktree cannot silently
+  // keep the same path-bound session alive.
+  const expectedProjectId = input?.project_id ?? input?.projectId;
+  if (expectedProjectId !== undefined && expectedProjectId !== null && expectedProjectId !== '' && binding.project_id !== expectedProjectId) {
+    return conflictBinding([bindingDiagnostic('PROJECT_ID_MISMATCH', 'Trace project descriptor identity changed for this host session', 'project_id')], binding);
+  }
+  const expectedGitRoot = input?.git_root ?? input?.gitRoot;
+  if (expectedGitRoot !== undefined && expectedGitRoot !== null && expectedGitRoot !== '' && (binding.git_root === null || !samePath(binding.git_root, expectedGitRoot))) {
+    return conflictBinding([bindingDiagnostic('PROJECT_GIT_ROOT_MISMATCH', 'Trace project Git root changed for this host session', 'git_root')], binding);
+  }
+  const expectedCommonDir = input?.git_common_dir ?? input?.gitCommonDir;
+  const actualCommonDir = binding.repository?.common_dir ?? null;
+  if (expectedCommonDir !== undefined && expectedCommonDir !== null && expectedCommonDir !== '' && (actualCommonDir === null || !samePath(actualCommonDir, expectedCommonDir))) {
+    return conflictBinding([bindingDiagnostic('PROJECT_REPOSITORY_MISMATCH', 'Trace project Git worktree identity changed for this host session', 'git_common_dir')], binding);
+  }
+  return binding;
 }
 
 function now() {
@@ -335,7 +400,12 @@ function requireColumns(db, table, columns) {
 }
 
 /** Create or validate only the host-ingest extension of the web database. */
-export function ensureHostSessionSchema(db) {
+export function ensureHostSessionSchema(db, {allowSchemaMigration = true} = {}) {
+  // Opening a legacy Product database is a read-only operation until its
+  // owner identity is explicitly adopted.  In that mode callers may still
+  // construct the service so core workspace reads remain available, but no
+  // host table/index/column migration is allowed here.
+  if (!allowSchemaMigration) return false;
   db.exec(`
     CREATE TABLE IF NOT EXISTS host_sessions(
       host TEXT NOT NULL,
@@ -343,6 +413,9 @@ export function ensureHostSessionSchema(db) {
       status TEXT NOT NULL CHECK(status IN ('attached','paused','ended')),
       capture_policy TEXT NOT NULL CHECK(capture_policy='explicit'),
       project_ref TEXT,
+      project_id TEXT,
+      git_root TEXT,
+      git_common_dir TEXT,
       created_at TEXT NOT NULL,
       attached_at TEXT NOT NULL,
       paused_at TEXT,
@@ -412,12 +485,20 @@ export function ensureHostSessionSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS workflow_findings_session_idx ON workflow_findings(host, session_id, created_at);
   `);
-  requireColumns(db, 'host_sessions', ['host', 'session_id', 'status', 'capture_policy', 'project_ref', 'created_at', 'attached_at', 'paused_at', 'ended_at', 'updated_at', 'last_event_at']);
+  // v1 databases predate the durable project identity columns.  This additive
+  // migration is deliberately limited to the host extension and runs under
+  // the Product owner's startup transaction when one is available.
+  const hostColumns = tableColumns(db, 'host_sessions');
+  for (const column of ['project_id', 'git_root', 'git_common_dir']) {
+    if (!hostColumns.has(column)) db.exec(`ALTER TABLE host_sessions ADD COLUMN ${column} TEXT`);
+  }
+  requireColumns(db, 'host_sessions', ['host', 'session_id', 'status', 'capture_policy', 'project_ref', 'project_id', 'git_root', 'git_common_dir', 'created_at', 'attached_at', 'paused_at', 'ended_at', 'updated_at', 'last_event_at']);
   requireColumns(db, 'host_turns', ['host', 'session_id', 'turn_id', 'state', 'prompt', 'last_assistant_message', 'started_at', 'completed_at', 'interrupted_at', 'updated_at']);
   requireColumns(db, 'host_ingest_events', ['event_key', 'host', 'session_id', 'turn_id', 'event_kind', 'tool_use_id', 'content_sha256', 'event_json', 'outcome', 'result_json', 'created_at']);
   requireColumns(db, 'host_control_commands', ['command_id', 'operation', 'host', 'session_id', 'request_sha256', 'result_json', 'created_at']);
   requireColumns(db, 'workflow_findings', ['finding_id', 'host', 'session_id', 'turn_id', 'observation', 'desired_behavior', 'scope', 'target_kind', 'status', 'source_event_key', 'created_at']);
   ensureHostWorkflowSchema(db);
+  return true;
 }
 
 function sessionView(row) {
@@ -428,6 +509,9 @@ function sessionView(row) {
     status: row.status,
     capture_policy: row.capture_policy,
     project_ref: row.project_ref ?? null,
+    project_id: row.project_id ?? null,
+    git_root: row.git_root ?? null,
+    git_common_dir: row.git_common_dir ?? null,
     created_at: row.created_at,
     attached_at: row.attached_at,
     paused_at: row.paused_at ?? null,
@@ -607,9 +691,9 @@ function saveControl(db, identityValue, operation, fingerprint, result, timestam
  * DatabaseSync handle. `transaction` must run its callback under the same
  * SQLite write transaction as the web workspace owner.
  */
-export function createHostSessionIngest({db, transaction}) {
+export function createHostSessionIngest({db, transaction, allowSchemaMigration = true}) {
   if (!db || typeof db.prepare !== 'function' || typeof transaction !== 'function') throw new TypeError('createHostSessionIngest requires db and transaction');
-  ensureHostSessionSchema(db);
+  ensureHostSessionSchema(db, {allowSchemaMigration});
 
   function attach(input) {
     const identityValue = commandIdentity(input, 'attach');
@@ -618,9 +702,17 @@ export function createHostSessionIngest({db, transaction}) {
     const suppliedCwd = input.cwd !== undefined ? input.cwd : input.host_cwd;
     // Omitting project_ref is an explicit request for a personal host session;
     // a cwd candidate must never silently turn that session into a project one.
-    let requestedBinding = {status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null, cwd: suppliedCwd ?? null, git_root: null, repository: null, diagnostics: []};
+    let requestedBinding = {status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null, cwd: null, git_root: null, repository: null, diagnostics: []};
     let requestedProjectRef = suppliedProjectRef;
     if (suppliedProjectRef !== null) {
+      // A project-bound session must prove the process cwd at attachment time
+      // as well as on every later hook event.  Accepting project_ref alone
+      // would create an apparently bound row that cannot be revalidated and
+      // would make attach semantics weaker than ingest semantics.
+      if (suppliedCwd === undefined) {
+        const binding = verifyHostSessionProjectBinding({project_ref: suppliedProjectRef});
+        fail('HOST_PROJECT_BINDING_UNRESOLVED', 'A project-bound host session must include its absolute cwd; no session was attached', 422, binding);
+      }
       requestedBinding = resolveProjectBinding({project_ref: suppliedProjectRef, ...(suppliedCwd === undefined ? {} : {cwd: suppliedCwd})});
       if (requestedBinding.status !== 'resolved') {
         const code = requestedBinding.status === 'conflict' ? 'HOST_PROJECT_BINDING_CONFLICT' : 'HOST_PROJECT_BINDING_UNRESOLVED';
@@ -628,32 +720,62 @@ export function createHostSessionIngest({db, transaction}) {
       }
       requestedProjectRef = requestedBinding.project_ref;
     }
-    const fingerprint = sha(stableHostJson({operation: 'attach', host: identityValue.host, session_id: identityValue.sessionId, project_ref: requestedProjectRef}));
+    const fingerprint = sha(stableHostJson({operation: 'attach', host: identityValue.host, session_id: identityValue.sessionId,
+      project_ref: requestedProjectRef, cwd: requestedBinding.cwd ?? null, project_id: requestedBinding.project_id ?? null,
+      git_root: requestedBinding.git_root ?? null, git_common_dir: requestedBinding.repository?.common_dir ?? null}));
     return transaction(() => {
-      const replay = controlReplay(db, identityValue.commandId, fingerprint);
-      if (replay) return replay;
       const timestamp = now();
       const previous = readSession(db, identityValue.host, identityValue.sessionId);
       if (previous?.status === 'ended') fail('HOST_SESSION_ENDED', 'An ended host session cannot be re-attached; use a new session identity', 409);
       if (previous && previous.project_ref !== null && requestedProjectRef !== null && !samePath(previous.project_ref, requestedProjectRef)) fail('HOST_SESSION_BINDING_CONFLICT', 'Host session is already bound to a different project', 409);
       let binding = requestedBinding;
+      if (requestedProjectRef !== null) {
+        // Re-read the filesystem/Git identity while holding the Product write
+        // transaction.  The preflight above is only an early diagnostic; it
+        // must not be the check that authorizes the durable INSERT/UPDATE.
+        binding = verifyHostSessionProjectBinding({
+          project_ref: requestedProjectRef,
+          ...(suppliedCwd === undefined ? {} : {cwd: suppliedCwd}),
+          // A resumed session must remain attached to the identity it first
+          // recorded.  Legacy rows have null pins and are upgraded from the
+          // current verified binding; pinned rows reject descriptor/repo
+          // replacement instead of preserving a stale path-only session.
+          project_id: previous?.project_id ?? requestedBinding.project_id,
+          git_root: previous?.git_root ?? requestedBinding.git_root,
+          git_common_dir: previous?.git_common_dir ?? requestedBinding.repository?.common_dir,
+        });
+        if (binding.status !== 'resolved') {
+          const code = binding.status === 'conflict' ? 'HOST_PROJECT_BINDING_CONFLICT' : 'HOST_PROJECT_BINDING_UNRESOLVED';
+          fail(code, 'Host session project binding changed before it could be attached; no session was attached', binding.status === 'conflict' ? 409 : 422, binding);
+        }
+        requestedProjectRef = binding.project_ref;
+      }
       if (previous && previous.project_ref !== null && requestedProjectRef === null) {
         // A re-attach without project_ref keeps the original project binding.
-        // If a caller supplied cwd, verify it before changing the session back
-        // to attached; otherwise preserve the already verified binding.
-        binding = resolveProjectBinding({project_ref: previous.project_ref, ...(suppliedCwd === undefined ? {} : {cwd: suppliedCwd})});
+        // A project-bound re-attach must still supply cwd: without it the
+        // current filesystem/Git identity cannot be verified and the request
+        // remains fail-closed rather than preserving a stale path binding.
+        binding = verifyHostSessionProjectBinding({project_ref: previous.project_ref, ...(suppliedCwd === undefined ? {} : {cwd: suppliedCwd}),
+          project_id: previous.project_id, git_root: previous.git_root, git_common_dir: previous.git_common_dir});
         if (binding.status !== 'resolved') {
           const code = binding.status === 'conflict' ? 'HOST_PROJECT_BINDING_CONFLICT' : 'HOST_PROJECT_BINDING_UNRESOLVED';
           fail(code, 'Host session project binding could not be verified; session remains unchanged', binding.status === 'conflict' ? 409 : 422, binding);
         }
         requestedProjectRef = previous.project_ref;
       }
+      const projectId = requestedProjectRef === null ? null : binding.project_id;
+      const gitRoot = requestedProjectRef === null ? null : binding.git_root;
+      const gitCommonDir = requestedProjectRef === null ? null : binding.repository?.common_dir ?? null;
+      // Check command replay only after the same binding checks that protect a
+      // new write.  A stale replay must not mask descriptor/repository drift.
+      const replay = controlReplay(db, identityValue.commandId, fingerprint);
+      if (replay) return replay;
       if (!previous) {
-        db.prepare(`INSERT INTO host_sessions(host,session_id,status,capture_policy,project_ref,created_at,attached_at,paused_at,ended_at,updated_at,last_event_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(identityValue.host, identityValue.sessionId, 'attached', 'explicit', requestedProjectRef, timestamp, timestamp, null, null, timestamp, null);
+        db.prepare(`INSERT INTO host_sessions(host,session_id,status,capture_policy,project_ref,project_id,git_root,git_common_dir,created_at,attached_at,paused_at,ended_at,updated_at,last_event_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(identityValue.host, identityValue.sessionId, 'attached', 'explicit', requestedProjectRef, projectId, gitRoot, gitCommonDir, timestamp, timestamp, null, null, timestamp, null);
       } else {
-        db.prepare(`UPDATE host_sessions SET status='attached', project_ref=COALESCE(project_ref,?), attached_at=?, paused_at=NULL, updated_at=?
-          WHERE host=? AND session_id=?`).run(requestedProjectRef, timestamp, timestamp, identityValue.host, identityValue.sessionId);
+        db.prepare(`UPDATE host_sessions SET status='attached', project_ref=COALESCE(project_ref,?), project_id=COALESCE(project_id,?), git_root=COALESCE(git_root,?), git_common_dir=COALESCE(git_common_dir,?), attached_at=?, paused_at=NULL, updated_at=?
+          WHERE host=? AND session_id=?`).run(requestedProjectRef, projectId, gitRoot, gitCommonDir, timestamp, timestamp, identityValue.host, identityValue.sessionId);
       }
       const session = {...sessionView(readSession(db, identityValue.host, identityValue.sessionId)), project_binding: binding};
       return saveControl(db, identityValue, 'attach', fingerprint, commandResult('attached', identityValue, {operation: 'attach', session, project_binding: binding}), timestamp);
@@ -712,13 +834,14 @@ export function createHostSessionIngest({db, transaction}) {
       // sessions intentionally skip this check.
       let projectBinding;
       if (sessionRow.project_ref !== null) {
-        projectBinding = verifyHostSessionProjectBinding({project_ref: sessionRow.project_ref, cwd: input.cwd});
+        projectBinding = verifyHostSessionProjectBinding({project_ref: sessionRow.project_ref, cwd: input.cwd,
+          project_id: sessionRow.project_id, git_root: sessionRow.git_root, git_common_dir: sessionRow.git_common_dir});
         if (projectBinding.status === 'conflict' || projectBinding.status === 'unresolved') {
           const result = eventResult({identityValue, session: sessionRow, outcome: 'ignored', reason: projectBinding.status === 'conflict' ? 'project_binding_conflict' : 'project_binding_unresolved', extra: {project_binding: projectBinding}});
           return result;
         }
       } else if (sessionRow.project_ref === null) {
-        projectBinding = {status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null, cwd: input.cwd ?? null, git_root: null, repository: null, diagnostics: []};
+        projectBinding = {status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null, cwd: null, git_root: null, repository: null, diagnostics: []};
       }
       // Only an attached session is allowed to normalize (and, for tool
       // events, hash) an official body. This keeps an untracked global hook
@@ -826,7 +949,8 @@ export function createHostSessionIngest({db, transaction}) {
       // retried finding command could change cwd and receive the old receipt,
       // masking the drift that must remain fail-closed.
       if (session.project_ref !== null) {
-        const binding = verifyHostSessionProjectBinding({project_ref: session.project_ref, cwd: input.cwd});
+        const binding = verifyHostSessionProjectBinding({project_ref: session.project_ref, cwd: input.cwd,
+          project_id: session.project_id, git_root: session.git_root, git_common_dir: session.git_common_dir});
         if (binding.status === 'conflict' || binding.status === 'unresolved') {
           fail(binding.status === 'conflict' ? 'HOST_PROJECT_BINDING_CONFLICT' : 'HOST_PROJECT_BINDING_UNRESOLVED', 'Workflow finding cwd does not match the attached project; no finding was captured', binding.status === 'conflict' ? 409 : 422, binding);
         }

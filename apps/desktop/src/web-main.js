@@ -3,6 +3,7 @@ import { applyProductOperations } from '/runtime/product-workspace/index.mjs';
 import { ASSETS } from './product/assets.mjs';
 import { h, titleOf, homeEntries, mattersView, recordsOf, mountLibrary } from './product/library.mjs';
 import { mountHostSession } from './product/host-session.mjs';
+import { ensureRuntimeIdentity } from './product/runtime-identity.mjs';
 
 const root=document.querySelector('#app'),styles=new Map(),copy=structuredClone;
 let host,revision=0,storage,screen,route,renderId=0,dirty=0,saved=0,timer,tail=Promise.resolve(),pending=null,pendingGeneration=0,continuation=null,busy=false,dialog,queued=[];
@@ -26,10 +27,10 @@ function go(next,{replace=false,render=true,origin}={}){if(pending&&continuation
 const back=()=>go(route.returnTarget||{view:'home'});
 function statusText(state,text){status.dataset.state=state;status.innerHTML=`<i></i><span>${h(text)}</span>${state==='error'?'<button data-retry>重试保存</button><button data-export>导出未保存内容</button><button data-load>载入已保存版本</button>':''}`;}
 async function style(name){if(!styles.has(name)){const file={web:'product/web.css',home:'home.css',matters:'matters/matters.css',chain:'product/chain.css',compare:'product/comparison.css',worksite:'product/worksite.css',host:'product/host-session.css',discussion:'style.css'}[name];if(!file)return;const link=document.createElement('link');link.rel='stylesheet';link.media='not all';link.href=new URL(file,import.meta.url).href;link.dataset.desktopStyle=name;const ready=new Promise((yes,no)=>{link.onload=yes;link.onerror=()=>no(new Error(`样式未加载：${name}`));});styles.set(name,{link,ready});document.head.append(link);}await styles.get(name).ready;}
-async function read(){const r=await fetch('/api/product/workspace',{cache:'no-store'});if(!r.ok)throw new Error(r.status===404?'当前服务尚未载入产品命令接口，请重启 Trace 服务；没有修改原数据。':`读取本机内容失败（${r.status}），没有重置数据。`);const data=await r.json();if(!Number.isInteger(data.revision)||data.writeMode!=='product-commands')throw new Error('服务版本不支持产品命令，请重启服务');return data;}
+async function read(){await ensureRuntimeIdentity('/api/product/workspace');const r=await fetch('/api/product/workspace',{cache:'no-store',headers:{'x-trace-runtime-protocol':'1'}});if(!r.ok)throw new Error(r.status===404?'当前服务尚未载入产品命令接口，请重启 Trace 服务；没有修改原数据。':`读取本机内容失败（${r.status}），没有重置数据。`);const data=await r.json();if(!Number.isInteger(data.revision)||data.writeMode!=='product-commands')throw new Error('服务版本不支持产品命令，请重启服务');return data;}
 async function write(payload){
   pending=payload;statusText('saving','正在保存在本机…');let r,data;
-  try{r=await fetch('/api/product/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});data=await r.json();}catch{statusText('error','保存未确认。内容仍在页面中，请重试或导出。');throw new Error('保存连接中断');}
+  try{await ensureRuntimeIdentity('/api/product/commands');r=await fetch('/api/product/commands',{method:'POST',headers:{'Content-Type':'application/json','x-trace-runtime-protocol':'1'},body:JSON.stringify(payload)});data=await r.json();}catch{statusText('error','保存未确认。内容仍在页面中，请重试或导出。');throw new Error('保存连接中断');}
   if(!r.ok){const msg=r.status===409?'另一处已有更新，未覆盖它。请先导出，再载入新版本。':`保存失败：${data.error?.message||r.status}`;statusText('error',msg);throw new Error(msg);}
   if(data.receipt?.commandId!==payload.commandId||data.receipt?.status!=='committed'||data.receipt.afterRevision!==data.revision||!data.host){statusText('error','回执不完整，未把这次操作标记为已保存。');throw new Error('无效提交回执');}
   if(data.headRevision!==data.revision||data.revision<revision){statusText('error','本次操作曾保存，但另一处已有后来修改。请导出草稿再载入最新版本。');throw new Error('回执不是当前版本');}
@@ -47,6 +48,12 @@ async function commit(operations,after=update){
   catch(e){if(!pending)message(e.message);}finally{busy=false;root.inert=nav.inert=menu.inert=!!continuation;}
 }
 function download(value,name){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+async function exportWorkspace(){
+  await ensureRuntimeIdentity('/api/web/export');
+  const response=await fetch('/api/web/export',{cache:'no-store',headers:{'x-trace-runtime-protocol':'1'}});
+  if(!response.ok)throw new Error(`导出本机内容失败（${response.status}）。`);
+  const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='trace-web-workspace.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 function close(){dialog?.traceCleanup?.();dialog?.close();dialog?.remove();dialog=null;}
 function modal(title,body,setup){close();dialog=document.createElement('dialog');dialog.className='web-dialog';dialog.setAttribute('aria-label',title);dialog.innerHTML=`<header><h2>${h(title)}</h2><button aria-label="关闭">×</button></header>${body}`;document.body.append(dialog);dialog.querySelector('header button').onclick=close;dialog.oncancel=e=>{e.preventDefault();close();};setup?.(dialog);dialog.showModal();}
 function message(text){modal('这一步还没有完成',`<p>${h(text)}</p><footer><button class="web-primary" data-ok>回到原处</button></footer>`,d=>d.querySelector('[data-ok]').onclick=close);}
@@ -81,6 +88,7 @@ function profile(){
   const p=host.preferences||{};
   modal('个人与设置',`<p>这是你在本机的 Trace 空间。没有开通 Trace 账号或云同步；知乎连接需单独授权。</p><p><button type="button" data-zhihu>知乎与全网 · 检索和授权</button></p><form><label>怎么称呼你<input name="name" type="text" maxlength="60" value="${h(p.displayName)}" placeholder="你的称呼（可不填）"></label><label><input name="motion" type="checkbox" ${p.reduceMotion?'checked':''}> 减少界面动效</label><h3>你的内容保存在这里</h3><p>${h(storage?.location)}</p><p>${host.chain.matters.length} 件事 · ${host.chain.sources.length} 份材料 · ${Object.keys(host.worksite.works).length} 个工作记录</p><h3>重置与示例</h3><p>替换当前工作区前请导出内容。重置不等于物理清除数据库历史。</p><footer><button type="button" data-reset-demo>载入示例</button><button type="button" data-reset-clear>清空本机内容</button></footer><footer><a href="/api/web/export" download>导出全部内容</a><button class="web-primary" type="submit">保存设置</button></footer></form>`,d=>{
     d.querySelector('[data-zhihu]').onclick=zhihuPanel;
+    d.querySelector('a[href="/api/web/export"]').onclick=e=>{e.preventDefault();void exportWorkspace().catch(error=>message(error.message));};
     d.querySelector('form').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);void commit({type:'preferences.update',displayName:String(f.get('name')||'').trim(),reduceMotion:f.get('motion')==='on'},()=>{close();statusText('saved','设置已保存');});};
     d.querySelector('[data-reset-demo]').onclick=()=>resetWorkspace({demo:true});
     d.querySelector('[data-reset-clear]').onclick=()=>resetWorkspace({demo:false});
@@ -89,6 +97,7 @@ function profile(){
 function resetWorkspace({demo}){
   if(pending||busy){message('请先处理尚未确认的保存，不能跳过它重置。');return;}
   modal(demo?'确认载入示例':'确认清空本机内容',`<p>${demo?'将用三条明确标记的示例替换当前工作区。':'将把当前工作区替换为空。'}旧修订仍保留在数据库历史中，不是永久删除。</p><p>建议先<a href="/api/web/export" download>导出当前内容</a>。</p><footer><button data-cancel>取消</button><button class="web-primary" data-confirm>确认替换</button></footer>`,d=>{
+    d.querySelector('a[href="/api/web/export"]').onclick=e=>{e.preventDefault();void exportWorkspace().catch(error=>message(error.message));};
     d.querySelector('[data-cancel]').onclick=close;
     d.querySelector('[data-confirm]').onclick=()=>{close();void commit({type:'workspace.reset',mode:demo?'demo':'empty',confirm:'replace-current-workspace'},()=>go({view:'home'}));};
   });

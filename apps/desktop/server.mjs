@@ -41,7 +41,11 @@ const productWorkspace = createProductWorkspace({
 // and `/api/zhihu/*`; the Agent receives its provider in-process only.
 const zhihu = createZhihuBackend()
 const agent = createAgentBackend({ productWorkspace, retrievalProvider: zhihu.provider })
-const desktopServiceIdentity = buildDesktopServiceIdentity({runtime: runtimeIdentity, productIdentity: productWorkspace.identity, agentEnabled: process.env.TRACE_AGENT_ENABLED === '1'})
+function desktopServiceIdentity() {
+  return buildDesktopServiceIdentity({runtime: runtimeIdentity,
+    productIdentity: typeof productWorkspace.getLiveIdentity === 'function' ? productWorkspace.getLiveIdentity() : productWorkspace.identity,
+    agentEnabled: process.env.TRACE_AGENT_ENABLED === '1'})
+}
 // Port 0 asks the OS for an available ephemeral loopback port. The packaged
 // desktop host uses this path and reads the selected port from `ready`.
 const port = normalizeDesktopPort(process.env.TRACE_DESKTOP_PORT)
@@ -106,8 +110,16 @@ const server = http.createServer(async (request, response) => {
       response.end(JSON.stringify({error: {code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 身份握手。'}}))
       return
     }
-    response.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-trace-runtime-protocol': '1'})
-    response.end(JSON.stringify(desktopServiceIdentity))
+    try {
+      const identity = desktopServiceIdentity()
+      response.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-trace-runtime-protocol': '1'})
+      response.end(JSON.stringify(identity))
+    } catch (error) {
+      if (!response.headersSent) {
+        response.writeHead(503, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff'})
+        response.end(JSON.stringify({error: {code: error?.code || 'DATABASE_IDENTITY_CHANGED', message: 'Trace Product 数据库身份在运行期间发生变化；请重新打开服务。'}}))
+      } else if (!response.writableEnded) response.end()
+    }
     return
   }
   if (await productWorkspace.handle(request, response)) return

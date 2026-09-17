@@ -9,6 +9,12 @@
 ```text
 $trace 帮我开始这个项目。
 $trace 我现在有哪些协作积累？
+$trace 跟着这个任务
+$trace 暂停跟随
+$trace 结束跟随
+$trace 记下这个流程改进：先做只读仓库预检
+$trace 这次带回了什么
+$trace 查看待处理发现
 $trace-adapt 我希望你更适配我处理问题的方式。
 $trace-review 哪些内容正在等待我的决定？
 $trace-context 把我当前的上下文 Skill 包带进这个任务。
@@ -38,6 +44,10 @@ Skill 负责理解自然语言、解释选择、等待用户决定；本地 MCP 
 ```
 
 MCP 不会通用保存或返回 raw prompt、来源正文、认知源绝对 root、凭证、工具参数或隐藏推理。
+
+Host Session 是显式选择，不是 Plugin 安装后的默认行为：`$trace 跟着这个任务` 通过当前宿主身份 attach；`暂停跟随` / `结束跟随` 分别 pause/detach。附着后 Stop 才会排入异步 sensemaking job，结果先成为 candidate/finding，再进入 RoutingProposal；用户采用或试用前不会进入 activation，更不会静默生成 Skill 或修改理解。`$trace 这次带回了什么` 与 `$trace 查看待处理发现` 只读回带/发现摘要，原始 prompt/final 默认留在 Host Session 私有折叠区。没有 `.trace/` 的 cwd 也只有在运行 hook 的 Codex 环境与 Product Service 共享同一个绝对 `TRACE_WEB_STATE_FILE` 时才可写入用户级 `web.sqlite`；缺少服务或变量时返回安全 no-op/可恢复错误，不假装成功。
+
+Stop worker 的 `disabled`、离线 `fixture-dev`、服务端 profile 和不进入路由的 `shadow` 必须显式选择；fixture-dev 只证明离线契约，真实 profile 缺失或凭据不可用时不能静默换模型。Product `web.sqlite` 独占 HostSession/HostTurn/finding/workflow 状态，Agent `agent.sqlite` 只存 run/profile/event/result hash；Host UI 为 `/?view=host`。Repository Guard、CapabilityTrial 与 PublicationPolicy 仍是 preview/CAS/receipt 边界，缺少现有内容 producer 时保持 `producer_required`；云同步、ADrive、多租户、远程鉴权和真实供应商质量不在本 Plugin 内。
 
 ## 与 Trace 产品工作区往返
 

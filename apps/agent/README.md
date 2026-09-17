@@ -39,14 +39,14 @@ npm start -- --agent
 | `model.mjs` / `external-agent.mjs` | 受限模型工具循环与完整外部 Agent 协议 |
 | `remote-http.mjs` | 固定 HTTPS endpoint、服务端凭据、响应上限和错误净化 |
 | `store.mjs` | 独立 agent.sqlite 的运行、候选与事件持久化；附加 sensemaking run/event/result 表不保存 HostTurn 正文 |
-| `sensemaking-worker.mjs` | 消费 Product Workspace Stop outbox，使用离线受控 fixture 生成严格候选结果，并以 lease/attempt/hash 可恢复地写回 finding/proposal |
+| `sensemaking-worker.mjs` | 消费 Product Workspace Stop outbox；按服务端配置选择 fixture 或 ExecutorRegistry profile，以 lease/attempt/hash 可恢复地写回严格候选结果/finding/proposal |
 | `sensemaking-cli.mjs` | `once` / `drain` 本机 worker 入口；不联网、不执行 git 或发布 Skill |
 | `server.mjs` | 可选独立 API 宿主，不是默认推荐的第二个服务 |
 
-当前 HTTP 边界仍是单用户、本机同源、默认单并发；远程执行器不等于该 HTTP 服务已经具备公网多租户身份。默认关闭外部检索；可[显式开启知乎／全网来源](../../docs/zhihu-native.md)，不提供任意文件执行或自动采纳。网页已接入回答、来源、候选接受／放弃／撤销；发行包尚未覆盖此服务。后续顺序见[生产计划](../../docs/production-plan.md)。
+当前 HTTP 边界仍是单用户、本机同源、默认单并发；远程执行器不等于该 HTTP 服务已经具备公网多租户身份。默认关闭外部检索；可[显式开启知乎／全网来源](../../docs/zhihu-native.md)，不提供任意文件执行或自动采纳。网页已接入回答、来源、候选接受／放弃／撤销和 Host Session 视图；runtime package 已携带 Agent/Host 服务源码，但发行包的安装、升级、备份恢复仍需按实际目标单独验收。后续顺序见[生产计划](../../docs/production-plan.md)。
 
 ## Host Session sensemaking worker（第三阶段）
 
 Stop 只在 Product Workspace 的 `web.sqlite` 入队 `sensemaking_jobs`，hook 不等待模型。启动 `apps/agent` 时通过服务端配置选择明确的 `TRACE_SENSEMAKING_MODE=disabled|fixture-dev|profile|shadow`；`profile`/`shadow` 还必须配置 `TRACE_SENSEMAKING_PROFILE_ID`，prompt 不能覆盖 profile，也不会在真实 profile 不可用时静默切换模型。resident worker 启动时核验并接管过期 lease，后台单并发有界轮询；可用 `GET /api/agent/sensemaking/health` 查看 profile identity、队列、失败数、预算和最近错误，或用 `POST /api/agent/sensemaking/drain` 显式排空有限任务。
 
-profile 的版本、service identity、超时、步数、输入/输出上限、attempt 和工具集由服务端 `ExecutorRegistry` 绑定。executor 只收到已经过 privacy policy allowlist、预算和脱敏后的 HostTurn、安全 evidence、bounded finding 摘要；结果必须符合 `trace.sensemaking-result@1`。schema、provider identity、大小、secret/PII/path 脱敏或 echo/fragment overlap 任一失败，都会保留失败 job 与 rejected privacy receipt，不生成 finding。`shadow` 可保存可验证候选和 run 结果，但不会创建 routing proposal。`agent.sqlite` 只保存 run/profile/event/result hash，不拥有 HostTurn 原文；用户内容和工作流状态仍由 Product `web.sqlite` 负责。fixture profile 仅用于离线契约测试，不能作为真实供应方质量验收。
+profile 的版本、service identity、超时、步数、输入/输出上限、attempt 和工具集由服务端 `ExecutorRegistry` 绑定。executor 只收到已经过 privacy policy allowlist、预算和脱敏后的 HostTurn、安全 evidence、bounded finding 摘要；结果必须符合 `trace.sensemaking-result@1`。schema、provider identity、大小、secret/PII/path 脱敏或 echo/fragment overlap 任一失败，都会保留失败 job 与 rejected privacy receipt，不生成 finding。`shadow` 可保存可验证候选和 run 结果，但不会创建 routing proposal。`agent.sqlite` 只保存 run/profile/event/result hash，不拥有 HostTurn 原文；用户内容和工作流状态仍由 Product `web.sqlite` 负责。`fixture-dev` 仅用于离线契约测试，不能作为真实供应方质量验收；未配置真实 profile 时必须明确显示 disabled/fixture-dev，而不是静默替换执行器。

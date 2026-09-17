@@ -23,14 +23,14 @@ Codex event cwd
   → Trace source lease / evidence handler
 ```
 
-所以项目 A、B 可共用用户级 hooks，仍各自使用自己的 profile 和 SQLite。没有 `.trace/` 的项目得到成功 `{}` no-op，不会创建状态或读取其他项目来源；如果用户已经通过 Host Session Ingest 明确附着当前 Codex 会话，生命周期事件可以写入用户级 Product Workspace `web.sqlite`，但不会因此绑定一个不存在的项目。
+所以项目 A、B 可共用用户级 hooks，仍各自使用自己的 profile 和 SQLite。没有 `.trace/` 的项目得到成功 `{}` no-op，不会创建状态或读取其他项目来源；如果用户已经通过 Host Session Ingest 明确附着当前 Codex 会话，且运行 hook 的 Codex 环境与 Product Service 共享同一个绝对 `TRACE_WEB_STATE_FILE`，生命周期事件可以写入用户级 Product Workspace `web.sqlite`，但不会因此绑定一个不存在的项目。缺少该服务或变量时仍是安全 no-op。
 
 ## 七个 hook 事件
 
 | 事件 | Trace 的行为 | Codex 的行为 |
 |---|---|---|
 | `SessionStart` | 根据 cwd 找项目，可提供 source lease | 获得当前项目的协作边界 |
-| `UserPromptSubmit` | 提供 formal source root、prefix、预算和隐私约束；不持久化 prompt | 决定是否需要并怎样使用来源 |
+| `UserPromptSubmit` | 提供 formal source root、prefix、预算和隐私约束；未附着 Host Session 时不持久化 prompt | 决定是否需要并怎样使用来源 |
 | `PreToolUse` | 对可识别的 formal Markdown native read 检查单轮预算 | 工具调用仍由 Codex 发起；超过预算的可识别读会被拒绝 |
 | `PostToolUse` | 观察实际 native tool 访问，写入安全 evidence；Host Session 只留 event/tool identity | 保持原始工具结果和推理控制权 |
 | `Stop` | 在明确附着的 Host Session 中封口当前 HostTurn，可保存官方 `last_assistant_message` | 报告 assistant turn 已正常停止 |

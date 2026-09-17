@@ -63,7 +63,7 @@ trace codex enable
 
 Trace 添加自己管理的 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`Interrupt` 和 `SessionEnd` hook，保留其他 hook，并把旧配置备份与本次 receipt 放入可追溯位置。`hooks.json` 虽然是用户级配置，但安装的是一个不绑定项目路径的路由入口：每次 Codex 事件都用自己的 `cwd` 向上找到最近的 `.trace/`。因此在项目 A、B 都执行 enable 后，A 只会使用 A 的状态和来源，B 也只会使用 B 的。
 
-这些 hook 默认只观察，不会保存 Codex prompt。若要接收原生 Host Session，必须在当前 task 中通过 MCP 的 `trace_host_session_attach`（或高级 CLI `trace codex host-session attach --session-id ... --web-state-file ...`）明确附着；之后可用 pause/detach 控制接收。附着的生命周期记录进入 Product Workspace `web.sqlite` 的独立表，不写项目 `trace.sqlite`，也不依赖 `transcript_path`。
+这些 hook 默认只观察，不会保存 Codex prompt。若要接收原生 Host Session，必须在当前 task 中通过 MCP 的 `trace_host_session_attach`（或高级 CLI `trace codex host-session attach --session-id ... --web-state-file ...`）明确附着；之后可用 pause/detach 控制接收。附着的生命周期记录进入 Product Workspace `web.sqlite` 的独立表，不写项目 `trace.sqlite`，也不依赖 `transcript_path`。要让用户级 hook 实际送达这些表，运行 Codex 的环境还必须配置与 Product Service 相同的绝对 `TRACE_WEB_STATE_FILE`；没有 Product Service 或该变量时，hook 仍按无项目路径返回安全 `{}` no-op，不会猜测数据库位置。
 
 Trace 不会先替 Codex 挑两个页面。它只把当前项目已授权的 formal source root、范围与单轮读取预算交给 Codex；Codex 用自己的原生搜索/读取工具完成工作。随后 Trace 记录安全 evidence，区分“来源已提供 / 已搜索 / 已读取 / 未分类访问”。
 

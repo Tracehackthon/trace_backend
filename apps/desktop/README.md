@@ -25,7 +25,7 @@
 - 同一 commandId 同一请求返回原回执，不执行第二次；同 ID 换内容、旧 workspace revision 均冲突。返回 `headRevision` 区分旧回执与当前状态。页面保留失败后继续编辑的草稿，重试原命令后依次保存后续动作。
 - GET `/api/web/export` 导出真实已保存内容。手工保存链路不外发；显式使用 Agent 时，允许的上下文会交给 Codex。
 - Node 的 `node:sqlite` 有 ExperimentalWarning；它不代表测试失败。数据库历史快照目前未自动压缩。
-- 默认入口 `src/web-main.js`。事项、理解、对照、工作与产品命令由 [`@trace/product-workspace`](../../packages/product/workspace/README.md) 统一维护；desktop 下只保留页面 Adapter。原 `src/main.js` 与旧讨论保留在 `legacy.html`，不作为当前产品状态源。
+- 本机 HTTP 默认入口是 `apps/desktop/server.mjs`（由根目录 `npm start` 组装）；页面脚本入口仍是 `src/web-main.js`。事项、理解、对照、工作与产品命令由 [`@trace/product-workspace`](../../packages/product/workspace/README.md) 统一维护；desktop 下只保留页面 Adapter。原 `src/main.js` 与旧讨论保留在 `legacy.html`，不作为当前产品状态源。
 - 背景 / 两姿态鸟 / 完整字体 / 现用 vendor 的固定字节在 `approved-assets.lock.json` 中，测试校验，不得通过重新生成资源或刷新 lock 掩盖漂移。
 - 原图、原组件和字体许可仍在原 artifacts；runtime 是隔离派生副本。
 
@@ -63,7 +63,7 @@ Codex plugin 暴露对应的 `trace_product_context_receive` 和 `trace_product_
 
 两条接口复用现有 SQLite 命令账本、幂等回放和工作区修订链。回传前重新核验项目、delivery、session、hash 与 matter 归属；成功状态 `returned_for_review` 不会自动修改「我的理解」。Plugin 默认通过 `TRACE_PRODUCT_URL=http://127.0.0.1:4173` 连接，MCP client 只允许无凭证、无路径的 HTTP loopback origin。
 
-`received` 证明该本机 Codex adapter 领取并持久化绑定了快照，不证明内容已经正确影响 Agent 的推理或产物；后者仍看实际 diff、测试和产物证据。Host Session 的 Stop outbox/fixture worker 已覆盖本机异步 sensemaking，但运行中快照失效通知、远程宿主凭据或来源/模型 adapter 仍未实现。
+`received` 证明该本机 Codex adapter 领取并持久化绑定了快照，不证明内容已经正确影响 Agent 的推理或产物；后者仍看实际 diff、测试和产物证据。Host Session 的 Stop outbox 已接入 resident worker，可按服务端配置运行 fixture-dev、profile 或 shadow；运行中快照失效通知、远程宿主凭据或真实供应商质量验收仍未完成。
 
 ## Codex Host Session Ingest
 

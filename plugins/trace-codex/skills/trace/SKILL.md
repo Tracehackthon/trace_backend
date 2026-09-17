@@ -17,16 +17,6 @@ When the user asks to use, continue, or receive context they prepared in Trace, 
 
 After real work and verification finish, call `trace_product_result_return` once with the original delivery identifiers. Separate verified `fact`, your `interpretation`, and `unconfirmed` points. Returning a result creates a review draft in Trace; it never adopts a new personal understanding on the user's behalf.
 
-## Bring the user's context Skill package into this task
-
-When the user asks for their context package, Skill package, current collaboration style, or cognitive-source entry map, use `$trace-context`. It compiles the project’s already locked profile into a task-bound virtual `SKILL.md`, verifies the package and writes an activation receipt. It does not install a global Skill, read source bodies, or replace the separate `$trace-work` handoff flow.
-
-## Bring a prepared Trace work item into Codex
-
-When the user asks to use, continue, or receive context they prepared in Trace, use the `$trace-work` workflow. Call `trace_product_context_receive` with the current absolute project directory; do not copy an entire Web workspace or invent a delivery receipt. Respect each returned item's `role` and `instruction`, and keep the context scoped to the current task.
-
-After real work and verification finish, call `trace_product_result_return` once with the original delivery identifiers. Separate verified `fact`, your `interpretation`, and `unconfirmed` points. Returning a result creates a review draft in Trace; it never adopts a new personal understanding on the user's behalf.
-
 ## Start with the project state
 
 Call `trace_project_status` before offering configuration advice.
@@ -86,9 +76,32 @@ changes canonical understanding, or publishes a Skill. Routing is always a
 proposal; adoption/trial/rejection uses `trace_routing_decide` with the latest
 revision.
 
+For a cwd without `.trace/`, an explicitly attached session can still reach the
+user-level Product `web.sqlite` only when the Codex hook process and Product
+Service share the same absolute `TRACE_WEB_STATE_FILE`; otherwise the hook's
+successful `{}` response is a safe no-op and does not guess a database path.
+
 When a captured finding has no proposal yet, call `trace_routing_propose` with the
 finding identity returned by the read-only list before presenting its deterministic
 route. The proposal remains review-only until the user chooses adopt, trial, or reject.
+
+## Host workflow and publication boundaries
+
+`Stop` only queues one bounded sensemaking job. Use
+`trace_sensemaking_worker_status` to inspect the server-selected mode and profile;
+`disabled`, offline `fixture-dev`, bound `profile`, and non-routing `shadow` are
+explicit modes. `fixture-dev` proves an offline contract, not real provider
+quality; a missing profile or credential must stay disabled rather than silently
+switching executors. Product `web.sqlite` owns HostSession/HostTurn/finding and
+workflow state; `agent.sqlite` owns only run/profile/event/result hashes.
+
+Show the user the Host UI at `http://127.0.0.1:4173/?view=host` when the Product
+Service is running. Repository Guard is always preview → explicit apply → receipt
+or recovery; it never resets, cleans, switches back, pushes, or merges by itself.
+Capability candidates remain `producer_required` without an existing publisher;
+`CapabilityTrial` and `PublicationPolicy` are separate CAS/receipt gates, and no
+candidate or trial is a published Skill. Cloud sync, ADrive, multi-tenant service,
+remote authentication, and real supplier quality are outside this local Plugin.
 
 ## Response style
 

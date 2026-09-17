@@ -15,7 +15,7 @@
 
 ## 不提供什么
 
-MCP 不保存或通用返回 raw prompt、来源正文、认知源绝对 root、凭证、工具参数或隐藏推理；动态上下文包不会被安装到全局 Skill 目录。它不是检索层，Codex 仍用自己的搜索、读取、推理和编码能力。
+MCP 不会通用返回 raw prompt、来源正文、认知源绝对 root、凭证、工具参数或隐藏推理；动态上下文包不会被安装到全局 Skill 目录。显式 Host Session Ingest 是例外的受控写入边界：attach 后，用户输入与 final 只由 Product Workspace 私有保存到 `web.sqlite`，不进入 MCP 通用响应或项目 `trace.sqlite`。MCP 不是检索层，Codex 仍用自己的搜索、读取、推理和编码能力。
 
 Host Session Ingest 默认不捕获 prompt；必须先显式 attach。会话记录写入 Product Workspace 的 `web.sqlite` 独立表，不推进产品 snapshot revision，不写项目 `trace.sqlite` 或 Agent 库，也不依赖 `transcript_path`。附着时 `PreToolUse` / `PostToolUse` 仅保留安全 event/tool identity，不保留工具输入或输出。finding 初始保持 `scope=unknown`、`target_kind=unresolved`、`status=captured`，不会自动生成 Skill、修改理解或发布规则。
 

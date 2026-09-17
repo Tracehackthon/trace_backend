@@ -6,6 +6,7 @@ import { createProductWorkspace } from '../../packages/product/workspace/src/wor
 import { createAgentBackend } from '../agent/backend.mjs'
 import { createZhihuBackend } from '../agent/zhihu.mjs'
 import { normalizeDesktopPort } from './runtime-port.mjs'
+import { loadRuntimeIdentity } from './runtime-identity.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(root, '../..')
@@ -23,6 +24,7 @@ const productWorkspace = createProductWorkspace({
 // and `/api/zhihu/*`; the Agent receives its provider in-process only.
 const zhihu = createZhihuBackend()
 const agent = createAgentBackend({ productWorkspace, retrievalProvider: zhihu.provider })
+const runtimeIdentity = loadRuntimeIdentity(root)
 // Port 0 asks the OS for an available ephemeral loopback port. The packaged
 // desktop host uses this path and reads the selected port from `ready`.
 const port = normalizeDesktopPort(process.env.TRACE_DESKTOP_PORT)
@@ -55,6 +57,17 @@ function resolveAsset(url = '/') {
 
 const server = http.createServer(async (request, response) => {
   try {
+  const requestUrl = new URL(request.url || '/', 'http://127.0.0.1')
+  if (requestUrl.pathname === '/api/runtime/identity') {
+    if (request.method !== 'GET') {
+      response.writeHead(405, {'content-type': 'application/json; charset=utf-8', allow: 'GET'})
+      response.end(JSON.stringify({error: 'METHOD_NOT_ALLOWED'}))
+      return
+    }
+    response.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
+    response.end(JSON.stringify(runtimeIdentity))
+    return
+  }
   if (await productWorkspace.handle(request, response)) return
   if (await zhihu.handle(request, response)) return
   if (await agent.handle(request, response)) return

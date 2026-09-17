@@ -70,17 +70,17 @@ test('distribution retains product documentation and the trace launcher', () => 
     assert.equal(fs.existsSync(path.join(output, 'bundle', '..', 'docs', 'versioning.md')), true);
     const manifest = JSON.parse(fs.readFileSync(path.join(output, 'release-manifest.json'), 'utf8'));
     const sqlJsEntries = manifest.files
-      .filter(file => file.path.startsWith('node_modules/sql.js/'))
+      .filter(file => file.path.startsWith('dist/node_modules/sql.js/'))
       .map(file => file.path)
       .sort();
     assert.deepEqual(sqlJsEntries, [
-      'node_modules/sql.js/dist/sql-asm.js',
-      'node_modules/sql.js/dist/sql-wasm.js',
-      'node_modules/sql.js/dist/sql-wasm.wasm',
-      'node_modules/sql.js/package.json',
+      'dist/node_modules/sql.js/dist/sql-asm.js',
+      'dist/node_modules/sql.js/dist/sql-wasm.js',
+      'dist/node_modules/sql.js/dist/sql-wasm.wasm',
+      'dist/node_modules/sql.js/package.json',
     ], 'the runtime package must contain only sql.js runtime assets');
-    assert.equal(sqlJsEntries.some(file => /node_modules\/sql\.js\/(?:\.|.*(?:test|docs?|\.devcontainer)(?:\/|$))/i.test(file)), false, 'sql.js development assets must not enter the runtime manifest');
-    assert.equal(fs.existsSync(path.join(output, 'node_modules', 'sql.js', '.devcontainer')), false, 'sql.js dot-prefixed development assets must not be staged');
+    assert.equal(sqlJsEntries.some(file => /dist\/node_modules\/sql\.js\/(?:\.|.*(?:test|docs?|\.devcontainer)(?:\/|$))/i.test(file)), false, 'sql.js development assets must not enter the runtime manifest');
+    assert.equal(fs.existsSync(path.join(output, 'dist', 'node_modules', 'sql.js', '.devcontainer')), false, 'sql.js dot-prefixed development assets must not be staged');
     const sqliteProbe = spawnSync(process.execPath, ['--input-type=module', '-e', [
       `process.env.TRACE_SQLITE_DRIVER = 'sql.js';`,
       `const {openSqlite} = await import(${JSON.stringify(pathToFileURL(path.join(output, 'dist', 'packages', 'core', 'storage', 'src', 'sqlite-driver.js')).href)});`,

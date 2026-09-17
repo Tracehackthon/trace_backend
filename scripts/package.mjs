@@ -94,7 +94,7 @@ for (const relative of [
   'node_modules/sql.js/dist/sql-asm.js',
   'node_modules/sql.js/dist/sql-wasm.js',
   'node_modules/sql.js/dist/sql-wasm.wasm',
-]) copy(relative, relative);
+]) copy(relative, relative.replace(/^node_modules\//, 'dist/node_modules/'));
 const sqlJsPackage = path.join(root, 'node_modules', 'sql.js', 'package.json');
 const sqlJsInfo = JSON.parse(fs.readFileSync(sqlJsPackage, 'utf8'));
 copy('README.md', 'README.md');

@@ -24,6 +24,10 @@ Trace Web 产品状态的权威 Module。它集中维护事项、原表达、理
 `(host, session_id, turn_id?, event_kind, tool_use_id?)` 构成，重复同内容
 返回原回执，重复键不同内容失败。
 
+受理的 `event_kind` 固定为 `SessionStart`、`UserPromptSubmit`、
+`PreToolUse`、`PostToolUse`、`Stop`、`Interrupt`、`SessionEnd`；这套边界不读取
+`transcript_path`，也不会因为 hook 已安装就自动打开捕获。
+
 Host Session 允许 `project_ref = null`，因此不依赖 `.trace/` 或 cwd；未附着的
 全局 hook 仍是成功 no-op，不创建产品状态。Workflow Finding 只有在用户明确
 捕获并指向已接收 HostTurn 时保存，初始固定为
@@ -34,8 +38,11 @@ Host Session 允许 `project_ref = null`，因此不依赖 `.trace/` 或 cwd；�
 
 `src/host-workflow.mjs` 继续复用这一个 `web.sqlite` owner：Stop 在同一事务中
 只创建一个 `sensemaking_jobs` outbox/job（queued、attempt、lease、输入/结果
-hash、profile/model version）；实际 fixture worker 位于 `apps/agent`，不在本模块
-调用远程模型。候选写回 `workflow_findings(finding_kind=candidate,
+hash、profile/model version）。`apps/agent` 按服务端配置显式选择
+`disabled`、离线 `fixture-dev`、绑定 `ExecutorRegistry` 的 `profile`，或不进入
+路由的 `shadow`；`disabled` 不消费队列，`fixture-dev` 只证明离线契约，不代表真实
+供应商质量，缺少真实 profile/凭据时不会静默回退。worker 不在本模块直接调用远程模型。
+候选写回 `workflow_findings(finding_kind=candidate,
 origin=sensemaking)`，并生成 `routing_proposals`，但不会修改 canonical
 understanding 或发布 Skill。
 

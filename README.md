@@ -127,7 +127,7 @@ Trace 的核心对象不是笔记、聊天或待办，而是：
 | --- | --- | --- |
 | 产品状态 | SQLite 命令、revision CAS、幂等回放和显式保存 | 浏览器能直接覆盖整份用户状态 |
 | 真实来源 | 标题、作者、摘要、真实 URL、受限 provider 路由 | 搜索内容已经自动进入“我的理解” |
-| Agent Runtime | 网页控制器、profile、SSE、取消、超时、过期保护、候选确认／放弃／撤销与独立 `agent.sqlite` | Agent 可以自动改写用户的正式理解 |
+| Agent Runtime | 网页控制器、profile、SSE、取消、超时、过期保护、候选确认／放弃／撤销、Host Session sensemaking 与独立 `agent.sqlite` | Agent 不会自动改写 canonical understanding；候选仍须用户采用 |
 | Codex 工作往返 | 用户确认的工作快照、结果回传与待复核状态 | Codex 的结果已自动修订用户理解 |
 | 凭证隔离 | 密钥／Token 不进入浏览器 JS、MCP 输入、模型上下文或产品库 | 任意云端或多用户部署已经就绪 |
 
@@ -137,7 +137,8 @@ Trace 选择把未完成项写在 README，而不是用模糊的“即将上线�
 
 - **线上 OAuth 回调尚未验收**：登记域名仍需要部署长驻 callback relay；静态页面返回不是授权成功。
 - **不是公网多用户服务**：本机 Web／OAuth 为单用户 loopback + same-origin 设计。
-- **尚未完成生产发行与运维闭环**：Web/Agent 打包、备份恢复、运行归档和安全远程连接仍在推进。
+- **源码合并不等于运行时已部署**：本仓库已包含 Host Session、sensemaking、路由/激活、Guard、隐私和能力治理的可验证本机闭环；本机安装版本、数据库迁移和远程运行服务仍必须按[运行手册](docs/local-runtime.md)逐项核验。
+- **仍未实现的远程边界**：云同步、ADrive、多租户、远程鉴权，以及真实供应商的质量验收，不由本机 runtime 或 Plugin 自动提供。
 
 完整能力状态、验证方法和缺口见 [生产化计划](docs/production-plan.md)。
 
@@ -206,6 +207,28 @@ corepack pnpm start -- --agent
 ### 可选：连接 Codex
 
 Windows 用户可在 Trace 安装目录双击 `Connect-Trace-to-Codex.cmd`。启动器会先展示安装计划并要求确认，再连接本地 Plugin 与 MCP；它不会替你初始化项目、读取认知源或自动修改理解。源码 checkout 用户也可以按 [Codex Plugin 文档](docs/codex-plugin.md) 使用等价的 Node 命令完成预览和安装。
+
+### 可选：跟随一次 Codex 任务
+
+安装并启用 hooks 后，仍须在**当前任务中明确选择**是否接收宿主会话：
+
+```text
+$trace 跟着这个任务
+# 工作完成后：
+$trace 暂停跟随
+# 或：
+$trace 结束跟随
+```
+
+附着后，`UserPromptSubmit` 才会保存该轮用户输入，`Stop` 才会保存官方 final message；未附着的会话仍不捕获。Stop 只排入异步 sensemaking job，不同步等待模型，也不会自动生成 Skill、修改理解或发布规则。可在 `http://127.0.0.1:4173/?view=host` 查看 session、turn、finding、job、路由、回带与恢复状态；原始对话默认折叠并标为私有。
+
+要记下一条明确的流程改进，可在当前 HostTurn 中说：
+
+```text
+$trace 记下这个流程改进：先做仓库预检，再决定是否创建分支
+```
+
+它只创建 `captured` finding，初始范围为 `unknown`、目标为 `unresolved`，后续仍需路由提案和用户采用。没有 Product Service、`TRACE_WEB_STATE_FILE` 或附着会话时，入口应显示可恢复错误，不能假装已经保存。
 
 ## 按你的目的继续
 

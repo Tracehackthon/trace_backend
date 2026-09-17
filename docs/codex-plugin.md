@@ -7,7 +7,7 @@
 | 部分 | 负责什么 | 不负责什么 |
 | --- | --- | --- |
 | Skills：`$trace`、`$trace-adapt`、`$trace-review`、`$trace-context`、`$trace-work` | 理解自然语言意图、领取当前上下文或具体工作、解释提案与结果 | 静默替用户采用变更 |
-| 本地 MCP | 读取状态、生成/执行 proposal、发出任务绑定的上下文 Skill 包、领取工作并回传结果 | 读取或持久化 raw prompt、来源正文、绝对来源 root、凭证或工具参数；安装动态包到全局 Skill |
+| 本地 MCP | 读取状态、生成/执行 proposal、发出任务绑定的上下文 Skill 包、领取工作并回传结果 | 通用接口不读取或返回 raw prompt、来源正文、绝对来源 root、凭证或工具参数；安装动态包到全局 Skill。显式 Host Session Ingest 的 prompt/final 由 Product Workspace 私有写入 `web.sqlite` |
 | Trace runtime | `.trace/` 状态、协议、SQLite、回执、备份与 Codex hook 路由 | 取代 Codex 的原生搜索、读取、推理或编码能力 |
 
 因此，Trace 不是第二个 Agent，也不是“给 Codex 塞更多上下文”的插件。Codex 仍自己决定何时搜索、读哪些已授权来源、怎样推理和执行；Trace 让用户看见这些工作在哪个项目发生、哪些候选在等待决定，以及协作方式是否发生过明确变更。
@@ -49,6 +49,11 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 | `$trace-work 接收我在 Trace 里准备的工作` | 领取用户确认的具体工作快照；完成后回传结果 | delivery/session/project/hash 回执与 Trace 复核状态 |
 | `$trace 我升级后需要做什么？` | 只读检查版本与 lock | 哪些项目没有变、哪些变化需要显式采用 |
 | `$trace 在 Codex 中启用接续` | 先预览 hooks 配置 | 用户级影响、备份、保留的无关 hooks、按 cwd 路由的范围 |
+| `$trace 跟着这个任务` | 使用当前宿主身份 attach Host Session | 当前 session 已附着；不要求提供 session id，不回显隐私正文 |
+| `$trace 暂停跟随` / `$trace 结束跟随` | pause 或 detach 当前 Host Session | 后续事件停止接收；SessionEnd 仍正确封口 |
+| `$trace 记下这个流程改进：…` | 将明确动作关联当前 HostTurn，创建 captured finding | `scope=unknown`、`target_kind=unresolved`；不自动生成 Skill |
+| `$trace 这次带回了什么` | 查询有限 activation 与 used/affected receipt | offered ≠ used；只返回 adopted/显式 trial 的短摘要 |
+| `$trace 查看待处理发现` | 查看 WorkflowFinding 与 RoutingProposal | adopt/trial/reject 仍需用户选择，不改 canonical understanding |
 
 每一次可能写入状态的动作都遵循：
 

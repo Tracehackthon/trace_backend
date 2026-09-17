@@ -1,6 +1,6 @@
 # 底层架构：职责、数据与入口
 
-**当前工作区基线：2026-09-15。** 下方区分已实现执行底座与仍未完成的远程生产边界。生产化改造顺序见[阶段计划](production-plan.md)。
+**当前工作区基线：2026-09-17。** 下方区分已实现执行底座与仍未完成的远程生产边界。生产化改造顺序见[阶段计划](production-plan.md)。
 
 ## 已确认方向：独立、可配置的 Agent
 
@@ -69,10 +69,10 @@ Codex 原生任务
 | 知乎内容来源 | `packages/integration/zhihu-transport`、`apps/agent/retrieval.mjs` | 知乎／全网接口、用户授权、摘要规范化、实际来源注册与引用校验 | source provider，不是模型 provider；本机单用户，不自动保存／采纳；[接入与回调](zhihu-native.md) |
 | Codex 桥接 | `plugins/trace-codex`、`apps/mcp`、`apps/codex` | 用户意图入口、上下文包、工作快照领取与结果送回复核、显式宿主会话附着及生命周期接收 | 安装不会启用生成 API，不等于部署 Web 服务；未附着 hook 不捕获 prompt |
 | 原生协作底座 | `packages/product/application`、`packages/core`、`apps/codex` | profile、来源授权、认知接续、提案/采用、hooks evidence | 不是六项 Web 功能已经统一抽出的领域包 |
-| 维护与集成 | `apps/cli`、`packages/sdk`、`native` | CLI、RPC、安装更新和认知账本维护 | 现有发行不覆盖新 Web/Agent；backup 不覆盖其两库 |
+| 维护与集成 | `apps/cli`、`packages/sdk`、`native` | CLI、RPC、安装更新、Host worker/Guard recovery 和认知账本维护 | native 包可携带 Web/Agent host 源码，但目标机安装、两库备份恢复和运行服务仍需单独验收 |
 | 探索形态 | `legacy.html`、`plugins/trace-harness-plugin`、`artifacts` | 旧原型、宿主实验与历史验证材料 | 不作为当前产品入口或生产发行依据 |
 
-Product Workspace 已从 desktop 页面目录迁入独立 Module，并由浏览器安全 Interface 与 Node 持久化 Interface 共同维护同一套规则。当前仍待深化的是 Agent Runtime：`apps/desktop` 仍导入 `apps/agent` 的组装入口，下一步应让两个可执行宿主共同依赖独立 Agent Runtime Module，而不是让一个 app 依赖另一个 app。
+Product Workspace 已从 desktop 页面目录迁入独立 Module，并由浏览器安全 Interface 与 Node 持久化 Interface 共同维护同一套规则。`apps/desktop` 目前仍负责本机 HTTP 生命周期并组装 `apps/agent`，这是当前可验证的本机形态；未来若拆分 Agent Runtime，必须保留相同的 Product Workspace owner、profile identity 和回执边界。
 
 Host Session 的后续闭环也保持相同的 owner 边界：Stop 只在 Product Workspace 事务内入队 sensemaking job，`apps/agent` 的 worker 通过受控 fixture/执行接缝异步消费；候选 WorkflowFinding 经确定性 Finding Router 生成 RoutingProposal，用户以 CAS receipt 采用、试用或拒绝。Activation 只回带 adopted（以及显式请求的 trial）finding 的短摘要，不回带原始 transcript；SessionStart/UserPromptSubmit 的 `additionalContext` 记录 offered/used/affected 事实而不代称 Codex 已使用。RepositoryPreflight 默认只读 suggest，只有 adopted runtime-guard、clean local checkout 且显式 apply 时才允许创建分支。
 

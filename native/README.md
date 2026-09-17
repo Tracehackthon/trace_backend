@@ -26,7 +26,9 @@ node <installed-runtime-directory>\native\install-codex-plugin.mjs --dry-run
 node <installed-runtime-directory>\native\install-codex-plugin.mjs --confirm true
 ```
 
-它会复制受管理的 Plugin marketplace、注册 `trace-codex` 并为其 MCP 写入 runtime 位置；**不会**创建或升级项目 `.trace/`、读取认知源、迁移 profile，或启用 hooks。更新 Plugin 才显式追加 `--replace`，且只刷新 `trace-codex@trace-runtime-local`。安装先在 staging 完成 Plugin 校验，旧 marketplace 只有在 staging 成功后才会移动；因此 staging 失败不会触碰已有 marketplace。交换之后若失败，安装器会尝试恢复旧 marketplace；若无法完整恢复，会留下失败 journal，必须先审阅它再重试。
+它会复制受管理的 Plugin marketplace、在 `.agents/plugins/marketplace.json` 写入 Codex 可发现的 marketplace manifest、注册 `trace-codex` 并为其 MCP 写入 runtime 位置；**不会**创建或升级项目 `.trace/`、读取认知源、迁移 profile，或启用 hooks。更新 Plugin 才显式追加 `--replace`，且只刷新 `trace-codex@trace-runtime-local`。安装先在 staging 完成 Plugin 校验，旧 marketplace 只有在 staging 成功后才会移动；因此 staging 失败不会触碰已有 marketplace。交换之后若失败，安装器会尝试恢复旧 marketplace；若无法完整恢复，会留下失败 journal，必须先审阅它再重试。
+
+Plugin 版本更新也不会自动接收宿主会话。完成 Plugin 连接后，仍要单独通过 hooks proposal/approval 安装七个受管事件（`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`Interrupt`、`SessionEnd`），并在当前 Codex task 中明确 attach；未 attach 仍不保存 prompt/final。没有 `.trace/` 的 cwd 只有在 Codex hook 环境与 Product Service 共享同一个绝对 `TRACE_WEB_STATE_FILE` 时才能进入用户级 `web.sqlite`；缺少该配置时保持安全 no-op。
 
 完整的项目状态和版本行为见[Codex Plugin 文档](../docs/codex-plugin.md)与[版本、协议与发布](../docs/versioning.md)。
 

@@ -201,7 +201,12 @@ function install(options) {
     fs.mkdirSync(staging, {recursive: true});
     transaction.stagingCreated = true;
     writeManagedPlugin(plugin, staging, runtimeRoot);
-    fs.writeFileSync(path.join(staging, 'marketplace.json'), JSON.stringify(managedMarketplace(), null, 2) + '\n', {encoding: 'utf8', flag: 'wx'});
+    // Codex 0.153+ discovers local marketplace manifests under the
+    // `.agents/plugins` control directory.  Keeping the manifest at the
+    // marketplace root makes `plugin marketplace add` fail with “does not
+    // contain a supported manifest”, even though the staged plugin is valid.
+    fs.mkdirSync(path.join(staging, '.agents', 'plugins'), {recursive: true});
+    fs.writeFileSync(path.join(staging, '.agents', 'plugins', 'marketplace.json'), JSON.stringify(managedMarketplace(), null, 2) + '\n', {encoding: 'utf8', flag: 'wx'});
     if (backup) { fs.renameSync(marketplaceRoot, backup); transaction.previousMarketplaceMoved = true; }
     fs.renameSync(staging, marketplaceRoot);
     transaction.newMarketplaceInstalled = true;

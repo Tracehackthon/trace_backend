@@ -1,6 +1,6 @@
 # Trace Runtime 迁移完整性状态
 
-更新时间：2026-09-10
+更新时间：2026-09-17
 
 这份清单用来区分“已迁移并验证”“已实现但未接宿主”“有意保留的兼容边界”和“尚未迁移”。不能因为目录已经是 TypeScript 就把未验证的宿主或连接器说成完成。
 
@@ -19,7 +19,12 @@
 | 协作模型与认知源地图 | `packages/core/collaboration-context` + `packages/core/instance` | 已迁移并验证 | `trace.collaboration-model@0.1.0` / `trace.source-activation@0.1.0` 有 closed validator、相对 locator 与 prefix 守卫；cold-start starter 不携带个人历史；详细配置留在 ignored `profiles/`，可提交 lock 只保留 hash；显式 `trace profile update` 备份、刷新 lock，drift fail-closed；旧项目显示 `legacy_unlocked`，只能经 `trace profile migrate --confirm true` 固化当前兼容配置，不触碰来源或 SQLite |
 | JSONL → SQLite migration | `packages/core/migration` | 已迁移并验证 | staging、源文件不改写、报告可回放 |
 | Capability Publisher | `packages/core/capability` + `packages/core/capability-candidate` | 已迁移并验证 | `candidate_precedent → capability_candidate → adopted → preview → stage → validate → publish(approval) → rollback`；逐文件哈希、目标形状、Skill 内容契约、候选 revision 和认知源 provenance 门禁 |
-| Codex adapter | `apps/codex` | 已迁移并验证（真实 native-host hook 路由） | 用户级 `hooks.json` 调用 `hook-stdio --route-from-event-cwd`；按 cwd 发现当前 `.trace/`；`UserPromptSubmit` 仅提供 source lease，Codex 自行 native search/read；`PreToolUse` 预算、`PostToolUse` 记录实际 search/read/unclassified evidence；显式 Host Session attach 后接收 lifecycle/turn receipt，未附着或无 Trace 项目成功 no-op |
+| Codex adapter | `apps/codex` | 已迁移并验证（真实 native-host hook 路由） | 用户级 `hooks.json` 调用 `hook-stdio --route-from-event-cwd`；受管七个事件为 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`Interrupt`、`SessionEnd`；按 cwd 发现当前 `.trace/`，已附着但无 `.trace/` 的 lifecycle 可进入用户级 Product `web.sqlite`；未附着仍不捕获 prompt/final |
+| Host Session Ingest / Workflow | `packages/product/workspace/src/host-ingest.mjs` + `host-workflow.mjs` | 已迁移并验证（本机第三阶段） | `attach → HostTurn → Stop/Interrupt/SessionEnd → sensemaking job → WorkflowFinding → RoutingProposal → activation`；web.sqlite 是唯一产品内容 owner，独立 append-only/CAS 表不推进 workspace snapshot revision；工具只保留安全 identity，原始对话默认私有折叠 |
+| Sensemaking worker / privacy | `apps/agent/sensemaking-worker.mjs` + `apps/agent/profiles.mjs` | 已迁移并验证（fixture/profile/shadow contract） | resident worker 使用 DB lease/owner/expiry、bounded poll、profile identity、schema `trace.sensemaking-result@1`、redaction/echo fail-closed；`disabled`、`fixture-dev`、`profile`、`shadow` 必须显式，fixture 不代表真实供应商质量 |
+| Finding Router / Activation | `packages/product/workspace/src/host-workflow.mjs` + `apps/desktop/src/product/host-session.mjs` | 已迁移并验证 | target kinds、scope、理由/风险和 source refs 先形成 proposal；adopt/trial/reject 用 CAS receipt；activation 优先 adopted，trial 需显式开启并记录 offered/used/affected/dismissed，不注入完整 transcript |
+| Repository Guard recovery | `packages/product/workspace/src/host-workflow.mjs` | 已迁移并验证 | RepositoryPreflight 默认 suggest；`prepared → git_applied → receipt_committed` journal、recovery preview/reconcile/status；只在 adopted runtime-guard、clean local、hash 未变时允许显式 apply，不自动 push/merge/reset/clean |
+| Capability governance | `packages/product/workspace/src/host-workflow.mjs` + `packages/core/capability*` | 已迁移并验证（编排边界） | adopted capability-candidate 进入既有 CapabilityPublisher/Change Set；CapabilityTrial 固定 version/hash、scenario、evidence 与 outcome；PublicationPolicy 默认 manual，可撤回；无 producer 时保持 `producer_required`，不生成空 Skill |
 | doctor / backup / restore | `packages/core/operations`、`apps/cli` | 已迁移并验证 | integrity/schema/revision；VACUUM backup 清单；restore staging + previous target |
 | TypeScript SDK / JSONL RPC | `packages/sdk` | 已迁移并验证 | 与 runtime 相同方法和结果语义 |
 | Python SDK | `python/sdk` | 仅保留薄适配并验证 | 只启动/调用 TS runtime RPC；`uv.lock` 已固定；不包含旧 Python runtime |

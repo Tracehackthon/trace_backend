@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {assertCleanSourceIdentity, inspectSourceIdentity} from './source-identity.mjs';
+import {CODEX_PLUGIN_PROTOCOL_PROFILE} from '../native/codex-compatibility.mjs';
+import {runtimeApiSurface} from '../apps/desktop/runtime-identity.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const outputArg = process.argv.indexOf('--out');
@@ -12,7 +15,17 @@ const output = path.resolve(configured);
 if (fs.existsSync(output) && fs.readdirSync(output).length > 0) throw new Error(`Package output is not empty: ${output}`);
 fs.mkdirSync(output, {recursive: true});
 const packageInfo = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-fs.writeFileSync(path.join(output, 'runtime.json'), JSON.stringify({runtime_version: packageInfo.version, node_engine: packageInfo.engines?.node ?? 'unknown'}, null, 2) + '\n', 'utf8');
+const sourceIdentity = inspectSourceIdentity(root);
+if (process.argv.includes('--require-clean') || process.env.TRACE_REQUIRE_CLEAN === '1') assertCleanSourceIdentity(sourceIdentity);
+const distributionEligibility = sourceIdentity.clean ? 'release-ready' : 'development-dirty';
+fs.writeFileSync(path.join(output, 'runtime.json'), JSON.stringify({
+  runtime_version: packageInfo.version,
+  node_engine: packageInfo.engines?.node ?? 'unknown',
+  distribution_eligibility: distributionEligibility,
+  source_identity: sourceIdentity,
+  api_surface: runtimeApiSurface(),
+  host_compatibility: {codex_plugin: CODEX_PLUGIN_PROTOCOL_PROFILE},
+}, null, 2) + '\n', 'utf8');
 
 function copy(relative, target = relative) {
   const source = path.join(root, relative);
@@ -44,12 +57,29 @@ copy('native', 'native');
 // accidentally treat an internal prototype as a release surface.
 copy('plugins/trace-codex', 'plugins/trace-codex');
 copy('marketplace.json', 'marketplace.json');
+// `packages/bundle/codex/README.md` is readable from the source checkout,
+// where it lives three levels below the repository docs.  The packaged copy
+// lives at `bundle/codex`, so normalize those links to the distribution
+// layout instead of shipping links that point outside the release directory.
+const packagedBundleReadme = path.join(output, 'bundle', 'codex', 'README.md');
+if (fs.existsSync(packagedBundleReadme)) {
+  const text = fs.readFileSync(packagedBundleReadme, 'utf8');
+  fs.writeFileSync(packagedBundleReadme, text.replaceAll('(../../../docs/', '(../../docs/'), 'utf8');
+}
+// The bundle index moves from `packages/bundle` in the source checkout to
+// `bundle` in the distribution, so its versioning link loses one `..`.
+const packagedBundleIndex = path.join(output, 'bundle', 'README.md');
+if (fs.existsSync(packagedBundleIndex)) {
+  const text = fs.readFileSync(packagedBundleIndex, 'utf8');
+  fs.writeFileSync(packagedBundleIndex, text.replaceAll('(../../docs/', '(../docs/'), 'utf8');
+}
 // The desktop installer hosts its renderer itself, but it still needs the
 // product/search/Agent loopback APIs on a true first launch. Keep this narrow
 // server source beside the compiled runtime so Electron can start it with its
 // bundled Node runtime without requiring a developer checkout.
 copy('apps/desktop/server.mjs', 'apps/desktop/server.mjs');
 copy('apps/desktop/runtime-port.mjs', 'apps/desktop/runtime-port.mjs');
+copy('apps/desktop/runtime-identity.mjs', 'apps/desktop/runtime-identity.mjs');
 copy('apps/agent', 'apps/agent');
 copy('packages/product/workspace/src', 'packages/product/workspace/src');
 // The Node 22–24.1 runtime selects this pure-JS/WASM fallback before loading
@@ -78,9 +108,13 @@ function walk(directory) {
 walk(output);
 const manifest = {
   manifest_id: 'trace.runtime.distribution',
-  manifest_version: '0.1.0',
+  manifest_version: '0.2.0',
   runtime_version: packageInfo.version,
   node_engine: packageInfo.engines?.node ?? 'unknown',
+  distribution_eligibility: distributionEligibility,
+  source_identity: sourceIdentity,
+  api_surface: runtimeApiSurface(),
+  host_compatibility: {codex_plugin: CODEX_PLUGIN_PROTOCOL_PROFILE},
   sqlite_driver_bundle: {fallback: 'sql.js', version: sqlJsInfo.version, selected_on_node_before: '24.2.0'},
   state_modes: ['sqlite', 'separate-jsonl-development'],
   files,

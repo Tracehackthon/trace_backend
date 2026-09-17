@@ -61,8 +61,21 @@ test('distribution retains product documentation and the trace launcher', () => 
     assert.match(fs.readFileSync(path.join(output, 'Connect-Trace-to-Codex.cmd'), 'utf8'), /native\\install-codex-plugin\.mjs/);
     assert.equal(fs.existsSync(path.join(output, 'plugins', 'trace-codex', '.codex-plugin', 'plugin.json')), true);
     assert.equal(fs.existsSync(path.join(output, 'dist', 'apps', 'mcp', 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', 'server', 'mcp.js')), true);
+    const packagedBundleReadme = fs.readFileSync(path.join(output, 'bundle', 'codex', 'README.md'), 'utf8');
+    assert.match(packagedBundleReadme, /\]\(\.\.\/\.\.\/docs\/host-native-retrieval\.md\)/, 'packaged bundle links must resolve inside the distribution');
+    assert.equal(fs.existsSync(path.join(output, 'bundle', 'codex', '..', '..', 'docs', 'host-native-retrieval.md')), true);
+    const packagedBundleIndex = fs.readFileSync(path.join(output, 'bundle', 'README.md'), 'utf8');
+    assert.match(packagedBundleIndex, /\]\(\.\.\/docs\/versioning\.md\)/, 'packaged bundle index links must resolve inside the distribution');
+    assert.equal(fs.existsSync(path.join(output, 'bundle', '..', 'docs', 'versioning.md')), true);
     const manifest = JSON.parse(fs.readFileSync(path.join(output, 'release-manifest.json'), 'utf8'));
     assert.equal(manifest.files.some(file => file.path === 'docs/getting-started.md'), true);
+    assert.equal(manifest.manifest_version, '0.2.0');
+    assert.ok(['release-ready', 'development-dirty'].includes(manifest.distribution_eligibility));
+    assert.equal(manifest.distribution_eligibility, manifest.source_identity.clean ? 'release-ready' : 'development-dirty');
+    assert.match(manifest.source_identity.content_sha256, /^[0-9a-f]{64}$/);
+    assert.ok(manifest.api_surface.host.includes('/api/product/host/capability/publish'));
+    assert.equal(manifest.host_compatibility.codex_plugin.id, 'codex-plugin-marketplace-v1');
+    assert.equal(fs.existsSync(path.join(output, 'apps', 'desktop', 'runtime-identity.mjs')), true);
     const installed = path.join(directory, 'installed');
     const installedRuntime = spawnSync(process.execPath, [installer, '--package', output, '--target', installed], {encoding: 'utf8'});
     assert.equal(installedRuntime.status, 0, installedRuntime.stderr);
@@ -162,6 +175,7 @@ test('Codex plugin installer restores a replaced plugin after plugin add fails',
   const invoke = failure => spawnSync(process.execPath, [codexPluginInstaller, '--runtime-root', root, '--marketplace-root', marketplace, '--codex-command', fake.command, '--codex-arg', fake.argument, '--confirm', 'true', ...(fs.existsSync(marketplace) ? ['--replace'] : [])], {encoding: 'utf8', env: {...process.env, FAKE_CODEX_STATE: fake.stateFile, ...(failure ? {FAKE_CODEX_FAIL: failure} : {})}});
   try {
     const installed = invoke(); assert.equal(installed.status, 0, installed.stderr);
+    assert.equal(fs.existsSync(path.join(marketplace, '.agents', 'plugins', 'marketplace.json')), true, 'Codex local marketplaces require the .agents/plugins manifest location');
     fs.writeFileSync(path.join(marketplace, 'old-marketplace-marker.txt'), 'old', 'utf8');
     const failed = invoke('plugin-add');
     assert.notEqual(failed.status, 0);

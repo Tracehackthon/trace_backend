@@ -36,6 +36,12 @@ test('real Web server mounts backend without changing page; missing CLI fails sa
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   assert.equal(ready, true, diagnostic);
+  const identityResponse = await fetch(origin + '/api/runtime/identity');
+  assert.equal(identityResponse.status, 200);
+  const identity = await identityResponse.json();
+  assert.equal(identity.protocol_version, 1);
+  assert.ok(identity.api_surface.host.includes('/api/product/host/capability/publish'));
+  assert.equal(identity.source_identity, null, 'source checkout server must not invent a packaged release identity');
   const page = await (await fetch(origin)).text();
   assert.equal(page, fs.readFileSync(fileURLToPath(new URL('../apps/desktop/index.html', import.meta.url)), 'utf8'));
   assert.equal((await fetch(origin + '/runtime/product-workspace/index.mjs')).status, 200);

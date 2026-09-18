@@ -146,7 +146,7 @@ trace profile
 
 每次 `SessionStart` / `UserPromptSubmit`：
 
-1. Trace 按 hook 事件的 `cwd` 找到当前项目，不会用错其他项目的人或来源；
+1. Trace 用 hook 事件的 `cwd` 发现项目候选，并核对 descriptor、Git root 与 worktree 身份；冲突时 fail closed，不会用错其他项目的人或来源；
 2. 读取并校验当前协作模型、来源地图及 hash lock；
 3. 仅把版本化协作条款、地图中的安全相对 locator、当前来源 lease 和预算编译给 Codex；
 4. Codex 决定是否用自己的搜索/读取能力访问相关正式页；

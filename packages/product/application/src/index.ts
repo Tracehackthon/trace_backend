@@ -11,7 +11,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {ProtocolError} from '../../../core/protocol/src/index.js';
-import {TraceRuntime} from '../../../core/runtime/src/index.js';
+import {discoverRuntimeRoot, TraceRuntime} from '../../../core/runtime/src/index.js';
 import {
   initializeProject,
   loadLockedProjectSourceProfile,
@@ -109,18 +109,13 @@ function redactedPath(root: string, target: string): string {
   return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative.replaceAll(path.sep, '/') : '<outside-project>';
 }
 function runtimeRoot(): string {
-  const candidates = [process.env.TRACE_RUNTIME_ROOT, process.cwd(), path.dirname(fileURLToPath(import.meta.url))]
-    .filter((value): value is string => typeof value === 'string' && value.length > 0);
-  for (const initial of candidates) {
-    let cursor = path.resolve(initial);
-    for (let steps = 0; steps < 10; steps += 1) {
-      if (fs.existsSync(path.join(cursor, 'package.json')) && fs.existsSync(path.join(cursor, 'templates'))) return cursor;
-      const parent = path.dirname(cursor);
-      if (parent === cursor) break;
-      cursor = parent;
-    }
+  const explicit = process.env.TRACE_RUNTIME_ROOT;
+  if (explicit !== undefined && !path.isAbsolute(explicit)) throw new ProtocolError('IO_ERROR', 'TRACE_RUNTIME_ROOT must be an absolute directory');
+  try {
+    return discoverRuntimeRoot(explicit === undefined ? [process.cwd(), path.dirname(fileURLToPath(import.meta.url))] : [explicit], explicit !== undefined).root;
+  } catch (error) {
+    throw new ProtocolError('IO_ERROR', `Trace runtime root could not be validated: ${error instanceof Error ? error.message : String(error)}`);
   }
-  throw new ProtocolError('IO_ERROR', 'Trace runtime root could not be located');
 }
 function runtimeVersion(): string {
   const root = runtimeRoot();

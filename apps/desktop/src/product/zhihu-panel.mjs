@@ -1,4 +1,5 @@
 import {h} from './library.mjs';
+import {ensureRuntimeIdentity} from './runtime-identity.mjs';
 
 const failures = {
   AUTH_REQUIRED: '检索还没有配置：请在本机后端设置知乎 Access Secret。',
@@ -49,8 +50,9 @@ export function mountZhihuPanel(root, {onSelect} = {}) {
     const controller = new AbortController(); active = controller; buttons();
     const timeout = setTimeout(() => controller.abort(), 35000);
     try {
+      await ensureRuntimeIdentity(path.split('?')[0]);
       const res = await fetch(path, {method: data === undefined ? 'GET' : 'POST', cache: 'no-store', redirect: 'error', signal: controller.signal,
-        headers: {'content-type': 'application/json'}, ...(data === undefined ? {} : {body: JSON.stringify(data)})});
+        headers: {'content-type': 'application/json', 'x-trace-runtime-protocol': '1', ...(data === undefined ? {} : {origin: location.origin, 'sec-fetch-site': 'same-origin'} )}, ...(data === undefined ? {} : {body: JSON.stringify(data)})});
       if (res.status === 404) throw Error('当前服务尚未启用知乎入口。请更新并启用本机知乎后端；没有用演示内容代替。');
       const value = await res.json();
       if (!res.ok) throw Error(failures[value.error?.code] || `请求没有完成（${value.error?.code || res.status}）。没有把失败当成空结果。`);

@@ -5,8 +5,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {isSemver, runtimeRootCandidate} from '../runtime-identity.mjs';
 
 const nativeRoot = path.dirname(fileURLToPath(import.meta.url));
 const defaultRuntimeRoot = path.resolve(nativeRoot, '..');
@@ -50,6 +52,43 @@ function copyTree(source, destination) {
   fs.mkdirSync(path.dirname(destination), {recursive: true});
   fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
 }
+function fileHash(file) {
+  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+function pluginManifest(plugin) {
+  const file = path.join(plugin, '.codex-plugin', 'plugin.json');
+  let value;
+  try { value = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { throw new PluginInstallError('RUNTIME_ROOT_INVALID', `Trace Codex plugin manifest is invalid: ${file}`); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.name !== 'trace-codex' || !isSemver(value.version)
+    || value.skills !== './skills/' || value.mcpServers !== './.mcp.json') {
+    throw new PluginInstallError('RUNTIME_ROOT_INVALID', `Trace Codex plugin manifest has an unsupported identity: ${file}`);
+  }
+  return value;
+}
+function verifyPackagedPlugin(runtimeRoot, identity, plugin) {
+  if (identity.kind !== 'packaged') return;
+  const entries = new Map(identity.release_manifest.files.map(item => [item.path, item]));
+  const seen = new Set();
+  const walk = directory => {
+    for (const entry of fs.readdirSync(directory, {withFileTypes: true})) {
+      const file = path.join(directory, entry.name);
+      const relative = path.relative(runtimeRoot, file).replaceAll(path.sep, '/');
+      if (entry.isSymbolicLink()) throw new PluginInstallError('RUNTIME_ROOT_INVALID', `Packaged plugin contains a symlink: ${relative}`);
+      if (entry.isDirectory()) walk(file);
+      else if (entry.isFile()) {
+        const manifestEntry = entries.get(relative);
+        if (!manifestEntry || manifestEntry.bytes !== fs.statSync(file).size || manifestEntry.sha256 !== fileHash(file)) {
+          throw new PluginInstallError('RUNTIME_ROOT_INVALID', `Packaged plugin is not covered by release-manifest: ${relative}`);
+        }
+        seen.add(relative);
+      } else throw new PluginInstallError('RUNTIME_ROOT_INVALID', `Packaged plugin contains an unsupported entry: ${relative}`);
+    }
+  };
+  walk(plugin);
+  if (seen.size === 0) throw new PluginInstallError('RUNTIME_ROOT_INVALID', 'Packaged Trace Codex plugin is empty');
+}
 function parse(argv) {
   const options = {
     runtimeRoot: defaultRuntimeRoot,
@@ -78,11 +117,22 @@ function parse(argv) {
   return options;
 }
 function pluginFiles(runtimeRoot) {
+  // Do not treat a directory that merely happens to contain a plugin and an
+  // MCP entrypoint as a Trace runtime.  In particular, a stale checkout,
+  // partially copied package, or an unrelated directory must not become the
+  // source of TRACE_RUNTIME_ROOT during a dry-run or replacement install.
+  const identity = runtimeRootCandidate(runtimeRoot);
+  if (!identity.valid) {
+    const missing = identity.missing?.length ? ` (${identity.missing.join(', ')})` : '';
+    throw new PluginInstallError('RUNTIME_ROOT_INVALID', `Runtime root is not a validated Trace runtime: ${identity.code}${missing}`);
+  }
   const plugin = path.join(runtimeRoot, 'plugins', 'trace-codex');
   const entry = path.join(runtimeRoot, 'dist', 'apps', 'mcp', 'src', 'main.js');
-  if (!fs.existsSync(path.join(plugin, '.codex-plugin', 'plugin.json'))) throw new Error(`Missing Trace Codex plugin: ${plugin}`);
-  if (!fs.existsSync(entry)) throw new Error(`Missing built Trace MCP entry: ${entry}`);
-  return {plugin};
+  if (!fs.existsSync(plugin) || !fs.statSync(plugin).isDirectory()) throw new PluginInstallError('RUNTIME_ROOT_INVALID', `Missing Trace Codex plugin: ${plugin}`);
+  if (!fs.existsSync(entry) || !fs.statSync(entry).isFile() || fs.statSync(entry).size < 1) throw new PluginInstallError('RUNTIME_ROOT_INVALID', `Missing built Trace MCP entry: ${entry}`);
+  const manifest = pluginManifest(plugin);
+  verifyPackagedPlugin(runtimeRoot, identity, plugin);
+  return {plugin, identity, manifest};
 }
 function managedMarketplace() {
   return {
@@ -180,9 +230,12 @@ function install(options) {
   const runtimeRoot = absolute(options.runtimeRoot, '--runtime-root');
   const marketplaceRoot = absolute(options.marketplaceRoot, '--marketplace-root');
   noSymlink(runtimeRoot); noSymlink(path.dirname(marketplaceRoot));
-  const {plugin} = pluginFiles(runtimeRoot);
+  const {plugin, identity, manifest} = pluginFiles(runtimeRoot);
   const plan = {
     status: 'planned', runtime_root: runtimeRoot, marketplace_root: marketplaceRoot, plugin: 'trace-codex', marketplace: MARKETPLACE,
+    runtime_version: identity.runtime_version,
+    runtime_kind: identity.kind,
+    plugin_version: manifest.version,
     automatic_upgrade: false,
     will_do: ['copy the versioned Trace plugin to a managed local marketplace', 'register that marketplace with Codex', 'install trace-codex from it'],
     will_not_do: ['rewrite any Trace project', 'migrate project profiles', 'enable Trace hooks', 'update an existing plugin without --replace'],

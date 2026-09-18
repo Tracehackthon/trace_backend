@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {enqueueSensemakingJob, ensureHostWorkflowSchema} from './host-workflow.mjs';
 
 /**
@@ -35,18 +38,21 @@ const EVENT_KINDS = new Set(HOST_EVENT_KINDS);
 const TURN_STATES = new Set(HOST_TURN_STATES);
 const SESSION_STATUSES = new Set(HOST_SESSION_STATUSES);
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const PROJECT_INSTANCE_PROTOCOL_ID = 'trace.project-instance';
+const PROJECT_INSTANCE_PROTOCOL_VERSIONS = new Set(['0.1.0', '0.2.0']);
 
 export class HostIngestError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, details = undefined) {
     super(message);
     this.name = 'HostIngestError';
     this.status = status;
     this.code = code;
+    if (details !== undefined) this.details = details;
   }
 }
 
-function fail(code, message, status = 422) {
-  throw new HostIngestError(status, code, message);
+function fail(code, message, status = 422, details = undefined) {
+  throw new HostIngestError(status, code, message, details);
 }
 
 function plain(value) {
@@ -100,6 +106,219 @@ function boundedBodyHash(value, field) {
   try { encoded = stableHostJson(value); } catch { fail('INVALID_HOST_EVENT', `${field} must be JSON serializable`); }
   if (typeof encoded !== 'string' || encoded.length > MAX_TEXT) fail('INVALID_HOST_EVENT', `${field} exceeds the bounded host event size`);
   return sha(encoded);
+}
+
+/*
+ * Project identity is intentionally resolved here, at the host boundary,
+ * rather than inferred by callers from a directory name.  `.trace/project.json`
+ * is only a candidate marker.  A candidate is usable only after its descriptor,
+ * path and Git repository can all be checked, and an event cwd must agree with
+ * the candidate selected by an explicit project_ref.
+ *
+ * This is kept as a small dependency-free resolver because host-ingest is also
+ * loaded directly by the desktop Node adapter (before the TypeScript build is
+ * materialised).  The same shape is used by the CLI so diagnostics survive the
+ * source/dist boundary without adding another state owner.
+ */
+function pathKey(value) {
+  const resolved = path.resolve(value);
+  try { return fs.realpathSync.native(resolved); } catch { return resolved; }
+}
+
+function samePath(left, right) {
+  const a = pathKey(left), b = pathKey(right);
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+function insidePath(child, parent) {
+  const childKey = pathKey(child), parentKey = pathKey(parent);
+  const childValue = process.platform === 'win32' ? childKey.toLowerCase() : childKey;
+  const parentValue = process.platform === 'win32' ? parentKey.toLowerCase() : parentKey;
+  return childValue === parentValue || childValue.startsWith(`${parentValue}${path.sep}`);
+}
+
+function bindingDiagnostic(code, message, field = undefined) {
+  return {code, message, ...(field === undefined ? {} : {field})};
+}
+
+function gitValue(root, args) {
+  try {
+    const value = execFileSync('git', ['-C', root, ...args], {encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'pipe']}).trim();
+    return value.length === 0 ? null : value;
+  } catch { return null; }
+}
+
+function repositoryIdentity(root) {
+  const gitRootText = gitValue(root, ['rev-parse', '--show-toplevel']);
+  if (gitRootText === null) return {
+    status: 'unverified', root: null, common_dir: null, remote: null,
+    diagnostics: [bindingDiagnostic('GIT_ROOT_UNVERIFIABLE', 'Git repository root could not be verified', 'git_root')],
+  };
+  const gitRoot = pathKey(gitRootText);
+  const commonText = gitValue(root, ['rev-parse', '--git-common-dir']);
+  const commonDir = commonText === null ? null : pathKey(path.isAbsolute(commonText) ? commonText : path.resolve(gitRoot, commonText));
+  const remote = gitValue(root, ['remote', 'get-url', 'origin']);
+  return {
+    status: 'verified', root: gitRoot, common_dir: commonDir, remote,
+    diagnostics: [],
+  };
+}
+
+function validateProjectDescriptor(root, file) {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { return {descriptor: null, diagnostics: [bindingDiagnostic('PROJECT_DESCRIPTOR_INVALID', 'Trace project descriptor is unreadable', 'descriptor')]}; }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {descriptor: null, diagnostics: [bindingDiagnostic('PROJECT_DESCRIPTOR_INVALID', 'Trace project descriptor must be a JSON object', 'descriptor')]};
+  const diagnostics = [];
+  const allowed = new Set(['protocol_id', 'protocol_version', 'project_id', 'instance_id', 'template_id', 'template_version', 'source_mode', 'source_scope', 'state_file', 'source_root', 'created_at']);
+  const unknown = Object.keys(raw).filter(key => !allowed.has(key));
+  if (unknown.length > 0) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_UNKNOWN_FIELD', 'Trace project descriptor contains unsupported fields', 'descriptor'));
+  if (raw.protocol_id !== PROJECT_INSTANCE_PROTOCOL_ID) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_PROTOCOL', 'Trace project descriptor protocol is unsupported', 'protocol_id'));
+  if (!PROJECT_INSTANCE_PROTOCOL_VERSIONS.has(raw.protocol_version)) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_VERSION', 'Trace project descriptor version is unsupported', 'protocol_version'));
+  if (typeof raw.project_id !== 'string' || raw.project_id.trim().length === 0) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_PROJECT_ID', 'Trace project descriptor project_id is missing', 'project_id'));
+  for (const [field, label] of [['instance_id', 'instance identity'], ['template_id', 'template identity'], ['template_version', 'template version'], ['created_at', 'creation time']]) {
+    if (typeof raw[field] !== 'string' || raw[field].trim().length === 0) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_FIELD', `Trace project descriptor ${label} is missing`, field));
+  }
+  if (!['local', 'external', 'team', 'empty'].includes(raw.source_mode)) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_SOURCE_MODE', 'Trace project descriptor source_mode is unsupported', 'source_mode'));
+  if (!['personal', 'project', 'team', 'domain'].includes(raw.source_scope)) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_SOURCE_SCOPE', 'Trace project descriptor source_scope is unsupported', 'source_scope'));
+  if (raw.state_file !== '.trace/state/trace.sqlite') diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_STATE_PATH', 'Trace project descriptor state_file is not project-local', 'state_file'));
+  if (typeof raw.source_root !== 'string' || !raw.source_root.startsWith('.trace/')) diagnostics.push(bindingDiagnostic('PROJECT_DESCRIPTOR_SOURCE_PATH', 'Trace project descriptor source_root is not project-local', 'source_root'));
+  if (diagnostics.length > 0) return {descriptor: null, diagnostics};
+  return {descriptor: {
+    protocol_id: raw.protocol_id,
+    protocol_version: raw.protocol_version,
+    project_id: raw.project_id,
+    instance_id: raw.instance_id,
+    template_id: raw.template_id,
+    template_version: raw.template_version,
+    source_mode: raw.source_mode,
+    source_scope: raw.source_scope,
+    state_file: raw.state_file,
+    source_root: raw.source_root,
+    created_at: raw.created_at,
+  }, diagnostics};
+}
+
+function discoverProjectCandidate(directory, {explicit = false} = {}) {
+  if (typeof directory !== 'string' || !path.isAbsolute(directory)) return {candidate: null, diagnostics: [bindingDiagnostic('PROJECT_PATH_NOT_ABSOLUTE', 'Project path must be absolute', explicit ? 'project_ref' : 'cwd')]};
+  const resolved = pathKey(directory);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) return {candidate: null, diagnostics: [bindingDiagnostic('PROJECT_PATH_NOT_FOUND', 'Project path does not exist or is not a directory', explicit ? 'project_ref' : 'cwd')]};
+  let cursor = resolved;
+  while (true) {
+    const traceDir = path.join(cursor, '.trace');
+    const descriptorFile = path.join(traceDir, 'project.json');
+    if (fs.existsSync(descriptorFile)) {
+      const descriptorResult = validateProjectDescriptor(cursor, descriptorFile);
+      if (descriptorResult.descriptor === null) return {candidate: null, root: cursor, descriptor: null, diagnostics: descriptorResult.diagnostics};
+      const repository = repositoryIdentity(cursor);
+      return {
+        candidate: {
+          root: cursor,
+          project_dir: cursor,
+          project_ref: cursor,
+          trace_dir: traceDir,
+          descriptor: descriptorResult.descriptor,
+          repository,
+        },
+        diagnostics: [...repository.diagnostics],
+      };
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  return {candidate: null, diagnostics: explicit ? [bindingDiagnostic('PROJECT_DESCRIPTOR_NOT_FOUND', 'No Trace project descriptor was found for project_ref', 'project_ref')] : []};
+}
+
+function unresolvedBinding(diagnostics, extra = {}) {
+  return {
+    status: 'unresolved', state: 'unresolved', project_ref: extra.project_ref ?? null,
+    project_dir: extra.project_dir ?? null, project_id: extra.project_id ?? null,
+    cwd: extra.cwd ?? null, git_root: extra.git_root ?? null,
+    repository: extra.repository ?? null, diagnostics,
+  };
+}
+
+function conflictBinding(diagnostics, extra = {}) {
+  return {
+    status: 'conflict', state: 'conflict', project_ref: extra.project_ref ?? null,
+    project_dir: extra.project_dir ?? null, project_id: extra.project_id ?? null,
+    cwd: extra.cwd ?? null, git_root: extra.git_root ?? null,
+    repository: extra.repository ?? null, diagnostics,
+  };
+}
+
+/**
+ * Resolve a project candidate from an explicit project_ref and/or host cwd.
+ * The result is always structured: `personal` means no project was requested,
+ * while `unresolved` and `conflict` are fail-closed states.  No caller should
+ * treat the candidate marker alone as an authoritative project binding.
+ */
+export function resolveProjectBinding(input = {}) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return unresolvedBinding([bindingDiagnostic('PROJECT_BINDING_INPUT_INVALID', 'Project binding input must be an object')]);
+  const rawProjectRef = input.project_ref ?? input.projectRef;
+  const hasProjectRef = rawProjectRef !== undefined && rawProjectRef !== null && rawProjectRef !== '';
+  // `cwd: null`/empty is different from an omitted cwd: once a caller claims
+  // to provide host identity, an unverifiable value must not downgrade to a
+  // personal/no-candidate result.
+  const hasCwd = input.cwd !== undefined;
+  const cwdValue = hasCwd && typeof input.cwd === 'string' && path.isAbsolute(input.cwd) ? pathKey(input.cwd) : hasCwd ? String(input.cwd) : null;
+  if (rawProjectRef === '') return {status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null, cwd: cwdValue, git_root: null, repository: null, diagnostics: []};
+  const cwdResult = hasCwd ? discoverProjectCandidate(input.cwd) : {candidate: null, diagnostics: []};
+  if (cwdResult.diagnostics.length > 0 && cwdResult.candidate === null && hasCwd && cwdResult.diagnostics.some(item => item.code !== 'PROJECT_DESCRIPTOR_NOT_FOUND')) {
+    return unresolvedBinding(cwdResult.diagnostics, {cwd: cwdValue});
+  }
+  if (!hasProjectRef && cwdResult.candidate === null) {
+    // No project is a valid user-level host session.  A malformed explicit cwd
+    // was handled above; a normal directory without a descriptor remains
+    // personal rather than manufacturing a project binding.
+    return {status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null, cwd: cwdValue, git_root: null, repository: null, diagnostics: []};
+  }
+  if (!hasProjectRef && cwdResult.candidate !== null) {
+    const candidate = cwdResult.candidate;
+    if (candidate.repository.status !== 'verified') return unresolvedBinding([...cwdResult.diagnostics, ...candidate.repository.diagnostics], {cwd: cwdValue, project_ref: candidate.project_ref, project_dir: candidate.root, project_id: candidate.descriptor.project_id, repository: candidate.repository});
+    if (!insidePath(candidate.root, candidate.repository.root)) return unresolvedBinding([bindingDiagnostic('PROJECT_GIT_ROOT_MISMATCH', 'Project descriptor is outside its Git repository root', 'git_root')], {cwd: cwdValue, project_ref: candidate.project_ref, project_dir: candidate.root, project_id: candidate.descriptor.project_id, git_root: candidate.repository.root, repository: candidate.repository});
+    const cwdRepository = repositoryIdentity(cwdValue);
+    if (cwdRepository.status !== 'verified') return unresolvedBinding([...cwdRepository.diagnostics], {cwd: cwdValue, project_ref: candidate.project_ref, project_dir: candidate.root, project_id: candidate.descriptor.project_id, git_root: candidate.repository.root, repository: cwdRepository});
+    if (candidate.repository.common_dir !== null && cwdRepository.common_dir !== null && !samePath(candidate.repository.common_dir, cwdRepository.common_dir)) return unresolvedBinding([bindingDiagnostic('PROJECT_REPOSITORY_MISMATCH', 'Host cwd belongs to a different Git repository', 'git_root')], {cwd: cwdValue, project_ref: candidate.project_ref, project_dir: candidate.root, project_id: candidate.descriptor.project_id, git_root: cwdRepository.root, repository: cwdRepository});
+    if (!samePath(candidate.repository.root, cwdRepository.root)) return unresolvedBinding([bindingDiagnostic('PROJECT_GIT_ROOT_MISMATCH', 'Host cwd has a different Git root from the Trace project', 'git_root')], {cwd: cwdValue, project_ref: candidate.project_ref, project_dir: candidate.root, project_id: candidate.descriptor.project_id, git_root: cwdRepository.root, repository: cwdRepository});
+    return {status: 'resolved', state: 'resolved', project_ref: candidate.project_ref, project_dir: candidate.root, project_id: candidate.descriptor.project_id, descriptor: candidate.descriptor, cwd: cwdValue, git_root: candidate.repository.root, repository: candidate.repository, diagnostics: []};
+  }
+  if (typeof rawProjectRef !== 'string' || !path.isAbsolute(rawProjectRef)) return unresolvedBinding([bindingDiagnostic('PROJECT_PATH_NOT_ABSOLUTE', 'project_ref must be an absolute project directory', 'project_ref')], {project_ref: typeof rawProjectRef === 'string' ? rawProjectRef : null, cwd: cwdValue});
+  const explicitResult = discoverProjectCandidate(rawProjectRef, {explicit: true});
+  if (explicitResult.candidate === null) return unresolvedBinding(explicitResult.diagnostics, {project_ref: path.isAbsolute(rawProjectRef) ? pathKey(rawProjectRef) : rawProjectRef, cwd: cwdValue, project_dir: explicitResult.root ?? null});
+  const explicitCandidate = explicitResult.candidate;
+  const base = {project_ref: explicitCandidate.project_ref, project_dir: explicitCandidate.root, project_id: explicitCandidate.descriptor.project_id, cwd: cwdValue, git_root: explicitCandidate.repository.root, repository: explicitCandidate.repository};
+  if (explicitCandidate.repository.status !== 'verified') return unresolvedBinding([...explicitResult.diagnostics, ...explicitCandidate.repository.diagnostics], base);
+  if (!insidePath(explicitCandidate.root, explicitCandidate.repository.root)) return unresolvedBinding([bindingDiagnostic('PROJECT_GIT_ROOT_MISMATCH', 'Project descriptor is outside its Git repository root', 'git_root')], base);
+  if (cwdResult.candidate !== null) {
+    if (!samePath(explicitCandidate.root, cwdResult.candidate.root)) return conflictBinding([bindingDiagnostic('PROJECT_REF_CWD_MISMATCH', 'project_ref and host cwd resolve to different Trace projects', 'cwd')], base);
+    const cwdRepository = repositoryIdentity(cwdValue);
+    if (cwdRepository.status !== 'verified') return unresolvedBinding([...cwdRepository.diagnostics], base);
+    if (explicitCandidate.repository.common_dir !== null && cwdRepository.common_dir !== null && !samePath(explicitCandidate.repository.common_dir, cwdRepository.common_dir)) return conflictBinding([bindingDiagnostic('PROJECT_REPOSITORY_MISMATCH', 'project_ref and host cwd belong to different Git repositories', 'git_root')], base);
+    if (!samePath(explicitCandidate.repository.root, cwdRepository.root)) return conflictBinding([bindingDiagnostic('PROJECT_GIT_ROOT_MISMATCH', 'project_ref and host cwd have different Git roots', 'git_root')], base);
+  } else if (hasCwd) {
+    // A project-bound session cannot follow a cwd outside the bound project,
+    // even when that cwd has no own .trace marker.  This closes the common
+    // same-name/sibling-repository drift case.
+    if (cwdValue === null || !insidePath(cwdValue, explicitCandidate.root)) return conflictBinding([bindingDiagnostic('PROJECT_REF_CWD_MISMATCH', 'host cwd is outside the explicitly bound Trace project', 'cwd')], base);
+    const cwdRepository = repositoryIdentity(cwdValue);
+    if (cwdRepository.status !== 'verified') return unresolvedBinding([...cwdRepository.diagnostics], base);
+    if (explicitCandidate.repository.common_dir !== null && cwdRepository.common_dir !== null && !samePath(explicitCandidate.repository.common_dir, cwdRepository.common_dir)) return conflictBinding([bindingDiagnostic('PROJECT_REPOSITORY_MISMATCH', 'project_ref and host cwd belong to different Git repositories', 'git_root')], base);
+    if (!samePath(explicitCandidate.repository.root, cwdRepository.root)) return conflictBinding([bindingDiagnostic('PROJECT_GIT_ROOT_MISMATCH', 'project_ref and host cwd have different Git roots', 'git_root')], base);
+  }
+  return {status: 'resolved', state: 'resolved', ...base, descriptor: explicitCandidate.descriptor, diagnostics: []};
+}
+
+/** Verify a stored session binding against a hook cwd without rebinding it. */
+export function verifyHostSessionProjectBinding(input = {}) {
+  const projectRef = input?.project_ref ?? input?.projectRef;
+  if (projectRef === undefined || projectRef === null || projectRef === '') return {
+    status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null,
+    cwd: input?.cwd ?? null, git_root: null, repository: null, diagnostics: [],
+  };
+  if (input?.cwd === undefined) return unresolvedBinding([bindingDiagnostic('PROJECT_CWD_REQUIRED', 'A project-bound host event must include its absolute cwd', 'cwd')], {project_ref: projectRef});
+  return resolveProjectBinding({project_ref: projectRef, ...(input?.cwd === undefined ? {} : {cwd: input.cwd})});
 }
 
 function now() {
@@ -394,24 +613,50 @@ export function createHostSessionIngest({db, transaction}) {
 
   function attach(input) {
     const identityValue = commandIdentity(input, 'attach');
-    const projectRef = optionalText(input.project_ref ?? input.projectRef, 'project_ref', MAX_ID * 8);
-    const fingerprint = sha(stableHostJson({operation: 'attach', host: identityValue.host, session_id: identityValue.sessionId, project_ref: projectRef}));
+    const suppliedProjectRefValue = optionalText(input.project_ref ?? input.projectRef, 'project_ref', MAX_ID * 8);
+    const suppliedProjectRef = suppliedProjectRefValue === '' ? null : suppliedProjectRefValue;
+    const suppliedCwd = input.cwd !== undefined ? input.cwd : input.host_cwd;
+    // Omitting project_ref is an explicit request for a personal host session;
+    // a cwd candidate must never silently turn that session into a project one.
+    let requestedBinding = {status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null, cwd: suppliedCwd ?? null, git_root: null, repository: null, diagnostics: []};
+    let requestedProjectRef = suppliedProjectRef;
+    if (suppliedProjectRef !== null) {
+      requestedBinding = resolveProjectBinding({project_ref: suppliedProjectRef, ...(suppliedCwd === undefined ? {} : {cwd: suppliedCwd})});
+      if (requestedBinding.status !== 'resolved') {
+        const code = requestedBinding.status === 'conflict' ? 'HOST_PROJECT_BINDING_CONFLICT' : 'HOST_PROJECT_BINDING_UNRESOLVED';
+        fail(code, 'Host session project binding could not be verified; no session was attached', requestedBinding.status === 'conflict' ? 409 : 422, requestedBinding);
+      }
+      requestedProjectRef = requestedBinding.project_ref;
+    }
+    const fingerprint = sha(stableHostJson({operation: 'attach', host: identityValue.host, session_id: identityValue.sessionId, project_ref: requestedProjectRef}));
     return transaction(() => {
       const replay = controlReplay(db, identityValue.commandId, fingerprint);
       if (replay) return replay;
       const timestamp = now();
       const previous = readSession(db, identityValue.host, identityValue.sessionId);
       if (previous?.status === 'ended') fail('HOST_SESSION_ENDED', 'An ended host session cannot be re-attached; use a new session identity', 409);
-      if (previous && previous.project_ref !== null && projectRef !== null && previous.project_ref !== projectRef) fail('HOST_SESSION_BINDING_CONFLICT', 'Host session is already bound to a different project', 409);
+      if (previous && previous.project_ref !== null && requestedProjectRef !== null && !samePath(previous.project_ref, requestedProjectRef)) fail('HOST_SESSION_BINDING_CONFLICT', 'Host session is already bound to a different project', 409);
+      let binding = requestedBinding;
+      if (previous && previous.project_ref !== null && requestedProjectRef === null) {
+        // A re-attach without project_ref keeps the original project binding.
+        // If a caller supplied cwd, verify it before changing the session back
+        // to attached; otherwise preserve the already verified binding.
+        binding = resolveProjectBinding({project_ref: previous.project_ref, ...(suppliedCwd === undefined ? {} : {cwd: suppliedCwd})});
+        if (binding.status !== 'resolved') {
+          const code = binding.status === 'conflict' ? 'HOST_PROJECT_BINDING_CONFLICT' : 'HOST_PROJECT_BINDING_UNRESOLVED';
+          fail(code, 'Host session project binding could not be verified; session remains unchanged', binding.status === 'conflict' ? 409 : 422, binding);
+        }
+        requestedProjectRef = previous.project_ref;
+      }
       if (!previous) {
         db.prepare(`INSERT INTO host_sessions(host,session_id,status,capture_policy,project_ref,created_at,attached_at,paused_at,ended_at,updated_at,last_event_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(identityValue.host, identityValue.sessionId, 'attached', 'explicit', projectRef, timestamp, timestamp, null, null, timestamp, null);
+          VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(identityValue.host, identityValue.sessionId, 'attached', 'explicit', requestedProjectRef, timestamp, timestamp, null, null, timestamp, null);
       } else {
         db.prepare(`UPDATE host_sessions SET status='attached', project_ref=COALESCE(project_ref,?), attached_at=?, paused_at=NULL, updated_at=?
-          WHERE host=? AND session_id=?`).run(projectRef, timestamp, timestamp, identityValue.host, identityValue.sessionId);
+          WHERE host=? AND session_id=?`).run(requestedProjectRef, timestamp, timestamp, identityValue.host, identityValue.sessionId);
       }
-      const session = sessionView(readSession(db, identityValue.host, identityValue.sessionId));
-      return saveControl(db, identityValue, 'attach', fingerprint, commandResult('attached', identityValue, {operation: 'attach', session}), timestamp);
+      const session = {...sessionView(readSession(db, identityValue.host, identityValue.sessionId)), project_binding: binding};
+      return saveControl(db, identityValue, 'attach', fingerprint, commandResult('attached', identityValue, {operation: 'attach', session, project_binding: binding}), timestamp);
     });
   }
 
@@ -460,6 +705,21 @@ export function createHostSessionIngest({db, transaction}) {
       // ignored event here: an unattached prompt/final answer must not enter
       // any durable Trace database merely because a global hook saw it.
       if (!sessionRow) return eventResult({identityValue, session: null, outcome: 'ignored', reason: 'not_attached'});
+      // Codex includes cwd on hook events.  Once a session is project-bound,
+      // every event must include a cwd that still resolves to that exact
+      // project and repository.  Drift or a missing cwd is an ignored,
+      // structured receipt rather than a turn/finding mutation; personal
+      // sessions intentionally skip this check.
+      let projectBinding;
+      if (sessionRow.project_ref !== null) {
+        projectBinding = verifyHostSessionProjectBinding({project_ref: sessionRow.project_ref, cwd: input.cwd});
+        if (projectBinding.status === 'conflict' || projectBinding.status === 'unresolved') {
+          const result = eventResult({identityValue, session: sessionRow, outcome: 'ignored', reason: projectBinding.status === 'conflict' ? 'project_binding_conflict' : 'project_binding_unresolved', extra: {project_binding: projectBinding}});
+          return result;
+        }
+      } else if (sessionRow.project_ref === null) {
+        projectBinding = {status: 'personal', state: 'personal', project_ref: null, project_dir: null, project_id: null, cwd: input.cwd ?? null, git_root: null, repository: null, diagnostics: []};
+      }
       // Only an attached session is allowed to normalize (and, for tool
       // events, hash) an official body. This keeps an untracked global hook
       // from doing work on arbitrary tool payloads before it becomes eligible
@@ -469,7 +729,7 @@ export function createHostSessionIngest({db, transaction}) {
       if (previousReceipt) return previousReceipt;
       if (sessionRow.status === 'ended') {
         if (identityValue.eventKind !== 'SessionEnd') fail('HOST_SESSION_ENDED', 'Host session has ended; event was not accepted', 409);
-        const result = eventResult({identityValue, session: sessionRow, outcome: 'ignored', reason: 'session_ended'});
+        const result = eventResult({identityValue, session: sessionRow, outcome: 'ignored', reason: 'session_ended', extra: projectBinding === undefined ? {} : {project_binding: projectBinding}});
         insertEvent(db, identityValue, normalized, 'ignored', result, now());
         return result;
       }
@@ -478,7 +738,7 @@ export function createHostSessionIngest({db, transaction}) {
         db.prepare(`UPDATE host_sessions SET status='ended', ended_at=?, updated_at=?, last_event_at=? WHERE host=? AND session_id=?`).run(timestamp, timestamp, timestamp, identityValue.host, identityValue.sessionId);
         db.prepare(`UPDATE host_turns SET state='interrupted', interrupted_at=?, updated_at=?
           WHERE host=? AND session_id=? AND state='started'`).run(timestamp, timestamp, identityValue.host, identityValue.sessionId);
-        const result = eventResult({identityValue, session: {...sessionRow, status: 'ended', ended_at: timestamp, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied', reason: 'session_ended'});
+        const result = eventResult({identityValue, session: {...sessionRow, status: 'ended', ended_at: timestamp, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied', reason: 'session_ended', extra: projectBinding === undefined ? {} : {project_binding: projectBinding}});
         insertEvent(db, identityValue, normalized, 'applied', result, timestamp);
         return result;
       }
@@ -487,7 +747,7 @@ export function createHostSessionIngest({db, transaction}) {
       const timestamp = now();
       if (identityValue.eventKind === 'SessionStart') {
         db.prepare('UPDATE host_sessions SET updated_at=?, last_event_at=? WHERE host=? AND session_id=?').run(timestamp, timestamp, identityValue.host, identityValue.sessionId);
-        const result = eventResult({identityValue, session: {...sessionRow, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied'});
+        const result = eventResult({identityValue, session: {...sessionRow, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied', extra: projectBinding === undefined ? {} : {project_binding: projectBinding}});
         insertEvent(db, identityValue, normalized, 'applied', result, timestamp);
         return result;
       }
@@ -495,7 +755,7 @@ export function createHostSessionIngest({db, transaction}) {
         // Retain only the safe event identity. Native tool input and output
         // remain with Codex/source evidence and never enter web.sqlite.
         db.prepare('UPDATE host_sessions SET updated_at=?, last_event_at=? WHERE host=? AND session_id=?').run(timestamp, timestamp, identityValue.host, identityValue.sessionId);
-        const result = eventResult({identityValue, session: {...sessionRow, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied'});
+        const result = eventResult({identityValue, session: {...sessionRow, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied', extra: projectBinding === undefined ? {} : {project_binding: projectBinding}});
         insertEvent(db, identityValue, normalized, 'applied', result, timestamp);
         return result;
       }
@@ -513,7 +773,7 @@ export function createHostSessionIngest({db, transaction}) {
         }
         db.prepare('UPDATE host_sessions SET updated_at=?, last_event_at=? WHERE host=? AND session_id=?').run(timestamp, timestamp, identityValue.host, identityValue.sessionId);
         const turn = turnView(readTurn(db, identityValue.host, identityValue.sessionId, turnId));
-        const result = eventResult({identityValue, session: {...sessionRow, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied', turn, capturedFields: ['prompt']});
+        const result = eventResult({identityValue, session: {...sessionRow, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied', turn, capturedFields: ['prompt'], extra: projectBinding === undefined ? {} : {project_binding: projectBinding}});
         insertEvent(db, identityValue, normalized, 'applied', result, timestamp);
         return result;
       }
@@ -547,7 +807,7 @@ export function createHostSessionIngest({db, transaction}) {
       }
       db.prepare('UPDATE host_sessions SET updated_at=?, last_event_at=? WHERE host=? AND session_id=?').run(timestamp, timestamp, identityValue.host, identityValue.sessionId);
       const turn = turnView(readTurn(db, identityValue.host, identityValue.sessionId, turnId));
-      const result = eventResult({identityValue, session: {...sessionRow, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied', turn, capturedFields: identityValue.eventKind === 'Stop' ? ['last_assistant_message'] : [], extra: sensemakingJobId === undefined ? {} : {sensemaking_job_id: sensemakingJobId}});
+      const result = eventResult({identityValue, session: {...sessionRow, updated_at: timestamp, last_event_at: timestamp}, outcome: 'applied', turn, capturedFields: identityValue.eventKind === 'Stop' ? ['last_assistant_message'] : [], extra: {...(sensemakingJobId === undefined ? {} : {sensemaking_job_id: sensemakingJobId}), ...(projectBinding === undefined ? {} : {project_binding: projectBinding})}});
       insertEvent(db, identityValue, normalized, 'applied', result, timestamp);
       return result;
     });
@@ -560,10 +820,19 @@ export function createHostSessionIngest({db, transaction}) {
     const desiredBehavior = optionalText(input.desired_behavior ?? input.desiredBehavior, 'desired_behavior');
     const fingerprint = sha(stableHostJson({operation: 'finding', host: identityValue.host, session_id: identityValue.sessionId, turn_id: suppliedTurnId, observation, desired_behavior: desiredBehavior}));
     return transaction(() => {
-      const replay = controlReplay(db, identityValue.commandId, fingerprint);
-      if (replay) return replay;
       const session = readSession(db, identityValue.host, identityValue.sessionId);
       if (!session || session.status === 'ended') fail(session ? 'HOST_SESSION_ENDED' : 'HOST_SESSION_NOT_FOUND', 'A workflow finding requires an attached or paused host session', session ? 409 : 404);
+      // Check the stored project binding before command replay.  Otherwise a
+      // retried finding command could change cwd and receive the old receipt,
+      // masking the drift that must remain fail-closed.
+      if (session.project_ref !== null) {
+        const binding = verifyHostSessionProjectBinding({project_ref: session.project_ref, cwd: input.cwd});
+        if (binding.status === 'conflict' || binding.status === 'unresolved') {
+          fail(binding.status === 'conflict' ? 'HOST_PROJECT_BINDING_CONFLICT' : 'HOST_PROJECT_BINDING_UNRESOLVED', 'Workflow finding cwd does not match the attached project; no finding was captured', binding.status === 'conflict' ? 409 : 422, binding);
+        }
+      }
+      const replay = controlReplay(db, identityValue.commandId, fingerprint);
+      if (replay) return replay;
       const turnId = suppliedTurnId ?? db.prepare(`SELECT turn_id FROM host_turns WHERE host=? AND session_id=? AND state='started' ORDER BY updated_at DESC LIMIT 1`).get(identityValue.host, identityValue.sessionId)?.turn_id;
       if (!turnId) fail('HOST_TURN_NOT_FOUND', 'A workflow finding must reference the current open HostTurn', 404);
       const turn = readTurn(db, identityValue.host, identityValue.sessionId, turnId);

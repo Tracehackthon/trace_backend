@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {TraceRuntime} from '../../../packages/core/runtime/src/index.js';
+import {discoverRuntimeRoot, TraceRuntime} from '../../../packages/core/runtime/src/index.js';
 import {CHANGE_KINDS, CHANGE_STATUSES, type ChangeKind, type ChangeStatus, type ChangeLineage, type Compatibility, type ScopeType, type Validation, ProtocolError} from '../../../packages/core/protocol/src/index.js';
 import {DATA_KINDS, type DataKind} from '../../../packages/core/data/src/index.js';
 import {StorageError} from '../../../packages/core/storage/src/index.js';
@@ -177,21 +177,17 @@ function manifestFor(parsed: Map<string, string[]>): {manifest: ReturnType<typeo
 function runtimeVersionFor(parsed: Map<string, string[]>): string {
   const explicit = one(parsed, '--runtime-version', false);
   if (explicit !== undefined) return explicit;
-  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
-  const roots = [
-    runtimeRoot === undefined ? undefined : path.resolve(runtimeRoot, 'runtime.json'),
-    path.resolve(process.cwd(), 'package.json'),
-    path.resolve(process.cwd(), 'runtime.json'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../package.json'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../runtime.json'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../../package.json'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../../runtime.json'),
-  ].filter((value): value is string => value !== undefined);
-  for (const candidate of roots) {
-    if (!fs.existsSync(candidate)) continue;
-    try { const value = JSON.parse(fs.readFileSync(candidate, 'utf8')) as {version?: unknown; runtime_version?: unknown}; const version = value.version ?? value.runtime_version; if (typeof version === 'string' && version.length > 0) return version; } catch { /* keep looking */ }
+  return validatedRuntimeRoot().runtime_version!;
+}
+
+function validatedRuntimeRoot() {
+  const explicit = process.env.TRACE_RUNTIME_ROOT;
+  if (explicit !== undefined && !path.isAbsolute(explicit)) throw new ProtocolError('INVALID_INPUT', 'TRACE_RUNTIME_ROOT must be an absolute directory');
+  try {
+    return discoverRuntimeRoot(explicit === undefined ? [process.cwd(), path.dirname(process.argv[1] ?? process.cwd())] : [explicit], explicit !== undefined);
+  } catch (error) {
+    throw new ProtocolError('INVALID_INPUT', `cannot validate Trace runtime root: ${error instanceof Error ? error.message : String(error)}`);
   }
-  throw new ProtocolError('INVALID_INPUT', 'cannot resolve runtime version; pass --runtime-version VERSION');
 }
 
 function defaultInstanceId(projectDir: string): string { return `trace-${path.basename(path.resolve(projectDir)).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'project'}`; }
@@ -229,37 +225,41 @@ function userIdForProduct(parsed: Map<string, string[]>): string {
   return `local-${normalized || 'user'}`;
 }
 
-function findProjectContext(directory: string): ProductProjectContext | undefined {
-  let cursor = path.resolve(directory);
-  if (!fs.existsSync(cursor) || !fs.statSync(cursor).isDirectory()) return undefined;
-  while (true) {
-    const traceDir = path.join(cursor, '.trace');
-    const descriptorFile = path.join(traceDir, 'project.json');
-    if (fs.existsSync(descriptorFile)) {
-      let descriptor: ProjectInstanceDescriptor;
-      try { descriptor = validateProjectInstanceDescriptor(JSON.parse(fs.readFileSync(descriptorFile, 'utf8'))); }
-      catch (error) { throw new ProtocolError('PROJECT_INVALID', `Trace project descriptor is invalid: ${error instanceof Error ? error.message : String(error)}`); }
-      return {project_dir: cursor, trace_dir: traceDir, state_file: path.join(cursor, descriptor.state_file), descriptor};
-    }
-    const parent = path.dirname(cursor);
-    if (parent === cursor) return undefined;
-    cursor = parent;
-  }
-}
-
-function projectContext(parsed: Map<string, string[]>): ProductProjectContext {
+async function projectContext(parsed: Map<string, string[]>): Promise<ProductProjectContext> {
   const explicitProject = one(parsed, '--project-dir', false) ?? one(parsed, '--project', false);
   const requested = path.resolve(explicitProject ?? process.cwd());
   if (!fs.existsSync(requested) || !fs.statSync(requested).isDirectory()) throw new ProtocolError('INVALID_INPUT', `project directory does not exist: ${requested}`);
-  const context = findProjectContext(requested);
-  if (context === undefined) throw new ProtocolError('PROJECT_NOT_INITIALIZED', 'No .trace/project.json was found. Run "trace init" in the project directory first.');
-  return context;
+  // The upward descriptor walk is only a candidate lookup.  Product commands
+  // must pass the same descriptor/Git/worktree checks as a routed host event before
+  // opening the project state file; a marker in an arbitrary parent directory
+  // is not, by itself, an authoritative binding.
+  const binding = await eventProjectContext({cwd: requested});
+  if (binding.status === 'personal') throw new ProtocolError('PROJECT_NOT_INITIALIZED', 'No verified .trace/project.json project was found. Run "trace init" in a Git project directory first.');
+  if (binding.status !== 'resolved' || binding.context === undefined) {
+    const diagnostic = binding.diagnostics[0];
+    throw new ProtocolError('PROJECT_BINDING_UNRESOLVED', diagnostic === undefined ? 'Project identity could not be verified.' : `${diagnostic.code}: ${diagnostic.message}`);
+  }
+  return binding.context;
 }
 
-function eventProjectContext(event: Record<string, unknown>): ProductProjectContext | undefined {
-  const cwd = event.cwd;
-  if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return undefined;
-  return findProjectContext(cwd);
+type EventProjectBinding = {
+  status: 'resolved' | 'personal' | 'unresolved' | 'conflict';
+  project_ref: string | null;
+  project_dir: string | null;
+  project_id: string | null;
+  cwd: string | null;
+  git_root: string | null;
+  diagnostics: Array<{code: string; message: string; field?: string}>;
+  context?: ProductProjectContext;
+};
+
+/** Resolve a hook cwd without treating an upward .trace marker as authority. */
+async function eventProjectContext(event: Record<string, unknown>): Promise<EventProjectBinding> {
+  const module = await productWorkspaceModule();
+  const value = module.resolveProjectBinding({cwd: event.cwd});
+  if (value.status !== 'resolved' || value.project_dir === null || value.descriptor === undefined) return value;
+  const traceDir = path.join(value.project_dir, '.trace');
+  return {...value, context: {project_dir: value.project_dir, trace_dir: traceDir, state_file: path.join(value.project_dir, value.descriptor.state_file), descriptor: value.descriptor}};
 }
 
 function sourceProfileForContext(context: ProductProjectContext): MyWikiSourceProfile {
@@ -433,18 +433,17 @@ function hostWebStateFile(parsed?: Map<string, string[]>): string | undefined {
   const configured = explicit ?? process.env.TRACE_WEB_STATE_FILE;
   if (configured === undefined || configured.length === 0) return undefined;
   if (!path.isAbsolute(configured)) throw new ProtocolError('INVALID_PATH', 'web state file must be absolute');
-  const resolved = path.resolve(configured);
-  if (path.basename(resolved).toLowerCase() === 'trace.sqlite') throw new ProtocolError('WRONG_DATABASE', 'Host session ingest must use Product Workspace web.sqlite, not project trace.sqlite');
-  return resolved;
+  // Database role is verified from the SQLite application/schema/identity
+  // metadata when it is opened. A filename is not an authority and a valid
+  // Product database remains valid after a harmless rename.
+  return path.resolve(configured);
 }
 
 function hostAgentStateFile(parsed?: Map<string, string[]>): string {
   const explicit = parsed === undefined ? undefined : one(parsed, '--agent-state-file', false);
   const configured = explicit ?? process.env.TRACE_AGENT_STATE_FILE;
   if (configured === undefined || configured.length === 0 || !path.isAbsolute(configured)) throw new ProtocolError('INVALID_PATH', 'agent state file must be absolute; use --agent-state-file ABS or TRACE_AGENT_STATE_FILE');
-  const resolved = path.resolve(configured);
-  if (['web.sqlite', 'trace.sqlite'].includes(path.basename(resolved).toLowerCase())) throw new ProtocolError('WRONG_DATABASE', 'Agent sensemaking state must use an independent agent.sqlite');
-  return resolved;
+  return path.resolve(configured);
 }
 
 type HostWorkflowPort = {
@@ -469,39 +468,32 @@ type HostWorkflowPort = {
 };
 
 async function sensemakingWorkerModule(): Promise<{createSensemakingWorker: (options: {webFile: string; agentFile: string}) => {once: () => unknown; drain: (options: {limit?: number}) => unknown; health?: () => unknown; close: () => void}}> {
-  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
-  const candidates = [runtimeRoot, process.cwd(), path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../'), path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../..')]
-    .filter((value): value is string => typeof value === 'string' && path.isAbsolute(value));
-  for (const initial of candidates) {
-    let cursor = path.resolve(initial);
-    for (let steps = 0; steps < 10; steps += 1) {
-      const modulePath = path.join(cursor, 'apps', 'agent', 'sensemaking-worker.mjs');
-      if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createSensemakingWorker: (options: {webFile: string; agentFile: string}) => {once: () => unknown; drain: (options: {limit?: number}) => unknown; health?: () => unknown; close: () => void}};
-      const parent = path.dirname(cursor); if (parent === cursor) break; cursor = parent;
-    }
-  }
+  const root = validatedRuntimeRoot().root;
+  const modulePath = path.join(root, 'apps', 'agent', 'sensemaking-worker.mjs');
+  if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createSensemakingWorker: (options: {webFile: string; agentFile: string}) => {once: () => unknown; drain: (options: {limit?: number}) => unknown; health?: () => unknown; close: () => void}};
   throw new ProtocolError('IO_ERROR', 'Sensemaking worker module is unavailable; cannot drain local jobs');
 }
 
 /** Load the source Product Workspace adapter from both checkout and dist CLI. */
-async function productWorkspaceModule(): Promise<{createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}}> {
-  const runtimeRoot = process.env.TRACE_RUNTIME_ROOT;
-  const candidates = [
-    runtimeRoot,
-    process.cwd(),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../../'),
-    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), '../../../..'),
-  ].filter((value): value is string => typeof value === 'string' && path.isAbsolute(value));
-  for (const initial of candidates) {
-    let cursor = path.resolve(initial);
-    for (let steps = 0; steps < 10; steps += 1) {
-      const modulePath = path.join(cursor, 'packages', 'product', 'workspace', 'src', 'workspace.mjs');
-      if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as {createProductWorkspace: (options: {file: string}) => {hostSessions: {attach: (input: Record<string, unknown>) => Record<string, unknown>; pause: (input: Record<string, unknown>) => Record<string, unknown>; detach: (input: Record<string, unknown>) => Record<string, unknown>; ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>; captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>}; hostWorkflow?: HostWorkflowPort; close: () => void}};
-      const parent = path.dirname(cursor);
-      if (parent === cursor) break;
-      cursor = parent;
-    }
-  }
+type ProductWorkspaceModule = {
+  resolveProjectBinding: (input?: Record<string, unknown>) => EventProjectBinding & {descriptor?: ProjectInstanceDescriptor};
+  createProductWorkspace: (options: {file: string}) => {
+    hostSessions: {
+      attach: (input: Record<string, unknown>) => Record<string, unknown>;
+      pause: (input: Record<string, unknown>) => Record<string, unknown>;
+      detach: (input: Record<string, unknown>) => Record<string, unknown>;
+      ingestEvent: (input: Record<string, unknown>) => Record<string, unknown>;
+      captureWorkflowFinding: (input: Record<string, unknown>) => Record<string, unknown>;
+    };
+    hostWorkflow?: HostWorkflowPort;
+    close: () => void;
+  };
+};
+
+async function productWorkspaceModule(): Promise<ProductWorkspaceModule> {
+  const root = validatedRuntimeRoot().root;
+  const modulePath = path.join(root, 'packages', 'product', 'workspace', 'src', 'workspace.mjs');
+  if (fs.existsSync(modulePath)) return await import(pathToFileURL(modulePath).href) as ProductWorkspaceModule;
   throw new ProtocolError('IO_ERROR', 'Product Workspace adapter is unavailable; cannot receive a Codex host session');
 }
 
@@ -571,7 +563,7 @@ export async function run(argv: string[]): Promise<void> {
       ].join('\n'), {status: 'initialized', template_id: templateId, project: initialized.project_dir, trace_dir: initialized.trace_dir, source_mode: initialized.descriptor.source_mode, collaboration_model: {model_id: initialized.collaboration_model.model_id, version: initialized.collaboration_model.version}, source_activation: {manifest_id: initialized.source_activation.manifest_id, version: initialized.source_activation.version, entry_points: initialized.source_activation.entry_points.length}, next_actions: ['trace codex enable', 'trace profile', 'trace status']});
       return;
     }
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     if (group === 'source' && action === 'update') {
       if (one(parsed, '--confirm', false) !== 'true') throw new ProtocolError('USER_CONFIRMATION_REQUIRED', 'source update requires --confirm true');
       const file = one(parsed, '--file')!;
@@ -829,7 +821,7 @@ export async function run(argv: string[]): Promise<void> {
   if (group === 'review') {
     if (!action || action.startsWith('--')) throw new ProtocolError('INVALID_INPUT', 'trace review requires an inbox item ID');
     const parsed = args(rest);
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     const reviewed = productReview(context, action);
     const saveFile = one(parsed, '--save', false);
     if (saveFile !== undefined) {
@@ -861,7 +853,7 @@ export async function run(argv: string[]): Promise<void> {
   }
   if (group === 'codex' && (action === 'enable' || action === 'status')) {
     const parsed = args(rest);
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     const installer = new CodexHookInstaller(one(parsed, '--hooks-file', false));
     if (action === 'status') {
       const raw = fs.existsSync(installer.hooksFile) ? fs.readFileSync(installer.hooksFile, 'utf8') : '{}';
@@ -870,11 +862,11 @@ export async function run(argv: string[]): Promise<void> {
       const hasNativeEvidenceEvents = /"PreToolUse"\s*:/i.test(raw) && /"PostToolUse"\s*:/i.test(raw);
       const status = routedByEventCwd && hasNativeEvidenceEvents ? 'enabled' : hasTraceHook ? 'needs_reenable' : 'disabled';
       const message = status === 'enabled'
-        ? 'Trace 会按每次 Codex 事件的 cwd 找到当前项目；将版本化协作方式与认知源地图交给 Codex，Codex 自己检索/读取来源，Trace 只记录实际访问证据。完整 prompt 不会自动入库。'
+        ? 'Trace 会把每次 Codex 事件的 cwd 作为项目候选，并核对 descriptor、Git root 与 worktree 身份；只有验证通过才激活项目来源。Codex 自己检索/读取来源，Trace 只记录实际访问证据。完整 prompt 不会自动入库。'
         : status === 'needs_reenable'
           ? '发现旧版或不完整 hook。运行 trace codex enable，启用按事件 cwd 路由和宿主检索证据。'
           : '下一步：trace codex enable';
-      productResult(parsed, [`Codex：${status === 'enabled' ? '已启用' : status === 'needs_reenable' ? '需要升级' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, `路由：${routedByEventCwd ? '事件 cwd → 当前项目 .trace/' : hasTraceHook ? '旧版固定项目（不安全）' : '未配置'}`, `宿主检索证据：${hasNativeEvidenceEvents ? 'PreToolUse + PostToolUse 已配置' : '缺失，需升级'}`, message].join('\n'), {status, hooks_file: installer.hooksFile, project: context.project_dir, routing: routedByEventCwd ? 'event_cwd' : hasTraceHook ? 'legacy_project_binding' : 'none', host_retrieval_evidence: hasNativeEvidenceEvents});
+      productResult(parsed, [`Codex：${status === 'enabled' ? '已启用' : status === 'needs_reenable' ? '需要升级' : '未启用'}`, `hooks 配置：${installer.hooksFile}`, `路由：${routedByEventCwd ? '事件 cwd 候选 → descriptor/Git/worktree 核验' : hasTraceHook ? '旧版固定项目（不安全）' : '未配置'}`, `宿主检索证据：${hasNativeEvidenceEvents ? 'PreToolUse + PostToolUse 已配置' : '缺失，需升级'}`, message].join('\n'), {status, hooks_file: installer.hooksFile, project: context.project_dir, routing: routedByEventCwd ? 'verified_event_binding' : hasTraceHook ? 'legacy_project_binding' : 'none', host_retrieval_evidence: hasNativeEvidenceEvents});
       return;
     }
     const command = productHookCommand();
@@ -891,7 +883,7 @@ export async function run(argv: string[]): Promise<void> {
   }
   if (group === 'doctor' && (action === undefined || action.startsWith('--'))) {
     const parsed = args(action === undefined ? rest : [action, ...rest]);
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     const report = doctorSqlite(context.state_file);
     const errors = report.checks.filter(check => check.status === 'error').length;
     const warnings = report.checks.filter(check => check.status === 'warn').length;
@@ -900,7 +892,7 @@ export async function run(argv: string[]): Promise<void> {
   }
   if (group === 'backup' && (action === 'create' || action === 'restore') && ![...rest].includes('--sqlite-state-file')) {
     const parsed = args(rest);
-    const context = projectContext(parsed);
+    const context = await projectContext(parsed);
     if (action === 'create') {
       const fallback = path.join(context.trace_dir, 'backups', `trace-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
       const backup = backupSqlite(context.state_file, one(parsed, '--file', false) ?? fallback);
@@ -1153,7 +1145,7 @@ export async function run(argv: string[]): Promise<void> {
     const store = await openHostProductWorkspace(file);
     try {
       const value = operation === 'attach'
-        ? store.hostSessions.attach({...base, ...(projectRef === undefined ? {} : {projectRef})})
+        ? store.hostSessions.attach({...base, cwd: process.cwd(), ...(projectRef === undefined ? {} : {projectRef})})
         : operation === 'pause' ? store.hostSessions.pause(base) : store.hostSessions.detach(base);
       result({status: value.status, ...value});
     } finally { store.close(); }
@@ -1172,7 +1164,7 @@ export async function run(argv: string[]): Promise<void> {
     const commandId = one(parsed, '--command-id', false) ?? `codex-finding:${createHash('sha256').update(JSON.stringify({sessionId, turnId, observation, desiredBehavior: desiredBehavior ?? null})).digest('hex').slice(0, 32)}`;
     const store = await openHostProductWorkspace(file);
     try {
-      const value = store.hostSessions.captureWorkflowFinding({commandId, host: one(parsed, '--host', false) ?? 'codex', sessionId, turnId, observation, ...(desiredBehavior === undefined ? {} : {desiredBehavior})});
+      const value = store.hostSessions.captureWorkflowFinding({commandId, host: one(parsed, '--host', false) ?? 'codex', sessionId, turnId, observation, cwd: process.cwd(), ...(desiredBehavior === undefined ? {} : {desiredBehavior})});
       result({status: value.status, ...value});
     } finally { store.close(); }
     return;
@@ -1196,22 +1188,61 @@ export async function run(argv: string[]): Promise<void> {
     const profilePath = one(parsed, '--source-profile', false);
     const explicitSqlite = one(parsed, '--sqlite-state-file', false);
     if (routeFromEventCwd && (profilePath !== undefined || explicitSqlite !== undefined)) throw new ProtocolError('INVALID_INPUT', '--route-from-event-cwd cannot be combined with static source or state paths');
-    const context = routeFromEventCwd ? eventProjectContext(hookEvent) : explicitSqlite === undefined ? projectContext(parsed) : undefined;
+    const routedBinding = routeFromEventCwd ? await eventProjectContext(hookEvent) : undefined;
+    const context = routeFromEventCwd ? routedBinding?.context : explicitSqlite === undefined ? await projectContext(parsed) : undefined;
     // A user-level Codex hook also sees non-Trace projects. It may still feed
     // an explicitly attached host session into the user Product Workspace;
     // without an existing web.sqlite (or an attached session row) this remains
     // a successful no-op and never creates state from a raw prompt.
     const webFile = hostWebStateFile();
-    if (routeFromEventCwd && context === undefined) {
+    if (routeFromEventCwd && routedBinding !== undefined && routedBinding.status !== 'resolved') {
+      let hostSessionEvent: Record<string, unknown> | undefined;
       if (webFile !== undefined && fs.existsSync(webFile)) {
         const hostStore = await openHostProductWorkspace(webFile);
         // The hook payload is untrusted; keep the storage namespace bound to
         // the adapter rather than allowing an arbitrary `host` field to forge
         // another host identity.
-        try { hostStore.hostSessions.ingestEvent({...hookEvent, host: 'codex'}); }
+        try {
+          if (typeof hookEvent.session_id === 'string' && hookEvent.session_id.length > 0) hostSessionEvent = hostStore.hostSessions.ingestEvent({...hookEvent, host: 'codex'});
+        }
         finally { hostStore.close(); }
       }
-      process.stdout.write('{}\n'); return;
+      const hostBinding = hostSessionEvent?.project_binding;
+      const hostBindingStatus = hostBinding && typeof hostBinding === 'object' && !Array.isArray(hostBinding) && ((hostBinding as Record<string, unknown>).status === 'unresolved' || (hostBinding as Record<string, unknown>).status === 'conflict')
+        ? (hostBinding as Record<string, unknown>).status : undefined;
+      if (routedBinding.status === 'personal' && hostBindingStatus === undefined) {
+        // No Trace candidate is the normal user-level case.  Keep forwarding
+        // an explicitly attached personal session, but never synthesize a
+        // project activation from this cwd.
+        if (typeof hookEvent.session_id !== 'string' || hookEvent.session_id.length === 0) {
+          if (hookEvent.hook_event_name === 'SessionStart' || hookEvent.hook_event_name === 'UserPromptSubmit') process.stdout.write(JSON.stringify({hookSpecificOutput: {hookEventName: hookEvent.hook_event_name, additionalContext: JSON.stringify({trace: 'host_session', status: 'unresolved', reason: 'missing_session_id', durable_identity: 'session_id_required'})}}) + '\n');
+          else process.stdout.write('{}\n');
+        } else process.stdout.write('{}\n');
+        return;
+      }
+      // Do not open a TraceRuntime for an unverified cwd.  In particular this
+      // prevents an invalid/ambiguous candidate from receiving an activation.
+      if (hookEvent.hook_event_name === 'SessionStart' || hookEvent.hook_event_name === 'UserPromptSubmit') {
+        const safeEvent = hostSessionEvent === undefined ? undefined : (({turn: _turn, ...safe}) => safe)(hostSessionEvent);
+        const missingSessionId = typeof hookEvent.session_id !== 'string' || hookEvent.session_id.length === 0;
+        process.stdout.write(JSON.stringify({hookSpecificOutput: {
+          hookEventName: hookEvent.hook_event_name,
+          additionalContext: JSON.stringify({trace: 'host_session', status: routedBinding.status === 'personal' ? hostBindingStatus : routedBinding.status, reason: missingSessionId ? 'missing_session_id' : routedBinding.diagnostics[0]?.code ?? (hostBindingStatus === 'conflict' ? 'project_binding_conflict' : 'project_binding_unresolved'), durable_identity: missingSessionId ? 'session_id_required' : undefined, project_binding: routedBinding, ...(safeEvent === undefined ? {} : {host_session_event: safeEvent})}),
+        }}) + '\n');
+      } else process.stdout.write('{}\n');
+      return;
+    }
+    // Avoid even opening/creating a project Trace database for a durable hook
+    // event that has no Codex session identity.  buildCodexHookOutput repeats
+    // this guard at the adapter boundary, but this earlier CLI guard keeps the
+    // fail-closed path side-effect free as well as activation-free.
+    const durableHookEvent = typeof hookEvent.hook_event_name === 'string'
+      && ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'Interrupt', 'SessionEnd'].includes(hookEvent.hook_event_name);
+    if (durableHookEvent && (typeof hookEvent.session_id !== 'string' || hookEvent.session_id.length === 0)) {
+      if (hookEvent.hook_event_name === 'SessionStart' || hookEvent.hook_event_name === 'UserPromptSubmit') {
+        process.stdout.write(JSON.stringify({hookSpecificOutput: {hookEventName: hookEvent.hook_event_name, additionalContext: JSON.stringify({trace: 'host_session', status: 'unresolved', reason: 'missing_session_id', durable_identity: 'session_id_required'})}}) + '\n');
+      } else process.stdout.write('{}\n');
+      return;
     }
     const configuration = profilePath === undefined
       ? context === undefined ? {} : activationConfigurationForContext(context)
@@ -1418,6 +1449,7 @@ export async function run(argv: string[]): Promise<void> {
 
 run(process.argv.slice(2)).catch((error) => {
   const known = error as {code?: string; message?: string};
-  process.stdout.write(JSON.stringify({ok: false, code: known.code ?? (error instanceof StorageError ? error.code : 'IO_ERROR'), message: known.message ?? String(error)}) + '\n');
+  const details = (error as {details?: unknown}).details;
+  process.stdout.write(JSON.stringify({ok: false, code: known.code ?? (error instanceof StorageError ? error.code : 'IO_ERROR'), message: known.message ?? String(error), ...(details === undefined ? {} : {details})}) + '\n');
   process.exitCode = 1;
 });

@@ -11,6 +11,7 @@ const root = path.resolve(process.cwd());
 const installer = path.join(root, 'native', 'install.mjs');
 const codexPluginInstaller = path.join(root, 'native', 'install-codex-plugin.mjs');
 const packager = path.join(root, 'scripts', 'package.mjs');
+const traceMcpLauncher = path.join(root, 'plugins', 'trace-codex', 'scripts', 'launch-trace-mcp.mjs');
 const hash = value => createHash('sha256').update(value).digest('hex');
 
 test('native installer validates a release manifest and preserves replaced targets', () => {
@@ -68,6 +69,7 @@ test('distribution retains product documentation and the trace launcher', () => 
     const packagedBundleIndex = fs.readFileSync(path.join(output, 'bundle', 'README.md'), 'utf8');
     assert.match(packagedBundleIndex, /\]\(\.\.\/docs\/versioning\.md\)/, 'packaged bundle index links must resolve inside the distribution');
     assert.equal(fs.existsSync(path.join(output, 'bundle', '..', 'docs', 'versioning.md')), true);
+    const runtimeIdentity = JSON.parse(fs.readFileSync(path.join(output, 'runtime.json'), 'utf8'));
     const manifest = JSON.parse(fs.readFileSync(path.join(output, 'release-manifest.json'), 'utf8'));
     const sqlJsEntries = manifest.files
       .filter(file => file.path.startsWith('dist/node_modules/sql.js/'))
@@ -100,6 +102,10 @@ test('distribution retains product documentation and the trace launcher', () => 
     assert.equal(manifest.distribution_eligibility, manifest.source_identity.clean ? 'release-ready' : 'development-dirty');
     assert.match(manifest.source_identity.content_sha256, /^[0-9a-f]{64}$/);
     assert.ok(manifest.api_surface.host.includes('/api/product/host/capability/publish'));
+    for (const route of ['/api/agent/runs/:id/approval', '/api/agent/runs/:id/input']) {
+      assert.ok(runtimeIdentity.api_surface.agent.includes(route), `runtime.json must advertise ${route}`);
+      assert.ok(manifest.api_surface.agent.includes(route), `release manifest must advertise ${route}`);
+    }
     assert.equal(manifest.host_compatibility.codex_plugin.id, 'codex-plugin-marketplace-v1');
     assert.equal(fs.existsSync(path.join(output, 'apps', 'desktop', 'runtime-identity.mjs')), true);
     const installed = path.join(directory, 'installed');
@@ -109,7 +115,15 @@ test('distribution retains product documentation and the trace launcher', () => 
     assert.equal(fs.existsSync(path.join(installed, 'dist', 'apps', 'mcp', 'node_modules', 'zod', 'v3', 'index.js')), true);
     const pluginPlan = spawnSync(process.execPath, [path.join(installed, 'native', 'install-codex-plugin.mjs'), '--runtime-root', installed, '--marketplace-root', path.join(directory, 'codex-marketplace'), '--dry-run'], {encoding: 'utf8'});
     assert.equal(pluginPlan.status, 0, pluginPlan.stderr);
-    assert.equal(JSON.parse(pluginPlan.stdout).plugin, 'trace-codex');
+    const plan = JSON.parse(pluginPlan.stdout);
+    assert.equal(plan.plugin, 'trace-codex');
+    assert.equal(plan.runtime_kind, 'packaged');
+    assert.equal(plan.runtime_version, manifest.runtime_version);
+    const fake = fakeCodexCommand(directory);
+    const pluginInstalled = spawnSync(process.execPath, [path.join(installed, 'native', 'install-codex-plugin.mjs'), '--runtime-root', installed, '--marketplace-root', path.join(directory, 'codex-marketplace'), '--codex-command', fake.command, '--codex-arg', fake.argument, '--confirm', 'true'], {encoding: 'utf8', env: {...process.env, FAKE_CODEX_STATE: fake.stateFile}});
+    assert.equal(pluginInstalled.status, 0, pluginInstalled.stderr);
+    const installedMcp = JSON.parse(fs.readFileSync(path.join(directory, 'codex-marketplace', 'plugins', 'trace-codex', '.mcp.json'), 'utf8'));
+    assert.equal(installedMcp.mcpServers.trace.env.TRACE_RUNTIME_ROOT, installed);
   } finally {
     fs.rmSync(directory, {recursive: true, force: true});
   }
@@ -125,6 +139,9 @@ test('Codex plugin installer is explicit and its dry run never alters a user mar
     assert.equal(plan.status, 'planned');
     assert.equal(plan.dry_run, true);
     assert.equal(plan.automatic_upgrade, false);
+    assert.equal(plan.runtime_kind, 'source');
+    assert.equal(plan.runtime_version, '0.8.0');
+    assert.match(plan.plugin_version, /^\d+\.\d+\.\d+/);
     assert.equal(fs.existsSync(marketplace), false);
   } finally {
     fs.rmSync(directory, {recursive: true, force: true});
@@ -155,8 +172,8 @@ test('Codex plugin installer never removes an existing marketplace when staging 
   const runtime = path.join(directory, 'broken-runtime');
   const marketplace = path.join(directory, 'marketplace');
   try {
-    // pluginFiles() accepts the manifest and runtime entry; writeManagedPlugin()
-    // then fails because a malformed packaged plugin has no .mcp.json.
+    // A lookalike directory must be rejected before staging.  It has the
+    // plugin and MCP entry names but no Trace runtime/package manifest.
     fs.mkdirSync(path.join(runtime, 'plugins', 'trace-codex', '.codex-plugin'), {recursive: true});
     fs.mkdirSync(path.join(runtime, 'dist', 'apps', 'mcp', 'src'), {recursive: true});
     fs.writeFileSync(path.join(runtime, 'plugins', 'trace-codex', '.codex-plugin', 'plugin.json'), '{}\n', 'utf8');
@@ -166,9 +183,24 @@ test('Codex plugin installer never removes an existing marketplace when staging 
 
     const failed = spawnSync(process.execPath, [codexPluginInstaller, '--runtime-root', runtime, '--marketplace-root', marketplace, '--replace', '--confirm', 'true'], {encoding: 'utf8'});
     assert.notEqual(failed.status, 0);
+    assert.equal(JSON.parse(failed.stderr).code, 'RUNTIME_ROOT_INVALID');
     assert.equal(fs.readFileSync(path.join(marketplace, 'sentinel'), 'utf8'), 'preserve this marketplace');
     assert.deepEqual(fs.readdirSync(directory).filter(name => name.startsWith('marketplace.previous-')), [], 'the old marketplace must not be moved before staging succeeds');
     assert.deepEqual(fs.readdirSync(directory).filter(name => name.startsWith('marketplace.staging-')), [], 'failed staging is cleaned up without touching the old marketplace');
+  } finally { fs.rmSync(directory, {recursive: true, force: true}); }
+});
+
+test('Trace MCP launcher rejects a lookalike TRACE_RUNTIME_ROOT before starting it', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mcp-root-validation-'));
+  const runtime = path.join(directory, 'lookalike-runtime');
+  const sentinel = path.join(directory, 'started');
+  try {
+    fs.mkdirSync(path.join(runtime, 'dist', 'apps', 'mcp', 'src'), {recursive: true});
+    fs.writeFileSync(path.join(runtime, 'dist', 'apps', 'mcp', 'src', 'main.js'), `require('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'started');\n`, 'utf8');
+    const failed = spawnSync(process.execPath, [traceMcpLauncher], {encoding: 'utf8', env: {...process.env, TRACE_RUNTIME_ROOT: runtime}});
+    assert.notEqual(failed.status, 0);
+    assert.match(failed.stderr, /could not validate its installed runtime/i);
+    assert.equal(fs.existsSync(sentinel), false, 'launcher must validate the runtime before starting its MCP entry');
   } finally { fs.rmSync(directory, {recursive: true, force: true}); }
 });
 

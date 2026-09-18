@@ -10,7 +10,7 @@
 npm start -- --agent
 ```
 
-默认兼容路径使用本机 Codex CLI 0.153.4 且需已登录。也可以配置独立模型或完整外部 Agent，此时不要求机器安装 Codex。启动不消耗模型额度；真正提交生成才会执行。**不需要安装 Trace Plugin，不需要先开启 hooks。** 默认同源本机地址端口 4173。
+默认兼容路径使用本机 Codex CLI 0.155.0-alpha.2.6 且需已登录；它是明确命名的 `bounded-analysis` 模式：每次运行使用空临时目录、短线程和 Trace 受限工具，不读取项目文件。也可以由服务端配置独立的 `native` Codex profile，让 Codex 在管理员选定的真实项目目录中读取该项目的 AGENTS/skills/config，并以持久 thread 执行；native 连接不依赖静态 semver 白名单，而是在同一可执行文件生成 Schema 并完成 no-model wire qualification 后才放行，二进制或 Schema 更新后需重新资格验证。该模式不是浏览器可提交的任意 cwd，也不会自动批准工具或文件写入。还可以配置独立模型或完整外部 Agent，此时不要求机器安装 Codex。启动不消耗模型额度；真正提交生成才会执行。**不需要安装 Trace Plugin，不需要先开启 hooks。** 默认同源本机地址端口 4173。
 
 ## Web 如何调用
 
@@ -35,7 +35,7 @@ npm start -- --agent
 | `service.mjs` / `runtime.mjs` | 通用 executor 契约、受限工具桥、请求去重、运行状态、取消、超时、过期保护 |
 | `context.mjs` / `protocol.mjs` | 有界上下文、fresh、请求与候选校验 |
 | `profiles.mjs` | 服务端 profile 读取、选择、版本绑定和安全公开描述 |
-| `codex.mjs` | 可选 Codex JSON-RPC、版本约束与子进程隔离 |
+| `codex.mjs` | Codex JSON-RPC、协议/fixture 版本约束、bounded-analysis 隔离与 native 项目线程 |
 | `model.mjs` / `external-agent.mjs` | 受限模型工具循环与完整外部 Agent 协议 |
 | `remote-http.mjs` | 固定 HTTPS endpoint、服务端凭据、响应上限和错误净化 |
 | `store.mjs` | 独立 agent.sqlite 的运行、候选与事件持久化；附加 sensemaking run/event/result 表不保存 HostTurn 正文 |
@@ -44,6 +44,8 @@ npm start -- --agent
 | `server.mjs` | 可选独立 API 宿主，不是默认推荐的第二个服务 |
 
 当前 HTTP 边界仍是单用户、本机同源、默认单并发；远程执行器不等于该 HTTP 服务已经具备公网多租户身份。默认关闭外部检索；可[显式开启知乎／全网来源](../../docs/zhihu-native.md)，不提供任意文件执行或自动采纳。网页已接入回答、来源、候选接受／放弃／撤销和 Host Session 视图；runtime package 已携带 Agent/Host 服务源码，但发行包的安装、升级、备份恢复仍需按实际目标单独验收。后续顺序见[生产计划](../../docs/production-plan.md)。
+
+Native profile 只接受服务端 profile 文件中的绝对 `projectCwd`。运行请求可带 `threadId` 以恢复该 profile 已建立的持久 Codex thread；省略则 `thread/start`，不会设置 `ephemeral:true`、`history:none` 或 `project_doc_max_bytes:0`。Codex 发出审批或交互式输入请求时，当前纵切会先持久化带安全摘要的 `runtime.approval.required` / `runtime.input.required` 事件并保持 turn 等待；同源客户端必须通过 `POST /api/agent/runs/:runId/approval` 或 `/input` 明确响应，不能隐式批准。断线、超时、重启会 fail-closed，不会自动恢复或复活迟到响应；Trace 不从 Codex 读取或复制 `auth.json`，账号状态仍通过 Codex `account/read` 核验。
 
 ## Host Session sensemaking worker（第三阶段）
 

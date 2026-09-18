@@ -39,12 +39,13 @@ export const SENSEMAKING_OUTPUT_SCHEMA = {
   },
 };
 export function validateRequest(value) {
-  demand(keys(value, ['protocolVersion', 'requestId', 'expectedRevision', 'matterId', 'contextMode', 'contextEpoch', 'purpose', 'input', 'selection', 'sourceIds', 'previousRunId', 'retrieval', 'profileId']), 'INVALID_REQUEST', '请求包含不支持的字段。', 400);
+  demand(keys(value, ['protocolVersion', 'requestId', 'expectedRevision', 'matterId', 'contextMode', 'contextEpoch', 'purpose', 'input', 'selection', 'sourceIds', 'previousRunId', 'retrieval', 'profileId', 'threadId']), 'INVALID_REQUEST', '请求包含不支持的字段。', 400);
   demand(value.protocolVersion === 1 && identity(value.requestId) && identity(value.matterId) && integer(value.expectedRevision)
     && integer(value.contextEpoch) && ['fresh', 'resume'].includes(value.contextMode) && PURPOSES.includes(value.purpose)
     && text(value.input) && value.input.trim(), 'INVALID_REQUEST', '需要有效的请求身份、事项、版本、上下文模式、用途和输入。', 400);
   demand(value.previousRunId === undefined || identity(value.previousRunId), 'INVALID_REQUEST', 'previousRunId 无效。', 400);
   demand(value.profileId === undefined || identity(value.profileId) && value.profileId.length <= 80, 'INVALID_PROFILE_ID', 'profileId 无效。', 400);
+  demand(value.threadId === undefined || identity(value.threadId) && value.threadId.length <= 200, 'INVALID_THREAD_ID', 'threadId 无效。', 400);
   if (value.retrieval !== undefined) demand(keys(value.retrieval, ['sources']) && Array.isArray(value.retrieval.sources)
     && value.retrieval.sources.length >= 1 && value.retrieval.sources.length <= 2
     && value.retrieval.sources.every(x => ['zhihu', 'global'].includes(x)) && new Set(value.retrieval.sources).size === value.retrieval.sources.length,

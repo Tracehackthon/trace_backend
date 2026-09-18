@@ -1,6 +1,6 @@
 {
   "name": "trace-runtime",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "description": "Trace TypeScript runtime packages and host adapters",
   "type": "module",
@@ -26,6 +26,7 @@
     "audit:templates": "node scripts/audit-templates.mjs",
     "export:source": "node scripts/export-source.mjs",
     "test:python": "python scripts/test-python.py",
+    "qualify:codex-app-server": "node scripts/qualify-codex-app-server.mjs",
     "test:evals": "pnpm build && node --test tests/evals/*.test.mjs",
     "check:all": "pnpm typecheck && pnpm audit:templates && pnpm audit:versions && pnpm audit:release-plan && pnpm test && pnpm test:python",
     "changeset": "changeset",

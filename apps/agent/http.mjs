@@ -61,8 +61,11 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, maxS
           const result = await sensemakingWorker.drain({limit: body.limit ?? 16}); reply(res, 200, result); return true;
         }
         const runMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)(?:\/(events|cancel|adoption))?$/.exec(pathname);
+        const interactionMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)\/(approval|input)$/.exec(pathname);
         const requestMatch = /^\/api\/agent\/requests\/([^/]+)$/.exec(pathname);
-        const allowed = pathname === '/api/agent/runs' || pathname === '/api/agent/check' || pathname === '/api/agent/sensemaking/drain' || ['cancel', 'adoption'].includes(runMatch?.[2]) ? 'POST' : pathname === '/api/agent/sensemaking/health' || runMatch || requestMatch ? 'GET' : null;
+        const allowed = pathname === '/api/agent/runs' || pathname === '/api/agent/check' || pathname === '/api/agent/sensemaking/drain'
+          || ['cancel', 'adoption'].includes(runMatch?.[2]) || interactionMatch ? 'POST'
+          : pathname === '/api/agent/sensemaking/health' || runMatch || requestMatch ? 'GET' : null;
         demand(allowed, 'NOT_FOUND', '没有这个 Agent 接口。', 404);
         if (req.method !== allowed) { reply(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: '不支持这个方法。' } }, { allow: allowed }); return true; }
         if (pathname === '/api/agent/check') {
@@ -79,6 +82,13 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, maxS
         } else if (requestMatch) {
           let id; try { id = decodeURIComponent(requestMatch[1]); } catch {}
           demand(identity(id), 'INVALID_REQUEST_ID', '请求 ID 无效。', 400); reply(res, 200, service.byRequest(id));
+        } else if (interactionMatch) {
+          const body = await readBody(req);
+          const allowedKeys = interactionMatch[2] === 'input'
+            ? ['interactionId', 'expectedRevision', 'idempotencyKey', 'answers']
+            : ['interactionId', 'expectedRevision', 'idempotencyKey', 'decision', 'permissions', 'content'];
+          demand(keys(body, allowedKeys), 'INVALID_INTERACTION_RESPONSE', '交互响应字段无效。', 400);
+          reply(res, 200, service.respondInteraction(interactionMatch[1], body));
         } else if (runMatch[2] === 'cancel') {
           demand(keys(await readBody(req), []), 'INVALID_REQUEST', '取消接口只接受空对象。', 400); reply(res, 200, service.cancel(runMatch[1]));
         } else if (runMatch[2] === 'adoption') {

@@ -114,7 +114,7 @@ export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
       for (const row of db.prepare('SELECT payload,payload_hash FROM agent_runs').all()) {
         const run = decode(row);
         if (!TERMINAL.has(run.status)) {
-          run.status = 'interrupted'; run.finishedAt = new Date().toISOString(); run.error = { code: 'PROCESS_RESTARTED', message: '服务重启；未自动重复执行可能已计费的模型请求。' };
+          run.status = 'interrupted'; run.finishedAt = new Date().toISOString(); run.runtime = { ...(run.runtime ?? {}), pendingInteraction: null }; run.error = { code: 'PROCESS_RESTARTED', message: '服务重启；未自动重复执行可能已计费的模型请求。' };
           event(run, 'run.interrupted', { status: run.status, error: run.error });
         }
       }
@@ -128,7 +128,7 @@ export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
       return transaction(() => {
         demand(db.prepare('SELECT COUNT(*) AS n FROM agent_runs').get().n < maxRuns, 'RUN_STORAGE_LIMIT', 'Agent 记录达到本机保留上限；请归档后再执行。', 507);
         const run = { id: randomUUID(), request, requestHash: hash(request), context, profile, status: 'queued', createdAt: new Date().toISOString(),
-          startedAt: null, finishedAt: null, lastEventId: 0, result: null, error: null, runtime: null };
+          startedAt: null, finishedAt: null, lastEventId: 0, result: null, error: null, runtime: { pendingInteraction: null, interactionResponses: {} } };
         db.prepare('INSERT INTO agent_runs(id,request_id,request_hash,payload,payload_hash) VALUES(?,?,?,?,?)').run(run.id, request.requestId, run.requestHash, JSON.stringify(run), hash(run));
         event(run, 'run.queued', { status: run.status }); return run;
       });

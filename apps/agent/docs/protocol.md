@@ -1,7 +1,7 @@
 # Web Agent Runtime 调用协议
 
-- 日期：2026-09-15；读者：Trace 后端、Web 接入与宿主适配开发者。
-- 状态：**本机底层 v1、provider-neutral executor 接缝、Web 回答与候选采纳闭环已实现；默认运行开关未替用户开启。** Codex CLI 0.153.4 的真实闭环，以及无 Codex 的模型/外部 Agent 合成 HTTP 闭环已有验证；验收边界见[生产计划](../../../docs/production-plan.md)。
+- 日期：2026-09-17；读者：Trace 后端、Web 接入与宿主适配开发者。
+- 状态：**本机底层 v1、provider-neutral executor 接缝、Web 回答与候选采纳闭环已实现；默认运行开关未替用户开启。** Codex `0.155.0-alpha.2.6` 的协议 fixture、bounded-analysis 兼容路径和 native Codex 第一条纵切已有验证；native 的审批/交互输入会持久化为等待态，并通过同源 HTTP 显式继续。验收边界见[生产计划](../../../docs/production-plan.md)。
 - 权威实现：[Agent 后端](../README.md)。本文说明设计和调用方责任，不把静态站点部署、多租户运行或真实知乎联调写成已完成。原 manunl 入口保留导航，不维护两份协议。
 
 ## 1. 接入方向与执行器不能混为一谈
@@ -68,7 +68,7 @@ Web 展示候选；用户明确接受后由 Product Workspace 做独立 CAS 事�
 }
 ```
 
-示例 revision、matterId 和选区必须替换为实际值；偏移为 JS UTF-16 code unit，不能切开 emoji surrogate pair。可选字段为 `profileId/selection/sourceIds/previousRunId/retrieval`；其余均必填。省略 `profileId` 使用服务端默认值，显式值必须来自 capabilities。`revise` 必须有理解草稿选区。没有开放任意 `cwd/model/provider/endpoint/token/sandbox/autoApply` 字段。
+示例 revision、matterId 和选区必须替换为实际值；偏移为 JS UTF-16 code unit，不能切开 emoji surrogate pair。可选字段为 `profileId/selection/sourceIds/previousRunId/retrieval/threadId`；其余均必填。省略 `profileId` 使用服务端默认值，显式值必须来自 capabilities。`revise` 必须有理解草稿选区。没有开放任意 `cwd/model/provider/endpoint/token/sandbox/autoApply` 字段；`threadId` 只能恢复服务端绑定的 native profile thread，不能把 cwd 或权限带入请求。
 
 首次返回 `202 {run, replay:false}`，包含服务器生成的 runId、绑定事项/epoch/版本/hash 和事件游标。同一 requestId、同一请求精确重放返回同一 run；变更任何字段返回 `409 REQUEST_CONFLICT`。失败重做需用户发起**新 requestId**，不是自动重复一项可能计费的工作。
 
@@ -82,7 +82,7 @@ ContextPackage 默认最多 64 KiB。请求输入另限 16000 字符；选区、
 - `fresh`：不带旧停点、旧理解、原表达或隐式来源。用户**这次明确选择**的选区和来源摘录仍可使用。
 - 继续上一轮：可给 `previousRunId`，服务端最多带回六个成功祖先的输入/回答，并标记旧 Agent 内容不是事实；必须同一事项、模式、epoch 和产品版本。
 - 进入 fresh：调用已有产品命令 `chain.action / FRESH_CONTEXT`，由产品服务增加 epoch；不能只改生成请求字段。resume 同理使用已有 `RESUME_CONTEXT`。
-- 每一次 run 都新建 Codex thread；即使 `resume` 也由 Trace 重建明确的有限历史，不隐式恢复一个已被污染的 Codex 会话。
+- bounded-analysis 的每一次 run 都新建 Codex thread；native profile 则在服务端指定的项目 cwd 中创建持久 thread，并且只有请求显式给出同 profile 的 `threadId` 时才 `thread/resume`。Trace 不把任意 HTTP cwd、token 或权限转交给 Codex。
 
 模型初始输入只包含片段目录、身份/版本/角色和当前用户输入。已保存正文只通过：
 
@@ -109,13 +109,19 @@ ContextPackage 默认最多 64 KiB。请求输入另限 16000 字符；选区、
 
 ### Codex 专属隔离
 
+#### `bounded-analysis`（默认）
+
 使用每次新建的空临时工作目录，放置 `.git` 边界；`project_doc_max_bytes=0`。禁用本进程的 Hook、插件、继承 MCP、记忆、宿主 Skill、Shell、文件/图片/浏览器工具和子 Agent；不修改全局 Codex 文件。MCP 名称和 Skill 路径由运行时查询，只用于本次禁用，不放入 HTTP 返回或业务日志。
 
 真实验证发现两项容易遗漏的区别：
 1. `skip_host_skill_discovery` **本身不足以清除全部 Skill 目录**。需要获取当前可见 Skill 清单并通过本次 thread 配置逐一禁用；负例实测 `skills.list` 为空、`skills.read` 拒绝未开放包。
 2. 使用 `tool_mode=code_mode_only` 的模型，需要保留 Codex 的隔离 Code Mode 调用容器，否则工具实际返回 `code-mode host is disabled`。该容器不是任意 Node/Shell：本次 wire 测试的 `process/fetch/require` 均不可用；可调用工具集合仅为时钟、空 Skill 接口和两个 Trace 上下文工具；显式开启检索时额外包含允许的知乎／全网工具。另设 `agents.enabled=false`，不能只关闭旧 multi_agent feature 标志。
 
-动态工具和所用配置依赖 CLI 版本，因此当前固定验证 **0.153.4**，遇到未知版本先失败，不盲目假定配置还保持相同边界。只发送 stdout 协议，不公开 App Server 端口；本机登录由 Codex 自己管理。隔离是这一版本/配置的实测能力，不声称对任意未来模型目录、管理员强制配置、同用户恶意进程都有通用安全保证。
+动态工具和所用配置依赖 CLI 版本。bounded-analysis 仍只使用已登记的隔离 fixture；native Codex 则在首次连接或二进制/Schema 变化后，通过 `pnpm qualify:codex-app-server` 对同一可执行文件生成 Schema，并做不启动模型的 `initialize → account/read → thread/start(ephemeral)` wire probe，形成用户本地资格记录。未知版本只有通过这套具体证据才会放行，不能仅凭 semver 或服务端声明；未资格验证仍 fail-closed。只发送 stdout 协议，不公开 App Server 端口；本机登录由 Codex 自己管理。隔离是已实测版本/配置的能力，不声称对任意未来模型目录、管理员强制配置、同用户恶意进程都有通用安全保证。
+
+#### `native`
+
+由服务端 profile 固定真实 `projectCwd`，每次启动做 `realpath` 和目录核验，不伪造 `.git`，不注入 `history.persistence=none`、`project_doc_max_bytes=0` 或 `ephemeral=true`。因此 Codex 可以按项目实际规则读取 AGENTS、skills 与 Codex config，也可能发起命令、文件变更、权限或 MCP elicitation；这些请求会产生带 `state:"waiting",recoverable:true` 的安全 `runtime.approval.required` / `runtime.input.required`，并等待客户端显式响应。`POST /api/agent/runs/:runId/approval` 接受 `accept|accept_for_session|decline|cancel`，`POST /api/agent/runs/:runId/input` 接受问题答案；响应经过 same-origin、run/thread/turn/item/method、schema、CAS revision 与 idempotency 校验。安全摘要只保留动作类型、项目相对路径和网络主机，不保存原始命令、绝对路径或 secret。断线、超时、取消和重启均 fail-closed，绝不自动批准或猜测用户输入；native 线程的 `threadId`、`turnId`、`itemId` 会进入运行事件和 runtime 投影，取消时使用 `turn/interrupt`。
 
 ## 6. 状态、SSE 与失效
 
@@ -126,7 +132,7 @@ queued → running → succeeded（仅回答或候选）
 
 默认一次运行；并发超限 429，不排一个没有容量界限的队列。默认总超时 180 秒，含启动握手；过期/取消先尝试 `turn/interrupt` 并关闭本次拥有的子进程。迟到事件不能从 terminal 回到 succeeded。
 
-SSE 类型：`run.queued/run.running/runtime.connected/runtime.started/tool.completed/output.delta/run.<terminal>/run.adoption.changed`。
+SSE 类型：`run.queued/run.running/runtime.connected/runtime.started/runtime.item/runtime.approval.required/runtime.input.required/runtime.interaction.resolved/tool.completed/output.delta/run.<terminal>/run.adoption.changed`。
 每条事件包含 `runId/sequence/matterId/contextEpoch/contextHash` 以及安全的 profile identity（id/kind/owner/version/revision，不含连接与凭据）。`output.delta` 是**待验证的结构化 JSON 片段**，不是可直接写入正文的文本 patch；最终 `run.succeeded.data.result` 才是解析后的结果。若页面需要逐字展示 answer，可在后续 UI 接入时做受限增量 JSON 解析；本轮不伪装成已改好页面。
 
 游标用 SSE `id`；重连带 `Last-Event-ID` 或 `?after=N`。服务保存事件并从下一条补发；终态后自动关闭。断开 SSE 不取消模型，页面要停止执行必须调用 cancel。慢消费者超过缓冲预算被断开，但仍可按游标恢复。

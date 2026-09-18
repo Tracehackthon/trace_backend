@@ -10,7 +10,7 @@ import { buildServiceIdentity, DATABASE_ROLES, TRACE_AGENT_SERVICE_ID } from '..
 
 export const AGENT_API_SURFACE = Object.freeze({
   runtime: ['/api/runtime/identity'],
-  agent: ['/api/agent/capabilities', '/api/agent/check', '/api/agent/runs', '/api/agent/runs/:id', '/api/agent/runs/:id/events', '/api/agent/runs/:id/cancel', '/api/agent/runs/:id/adoption', '/api/agent/requests/:id', '/api/agent/sensemaking/health', '/api/agent/sensemaking/drain'],
+  agent: ['/api/agent/capabilities', '/api/agent/check', '/api/agent/runs', '/api/agent/runs/:id', '/api/agent/runs/:id/events', '/api/agent/runs/:id/approval', '/api/agent/runs/:id/input', '/api/agent/runs/:id/cancel', '/api/agent/runs/:id/adoption', '/api/agent/requests/:id', '/api/agent/sensemaking/health', '/api/agent/sensemaking/drain'],
 });
 
 /** Agent-only backend. Content-source and account routes are mounted by the

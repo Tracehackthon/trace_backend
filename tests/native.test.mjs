@@ -69,6 +69,7 @@ test('distribution retains product documentation and the trace launcher', () => 
     const packagedBundleIndex = fs.readFileSync(path.join(output, 'bundle', 'README.md'), 'utf8');
     assert.match(packagedBundleIndex, /\]\(\.\.\/docs\/versioning\.md\)/, 'packaged bundle index links must resolve inside the distribution');
     assert.equal(fs.existsSync(path.join(output, 'bundle', '..', 'docs', 'versioning.md')), true);
+    const runtimeIdentity = JSON.parse(fs.readFileSync(path.join(output, 'runtime.json'), 'utf8'));
     const manifest = JSON.parse(fs.readFileSync(path.join(output, 'release-manifest.json'), 'utf8'));
     const sqlJsEntries = manifest.files
       .filter(file => file.path.startsWith('dist/node_modules/sql.js/'))
@@ -101,6 +102,10 @@ test('distribution retains product documentation and the trace launcher', () => 
     assert.equal(manifest.distribution_eligibility, manifest.source_identity.clean ? 'release-ready' : 'development-dirty');
     assert.match(manifest.source_identity.content_sha256, /^[0-9a-f]{64}$/);
     assert.ok(manifest.api_surface.host.includes('/api/product/host/capability/publish'));
+    for (const route of ['/api/agent/runs/:id/approval', '/api/agent/runs/:id/input']) {
+      assert.ok(runtimeIdentity.api_surface.agent.includes(route), `runtime.json must advertise ${route}`);
+      assert.ok(manifest.api_surface.agent.includes(route), `release manifest must advertise ${route}`);
+    }
     assert.equal(manifest.host_compatibility.codex_plugin.id, 'codex-plugin-marketplace-v1');
     assert.equal(fs.existsSync(path.join(output, 'apps', 'desktop', 'runtime-identity.mjs')), true);
     const installed = path.join(directory, 'installed');
@@ -135,7 +140,7 @@ test('Codex plugin installer is explicit and its dry run never alters a user mar
     assert.equal(plan.dry_run, true);
     assert.equal(plan.automatic_upgrade, false);
     assert.equal(plan.runtime_kind, 'source');
-    assert.equal(plan.runtime_version, '0.7.1');
+    assert.equal(plan.runtime_version, '0.8.0');
     assert.match(plan.plugin_version, /^\d+\.\d+\.\d+/);
     assert.equal(fs.existsSync(marketplace), false);
   } finally {

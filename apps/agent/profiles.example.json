@@ -12,6 +12,15 @@
       "version": 1
     },
     {
+      "id": "native-codex",
+      "label": "Native Codex (selected project)",
+      "kind": "codex",
+      "enabled": false,
+      "version": 1,
+      "mode": "native",
+      "projectCwd": "D:\\Projects\\my-project"
+    },
+    {
       "id": "team-model",
       "label": "Team model gateway",
       "kind": "model",

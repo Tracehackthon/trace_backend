@@ -1,6 +1,6 @@
 # Codex bundle
 
-`trace.codex@0.4.1` 是当前 bundle manifest 声明的 Codex-first 组合身份：`core/runtime`、`core/collaboration-context`、项目 instance、Codex adapter、Continuity/Activation Pack、host retrieval evidence、正式认知来源 adapter 与 hooks installer。源码同时包含 `trace-codex` Plugin/MCP、Host Session、sensemaking、路由/激活与 Guard/能力治理；这些改动已进入 workspace Changeset，但产品 runtime/bundle/profile 的版本发行仍需独立批准，不能把当前 checkout 或本机源码构建误称为用户已安装版本。
+`trace.codex@0.5.0` 是当前 bundle manifest 声明的 Codex-first 组合身份：`core/runtime`、`core/collaboration-context`、项目 instance、Codex adapter、Continuity/Activation Pack、host retrieval evidence、正式认知来源 adapter 与 hooks installer。源码同时包含 `trace-codex` Plugin/MCP、Host Session、sensemaking、路由/激活与 Guard/能力治理；这些改动已进入 workspace Changeset，但产品 runtime/bundle/profile 的版本发行仍需独立批准，不能把当前 checkout 或本机源码构建误称为用户已安装版本。
 
 它不在 bundle 内复制用户认知源、聊天记录或运行时状态。产品模式使用项目 SQLite；开发兼容模式使用分离 JSONL；冷启动模板必须先 preview，再生成 instance lockfile。
 

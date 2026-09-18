@@ -23,6 +23,68 @@ test('HTTP run, durable SSE replay and result keep canonical product state byte-
   assert.equal((await a.request('/api/agent/runs', { ...body, input: 'changed' })).json.error.code, 'REQUEST_CONFLICT');
 });
 
+test('native interaction approval is HTTP-resumable, scoped, and idempotently replayable', async t => {
+  let resume, seen;
+  const adapter = {
+    check: async () => ({ authenticated: true, modelTurnTested: false }),
+    execute: async ({ onEvent }) => {
+      const interaction = { interactionId: 'fixture-interaction', threadId: 'fixture-thread', turnId: 'fixture-turn', itemId: 'fixture-item',
+        method: 'item/commandExecution/requestApproval', kind: 'approval', state: 'waiting', recoverable: true, reason: '需要执行项目内操作。' };
+      seen = interaction;
+      onEvent('runtime.approval.required', { interaction, method: interaction.method, state: 'waiting', recoverable: true });
+      await new Promise(resolve => { resume = resolve; });
+      onEvent('runtime.interaction.resolved', { interaction: { ...interaction, state: 'resolved', recoverable: false }, state: 'resolved' });
+      return output(answer('审批后继续'));
+    },
+    inspectInteraction: (_runId, interactionId) => { assert.equal(interactionId, seen.interactionId); return seen; },
+    validateInteraction: (_runId, interactionId, body) => { assert.equal(interactionId, seen.interactionId); assert.equal(body.decision, 'accept'); return { decision: 'accept' }; },
+    respondInteraction: (_runId, interactionId, body) => { assert.equal(interactionId, seen.interactionId); resume(); return { interaction: { ...seen, state: 'resolved', recoverable: false } }; },
+  };
+  const a = await fixture(t, { adapter });
+  const created = await a.request('/api/agent/runs', a.envelope()), id = created.json.run.runId;
+  let pending;
+  for (let i = 0; i < 100; i++) { pending = a.service.get(id); if (pending.runtime?.pendingInteraction) break; await delay(10); }
+  assert.equal(pending.runtime.pendingInteraction.interactionId, seen.interactionId);
+  const body = { interactionId: seen.interactionId, expectedRevision: pending.runtime.pendingInteraction.revision, idempotencyKey: 'approval-replay-1', decision: 'accept' };
+  const approved = await a.request(`/api/agent/runs/${id}/approval`, body);
+  assert.equal(approved.status, 200, JSON.stringify(approved.json)); assert.equal(approved.json.replay, false);
+  const replay = await a.request(`/api/agent/runs/${id}/approval`, body);
+  assert.equal(replay.status, 200, JSON.stringify(replay.json)); assert.equal(replay.json.replay, true);
+  const conflict = await a.request(`/api/agent/runs/${id}/approval`, { ...body, decision: 'decline' });
+  assert.equal(conflict.status, 409); assert.equal(conflict.json.error.code, 'INTERACTION_IDEMPOTENCY_CONFLICT');
+  const finished = await a.wait(id); assert.equal(finished.status, 'succeeded'); assert.equal(finished.result.answer, '审批后继续');
+  const events = await (await fetch(`${a.origin}/api/agent/runs/${id}/events`)).text();
+  assert.doesNotMatch(events, /secret/i);
+});
+
+test('native user-input interaction uses the same durable identity and input route', async t => {
+  let resume, seen, received;
+  const adapter = {
+    check: async () => ({ authenticated: true, modelTurnTested: false }),
+    execute: async ({ onEvent }) => {
+      const interaction = { interactionId: 'fixture-input', threadId: 'fixture-thread', turnId: 'fixture-turn', itemId: 'fixture-item',
+        method: 'item/tool/requestUserInput', kind: 'input', state: 'waiting', recoverable: true,
+        questions: [{ id: 'goal', header: 'Goal', question: 'What should this fixture use?', optionCount: 0, isSecret: false }] };
+      seen = interaction; onEvent('runtime.input.required', { interaction, method: interaction.method, state: 'waiting', recoverable: true });
+      await new Promise(resolve => { resume = resolve; });
+      onEvent('runtime.interaction.resolved', { interaction: { ...interaction, state: 'resolved', recoverable: false }, state: 'resolved' });
+      return output(answer(`input:${received.answers.goal.answers[0]}`));
+    },
+    inspectInteraction: (_runId, interactionId) => { assert.equal(interactionId, seen.interactionId); return seen; },
+    validateInteraction: (_runId, interactionId, body) => { assert.equal(interactionId, seen.interactionId); assert.deepEqual(body.answers, { goal: { answers: ['Trace'] } }); },
+    respondInteraction: (_runId, interactionId, body) => { assert.equal(interactionId, seen.interactionId); received = body; resume(); return { interaction: { ...seen, state: 'resolved', recoverable: false } }; },
+  };
+  const a = await fixture(t, { adapter });
+  const created = await a.request('/api/agent/runs', a.envelope()), id = created.json.run.runId;
+  let pending;
+  for (let i = 0; i < 100; i++) { pending = a.service.get(id); if (pending.runtime?.pendingInteraction) break; await delay(10); }
+  const interaction = pending.runtime.pendingInteraction;
+  const response = await a.request(`/api/agent/runs/${id}/input`, { interactionId: interaction.interactionId, expectedRevision: interaction.revision,
+    idempotencyKey: 'input-1', answers: { goal: { answers: ['Trace'] } } });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  const finished = await a.wait(id); assert.equal(finished.status, 'succeeded'); assert.equal(finished.result.answer, 'input:Trace');
+});
+
 test('fresh excludes old text; only explicit selection and same-epoch successful lineage can enter', async t => {
   const a = await fixture(t);
   const old = await a.request('/api/agent/runs', a.envelope()); await a.wait(old.json.run.runId);

@@ -6,7 +6,7 @@
 
 - `discuss / explain / compare / revise`：讨论、解释、比较用户明确选择的材料、生成精确选区的修订候选。
 - 通用 executor 契约、服务端 profile、按需上下文工具、结构化结果、SSE 事件、取消/超时、请求去重与重启恢复。
-- 三个明确适配器：本机 `codex app-server`、Trace 驱动的 OpenAI-compatible 模型循环、`trace-external-agent-v1` 完整 Agent 服务。
+- 三个明确适配器：本机 `codex app-server`（`bounded-analysis` 与服务端选定项目的 `native` 模式）、Trace 驱动的 OpenAI-compatible 模型循环、`trace-external-agent-v1` 完整 Agent 服务。
 - 从当前产品 SQLite 固定上下文；独立 `agent.sqlite` 保存请求、候选和事件。生成本身不写产品状态；用户明确接受修订候选时，由 Product Workspace 事务只改准确草稿选区。
 - 本轮支持单用户、loopback、同源调用。**默认不联网；可[显式开启知乎／全网来源](../../../docs/zhihu-native.md)，不提供任意文件执行、公网多租户认证或自动采纳。**
 
@@ -14,7 +14,7 @@
 
 ## 启动
 
-需要 Node >=22.13。只有选择 `codex` profile 时才需要已登录的 Codex CLI；当前经过运行时隔离验证的 CLI 为 **0.153.4**。其他版本失败关闭，需要重新验证而非直接放宽版本检查。非 Codex 配置见[Agent profile 与执行器协议](profiles.md)。
+需要 Node >=22.13。只有选择 `codex` profile 时才需要已登录的 Codex CLI。`bounded-analysis` 当前通过生成 schema/protocol fixture 和运行时兼容核验的 CLI 为 **0.155.0-alpha.2.6**；`native` 不把该版本号当能力契约，而是要求对当前可执行文件运行 `pnpm qualify:codex-app-server`，用生成 Schema 与不启动模型的 wire probe 形成本地资格记录。其他版本不能仅靠 semver 放行，未完成资格验证时 fail-closed。非 Codex 配置见[Agent profile 与执行器协议](profiles.md)。
 
 默认不开启 Agent。保持现有 Web 页面不变，在**确认原服务归属、停止自己管理的旧实例之后**，从 `trace-runtime` 启动后端：
 
@@ -44,10 +44,13 @@ pnpm --filter @trace/app-agent start
 | `TRACE_WEB_STATE_FILE` | 集成 Web 沿用原配置；独立 Agent 服务必须是绝对路径 |
 | `TRACE_AGENT_STATE_FILE` | 产品库同目录的 `agent.sqlite`，必须与产品库分开 |
 | `TRACE_CODEX_BIN` | `codex`；可配置绝对可执行文件路径；不经 shell 拼接 |
+| `TRACE_CODEX_QUALIFICATION_RECORD` | 可选、绝对路径；省略时 native 使用用户目录 `.trace-runtime/codex-app-server-qualification.json` |
 | `TRACE_CODEX_MODEL` | 省略则继承 CLI 默认模型；不静默回退到另一模型 |
 | `TRACE_AGENT_TIMEOUT_MS` | 180000；范围 1000—600000，涵盖启动、握手、工具和生成 |
 | `TRACE_AGENT_RUNTIME_ROOT` | OS 临时目录下 `trace-agent-runtime`；仅保存每次执行的空临时工作目录 |
 | `TRACE_AGENT_PORT` | 独立 API 4174，冲突直接失败，不自动换端口 |
+
+`TRACE_AGENT_RUNTIME_ROOT` 只服务于默认 `bounded-analysis` 的 scratch 目录。Native profile 使用 profile 文件里的绝对 `projectCwd`，不会把 HTTP 请求中的路径当作 cwd；首次执行创建持久 thread，后续请求显式带 `threadId` 才恢复。Native 仍由 Codex 自己读取登录状态，Trace 只调用 `account/read`，不读取/复制 `auth.json`。命令、文件写入、权限和 MCP elicitation 请求会产生 approval/input waiting 事件并等待显式响应，当前没有自动批准路径。客户端用 `POST /api/agent/runs/:runId/approval` 提交 `{interactionId,expectedRevision,idempotencyKey,decision}`；权限请求省略 `permissions` 时只授予 Codex 本次请求的原始范围和单次 turn scope，显式传入时也只能是该范围的子集。用 `/input` 提交 `{interactionId,expectedRevision,idempotencyKey,answers}`。响应只对当前 run 的 pending interaction 生效；同源、schema、CAS 和幂等校验失败不会触达 Codex。
 
 ## 调用入口
 
@@ -59,6 +62,8 @@ pnpm --filter @trace/app-agent start
 | `GET /api/agent/requests/:requestId` | 丢失提交响应时按原请求 ID 找回运行；ID 须 URL encode |
 | `GET /api/agent/runs/:runId` | 状态、候选、上下文目录、`usableAsCurrent` |
 | `GET /api/agent/runs/:runId/events` | SSE；支持 `Last-Event-ID` 或 `?after=N` |
+| `POST /api/agent/runs/:runId/approval` | 显式继续或拒绝当前 pending Codex 审批；需要 `interactionId`、`expectedRevision`、`idempotencyKey`、`decision`；权限请求可选传受原请求范围约束的 `permissions`，省略则精确使用本次请求范围且仅作用于当前 turn |
+| `POST /api/agent/runs/:runId/input` | 回答当前 pending Codex 用户输入；需要 `interactionId`、`expectedRevision`、`idempotencyKey`、`answers` |
 | `POST /api/agent/runs/:runId/cancel`，body `{}` | 幂等取消；不影响其他服务、会话或 canonical 数据 |
 | `POST /api/agent/runs/:runId/adoption` | `accept`／`dismiss`／`undo`；接受和撤销需 `commandId`、`expectedRevision`，并由 Product Workspace 做 CAS、目标和选区校验 |
 
@@ -96,6 +101,9 @@ node --test --test-concurrency=1 tests/agent-backend.test.mjs tests/agent-profil
 $env:TRACE_AGENT_WIRE = '1'
 node --test tests/agent-codex-wire.test.mjs
 Remove-Item Env:TRACE_AGENT_WIRE
+
+# 协议 fixture（不启动模型）
+node --test tests/codex-compatibility.test.mjs tests/agent-codex-native.test.mjs
 
 # 显式启用：会使用本机 Codex 登录及模型额度，只发送临时库的合成内容
 $env:TRACE_AGENT_LIVE = '1'

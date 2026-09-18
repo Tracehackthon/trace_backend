@@ -3,7 +3,7 @@ import path from 'node:path';
 import { AgentError, demand, hash, identity, integer, keys, text } from './protocol.mjs';
 import { assertExecutor } from './runtime.mjs';
 import { validateRemoteEndpoint } from './remote-http.mjs';
-import { createCodexAdapter, VERIFIED_CODEX_VERSION, VERIFIED_CODEX_VERSIONS } from './codex.mjs';
+import { CODEX_EXECUTION_MODES, BOUNDED_ANALYSIS_MODE, NATIVE_CODEX_MODE, createCodexAdapter } from './codex.mjs';
 import { createModelAdapter } from './model.mjs';
 import { createExternalAgentAdapter, EXTERNAL_AGENT_PROTOCOL } from './external-agent.mjs';
 
@@ -44,11 +44,15 @@ function validateProfile(value) {
   const profile = structuredClone(value); validateCommon(profile);
   validateSensemakingConfig(profile.sensemaking);
   if (profile.kind === 'codex') {
-    demand(keys(profile, [...COMMON, ...SENSEMAKING, 'executable', 'model', 'runtimeRoot'])
+    demand(keys(profile, [...COMMON, ...SENSEMAKING, 'executable', 'model', 'runtimeRoot', 'mode', 'projectCwd'])
       && (profile.executable === undefined || text(profile.executable, 1000) && profile.executable.trim())
       && (profile.model === undefined || identity(profile.model))
-      && (profile.runtimeRoot === undefined || path.isAbsolute(profile.runtimeRoot)),
+      && (profile.runtimeRoot === undefined || path.isAbsolute(profile.runtimeRoot))
+      && (profile.mode === undefined || CODEX_EXECUTION_MODES.includes(profile.mode))
+      && (profile.projectCwd === undefined || text(profile.projectCwd, 4096) && path.isAbsolute(profile.projectCwd)),
     'INVALID_PROFILE', 'Codex profile 配置无效。', 500);
+    profile.mode ??= BOUNDED_ANALYSIS_MODE;
+    if (profile.mode === NATIVE_CODEX_MODE) demand(profile.projectCwd, 'INVALID_PROFILE', 'native Codex profile 必须配置 projectCwd。', 500);
   } else if (profile.kind === 'model') {
     demand(keys(profile, [...COMMON, ...SENSEMAKING, ...AUTH, 'model']) && identity(profile.model),
       'INVALID_PROFILE', 'Model profile 需要固定的 endpoint 和 model。', 500);
@@ -99,12 +103,17 @@ function loadDocument(env) {
 
 function safeProfile(document, profile) {
   const capabilities = profile.kind === 'codex'
-    ? { tools: true, streaming: true, cancellation: true, output: 'trace-result-v1' }
+    ? { tools: true, streaming: true, cancellation: true, output: 'trace-result-v1',
+      executionMode: profile.mode ?? BOUNDED_ANALYSIS_MODE,
+      persistentThreads: (profile.mode ?? BOUNDED_ANALYSIS_MODE) === NATIVE_CODEX_MODE,
+      nativeWorkspace: (profile.mode ?? BOUNDED_ANALYSIS_MODE) === NATIVE_CODEX_MODE,
+      approvalPolicy: (profile.mode ?? BOUNDED_ANALYSIS_MODE) === NATIVE_CODEX_MODE ? 'on-request-fail-closed' : 'never' }
     : { tools: true, streaming: false, cancellation: true, output: 'trace-result-v1' };
   return { profileId: profile.id, label: profile.label ?? profile.id, kind: profile.kind, ownerId: document.ownerId,
     version: profile.version, revision: hash({ configVersion: document.configVersion, ownerId: document.ownerId, profile }), capabilities,
-    serviceIdentity: profile.kind === 'model' ? 'openai-chat-completions-v1' : profile.kind === 'agent' ? EXTERNAL_AGENT_PROTOCOL : `codex-app-server/${VERIFIED_CODEX_VERSION}`,
-    ...(profile.kind === 'codex' ? { verifiedRuntimeVersion: VERIFIED_CODEX_VERSION, verifiedRuntimeVersions: [...VERIFIED_CODEX_VERSIONS] } : {}),
+    serviceIdentity: profile.kind === 'model' ? 'openai-chat-completions-v1' : profile.kind === 'agent' ? EXTERNAL_AGENT_PROTOCOL : 'codex-app-server/dynamic-qualified',
+    ...(profile.kind === 'codex' ? { qualificationRequiredAtConnect: true,
+      executionMode: profile.mode ?? BOUNDED_ANALYSIS_MODE, nativeProjectConfigured: !!profile.projectCwd } : {}),
     ...(profile.kind === 'model' ? { model: profile.model } : {}),
     ...(profile.kind === 'agent' ? { protocol: profile.protocol } : {}),
     ...(profile.sensemaking === undefined ? {} : {sensemaking: structuredClone(profile.sensemaking)}) };
@@ -115,6 +124,7 @@ function safeProfile(document, profile) {
 export function createExecutorRegistry({ env = process.env, factories = {} } = {}) {
   const make = {
     codex: factories.codex ?? ((profile, document) => createCodexAdapter({ executable: profile.executable, model: profile.model,
+      mode: profile.mode ?? BOUNDED_ANALYSIS_MODE, ...(profile.projectCwd ? { projectCwd: profile.projectCwd } : {}),
       ...(profile.runtimeRoot ? { runtimeRoot: profile.runtimeRoot } : {}),
       redactEnvKeys: document.profiles.map(candidate => candidate.credentialEnv).filter(Boolean), env })),
     model: factories.model ?? (profile => createModelAdapter({ profile, env })),

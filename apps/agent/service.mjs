@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { AgentError, demand, hash, TERMINAL, validateRequest, validateOutput } from './protocol.mjs';
+import { AgentError, demand, hash, identity, integer, keys, TERMINAL, validateRequest, validateOutput } from './protocol.mjs';
 import { assembleContext } from './context.mjs';
 import { createRetrievalSession } from './retrieval.mjs';
 
@@ -24,6 +24,12 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
   executorRegistry ??= fixedRegistry(adapter);
   const bus = new EventEmitter(), jobs = new Map(); let closed = false, storageFailed = false;
   bus.setMaxListeners(64);
+  const interactionResponseBody = body => {
+    demand(body && typeof body === 'object' && !Array.isArray(body), 'INVALID_INTERACTION_RESPONSE', '交互响应必须是对象。', 400);
+    demand(identity(body.interactionId) && body.interactionId.length <= 120 && integer(body.expectedRevision)
+      && identity(body.idempotencyKey) && body.idempotencyKey.length <= 160, 'INVALID_INTERACTION_RESPONSE', '交互响应缺少稳定身份、版本或幂等键。', 400);
+    return body;
+  };
   const get = id => { const run = store.get(id); demand(run, 'RUN_NOT_FOUND', '没有这个运行记录。', 404); return run; };
   const isWorkspaceCurrent = run => {
     const snapshot = readWorkspace(), session = snapshot.host?.chain.sessions[run.request.matterId];
@@ -48,7 +54,8 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
       createdAt: run.createdAt, startedAt: run.startedAt, finishedAt: run.finishedAt, lastEventId: run.lastEventId,
       contextManifest: run.context.fragments.map(({ id, role, revision }) => ({ id, role, revision })), omitted: run.context.omitted,
       profile: run.profile, result: run.result, resultHash: run.resultHash ?? null, adoptionReceipt: run.adoptionReceipt ?? null,
-      error: run.error, runtime: run.runtime, usableAsCurrent: run.status === 'succeeded' && current,
+      error: run.error, runtime: run.runtime ? Object.fromEntries(Object.entries(run.runtime).filter(([key]) => key !== 'interactionResponses')) : null,
+      usableAsCurrent: run.status === 'succeeded' && current,
       adoptionAvailable: !!adoptCandidate && run.status === 'succeeded' && run.result?.kind === 'revision_candidate'
         && run.result?.adoption === 'not_applied',
       canonicalStateChanged: run.result?.adoption === 'applied' };
@@ -63,7 +70,10 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
   function stop(id, status, code, message) {
     const run = get(id);
     if (!TERMINAL.has(run.status)) {
-      try { update(id, { status, finishedAt: new Date().toISOString(), result: null, error: { code, message } }, `run.${status}`, { status, error: { code, message } }); }
+      try {
+        const runtime = { ...(run.runtime ?? {}), pendingInteraction: null };
+        update(id, { status, finishedAt: new Date().toISOString(), result: null, runtime, error: { code, message } }, `run.${status}`, { status, error: { code, message } });
+      }
       finally { jobs.get(id)?.controller.abort(); }
     }
     return publicRun(get(id));
@@ -75,6 +85,7 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
       if (controller.signal.aborted) return;
       demand(isWorkspaceCurrent(run), 'STALE_CONTEXT', '请求开始前工作区已变化。', 409);
       const selected = executorRegistry.resolve(run.profile);
+      const job = jobs.get(id); if (job) job.executor = selected.executor;
       run = update(id, { status: 'running', startedAt: new Date().toISOString() }, 'run.running', { status: 'running' });
       const safeStop = (...args) => { try { stop(...args); } catch { storageFailed = true; controller.abort(); } };
       timer = setTimeout(() => safeStop(id, 'timed_out', 'RUN_TIMEOUT', '本次执行超时；未自动重试，原文未改变。'), timeoutMs);
@@ -87,13 +98,26 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
       }, pollMs);
       const retrieval = createRetrievalSession({provider: retrievalProvider, sources: run.request.retrieval?.sources,
         signal: controller.signal, isCurrent: () => !closed && isWorkspaceCurrent(run) && executorRegistry.isCurrent(run.profile)});
-      const output = await selected.executor.execute({ request: run.request, context: run.context, signal: controller.signal, retrieval,
-        profile: run.profile, isCurrent: () => !closed && isWorkspaceCurrent(run) && executorRegistry.isCurrent(run.profile), onEvent: (type, data) => {
+      const output = await selected.executor.execute({ runId: id, profile: run.profile, request: run.request, context: run.context, signal: controller.signal, retrieval, isCurrent: () => !closed && isWorkspaceCurrent(run) && executorRegistry.isCurrent(run.profile), onEvent: (type, data) => {
           if (controller.signal.aborted || TERMINAL.has(get(id).status)) return;
           demand(isWorkspaceCurrent(run) && executorRegistry.isCurrent(run.profile), 'STALE_CONTEXT', '流式结果对应的版本或执行配置已变化。', 409);
-          demand(['runtime.connected', 'runtime.started', 'output.delta', 'tool.completed'].includes(type), 'INVALID_ADAPTER_EVENT', '未支持的 Adapter 事件。', 502);
-          const runtime = type.startsWith('runtime.') ? { ...(get(id).runtime ?? {}), ...data } : get(id).runtime;
-          update(id, { runtime }, type, data);
+          demand(['runtime.connected', 'runtime.started', 'runtime.item', 'runtime.approval.required', 'runtime.input.required', 'runtime.interaction.resolved',
+            'output.delta', 'tool.completed'].includes(type), 'INVALID_ADAPTER_EVENT', '未支持的 Adapter 事件。', 502);
+          let eventData = data;
+          const before = get(id);
+          let runtime = before.runtime ? { ...before.runtime } : {};
+          if (type === 'runtime.approval.required' || type === 'runtime.input.required') {
+            const interaction = { ...(data.interaction ?? {}), runId: id, profileId: run.profile.profileId,
+              revision: before.lastEventId + 1, state: 'waiting', recoverable: true };
+            runtime.pendingInteraction = interaction;
+            eventData = { ...data, interaction, interactionId: interaction.interactionId, state: 'waiting', recoverable: true };
+          } else if (type === 'runtime.interaction.resolved') {
+            const interaction = data.interaction ?? {};
+            if (runtime.pendingInteraction?.interactionId === interaction.interactionId) runtime.pendingInteraction = null;
+            eventData = { interactionId: interaction.interactionId ?? null, state: data.state ?? 'resolved', kind: interaction.kind ?? null };
+          }
+          if (type.startsWith('runtime.') && !['runtime.approval.required', 'runtime.input.required', 'runtime.interaction.resolved'].includes(type)) runtime = { ...runtime, ...data };
+          update(id, { runtime }, type, eventData);
         } });
       if (controller.signal.aborted || TERMINAL.has(get(id).status)) return;
       demand(isWorkspaceCurrent(run) && executorRegistry.isCurrent(run.profile), 'STALE_CONTEXT', '完成时工作区或执行配置已变化，结果不可作为当前建议。', 409);
@@ -141,11 +165,42 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
         ancestorId = ancestor.request.previousRunId;
       }
       const context = assembleContext(snapshot, request, history), run = store.create(request, context, selected.binding), controller = new AbortController();
-      const job = { controller, promise: null }; jobs.set(run.id, job);
+      const job = { controller, promise: null, executor: null }; jobs.set(run.id, job);
       job.promise = Promise.resolve().then(() => execute(run.id, controller));
       return { run: publicRun(run), replay: false };
     },
     cancel(id) { return stop(id, 'cancelled', 'USER_CANCELLED', '用户取消了本次执行。'); },
+    respondInteraction(id, body) {
+      demand(!closed && !storageFailed, 'AGENT_STORAGE_UNAVAILABLE', 'Agent 交互存储不可用；未继续执行。', 503);
+      body = interactionResponseBody(body);
+      const run = get(id);
+      const responses = run.runtime?.interactionResponses ?? {};
+      const requestHash = hash(body);
+      const replay = responses[body.idempotencyKey];
+      if (replay) {
+        demand(replay.requestHash === requestHash && replay.interactionId === body.interactionId,
+          'INTERACTION_IDEMPOTENCY_CONFLICT', '幂等键已经用于另一项交互。', 409);
+        return { protocolVersion: 1, replay: true, run: publicRun(run), interaction: replay.interaction };
+      }
+      demand(!TERMINAL.has(run.status), 'INTERACTION_NOT_FOUND', '运行已结束，不能继续交互。', 409);
+      const pending = run.runtime?.pendingInteraction;
+      demand(pending && pending.interactionId === body.interactionId && pending.state === 'waiting' && pending.recoverable === true,
+        'INTERACTION_NOT_FOUND', '交互请求不存在、已处理或已失效。', 409);
+      demand(body.expectedRevision === pending.revision, 'INTERACTION_REVISION_CONFLICT', '交互版本已变化，请刷新后重试。', 409);
+      const job = jobs.get(id);
+      demand(job?.executor && typeof job.executor.inspectInteraction === 'function' && typeof job.executor.validateInteraction === 'function' && typeof job.executor.respondInteraction === 'function',
+        'INTERACTION_UNAVAILABLE', '当前运行的交互通道已断开；不会自动恢复。', 409);
+      const inspected = job.executor.inspectInteraction(id, body.interactionId);
+      demand(inspected.interactionId === pending.interactionId && inspected.threadId === pending.threadId
+        && inspected.turnId === pending.turnId && inspected.itemId === pending.itemId && inspected.method === pending.method,
+        'INTERACTION_SCOPE_MISMATCH', '交互身份与当前 Codex 请求不匹配。', 409);
+      job.executor.validateInteraction(id, body.interactionId, body);
+      const receipt = { interactionId: pending.interactionId, state: 'resolving', kind: pending.kind, at: new Date().toISOString(), requestHash };
+      const runtime = { ...(run.runtime ?? {}), interactionResponses: { ...responses, [body.idempotencyKey]: { ...receipt, interaction: { ...pending, state: 'resolved', recoverable: false } } } };
+      update(id, { runtime }, 'runtime.interaction.accepted', { interactionId: pending.interactionId, kind: pending.kind, state: 'resolving' });
+      job.executor.respondInteraction(id, body.interactionId, body);
+      return { protocolVersion: 1, replay: false, run: publicRun(get(id)), interaction: { ...pending, state: 'resolved', recoverable: false } };
+    },
     adopt(id, body) {
       demand(adoptCandidate && executeProduct, 'ADOPTION_UNAVAILABLE', '当前产品宿主没有启用候选采纳。', 503);
       const run = get(id);

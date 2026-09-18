@@ -43,3 +43,30 @@ Plugin 版本更新也不会自动接收宿主会话。完成 Plugin 连接后�
 - SQLite driver materialization：Node `>=24.2.0` 可用稳定内置 driver；较早受支持 Node 使用发行包内的 `sql.js`，避免实验性 warning。
 
 Node SEA 单文件、签名和真正桌面安装器仍是未来发行物，不因本目录存在而宣称已经完成。
+
+## Codex app-server 动态资格验证
+
+Native Codex 不把任意新的 semver 当作兼容版本。`native/codex-compatibility.mjs` 将以下证据组合成一条可重放的本地资格记录：
+
+1. 当前可执行文件的 `--version` 与二进制 SHA-256；
+2. 同一可执行文件生成的 `app-server` JSON Schema 及内容指纹；
+3. Schema 中实际存在的 `initialize`、账户、thread、turn 和审批/事件方法；
+4. 当前进程的 `initialize`、`account/read`、隔离 `thread/start(ephemeral)` wire probe。
+
+服务器 `userAgent` 只用于和可执行文件版本互相校验，不作为能力清单；服务器返回的任意声明也不会直接放行。二进制哈希、Schema 指纹、版本或 initialize 身份变化时，旧记录失效。资格记录放在用户本地路径，不写入源码 fixture，原子更新并可回放核验。记录属于安装/协议能力，不绑定资格命令当时所在的项目目录；当前项目仍由 native adapter 在连接时重新约束。
+
+首次安装或 Codex 自动更新后执行：
+
+```powershell
+pnpm qualify:codex-app-server
+```
+
+可通过以下环境变量改变本地记录和 Schema 缓存位置：
+
+```powershell
+$env:TRACE_CODEX_QUALIFICATION_RECORD = '<absolute-path>\\codex-app-server-qualification.json'
+$env:TRACE_CODEX_SCHEMA_CACHE = '<absolute-directory>'
+$env:TRACE_CODEX_QUALIFY_PROJECT = '<absolute-project-directory>'
+```
+
+该命令默认**不会启动模型 turn**，只进行握手、账户读取和隔离 thread 创建。`TRACE_CODEX_LIVE_TURN_PROBE=1` 是明确的人工资格实验开关，可能触发 provider 工作，不应作为自动启动检查。未知版本只有在生成新 Schema 并通过该 wire probe 后，才会形成本地资格记录；缺少方法、Schema 被篡改、二进制被替换、身份不一致时保持 fail-closed。

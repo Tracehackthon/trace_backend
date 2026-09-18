@@ -2,3 +2,4 @@
 # preserve their LF bytes rather than silently rewriting them to CRLF.
 apps/desktop/src/vendor/anime.esm.js text eol=lf
 apps/desktop/src/vendor/shape-only.mjs text eol=lf
+tests/fixtures/codex-app-server-0.155.0-alpha.2.6/** text eol=lf

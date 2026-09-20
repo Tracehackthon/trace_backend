@@ -4,7 +4,7 @@ import * as B from './bridge.mjs';
 import { createDemoWorkspace } from './demo-workspace.mjs';
 import { SCREENS as CHAIN_SCREENS } from './chain-model.mjs';
 import { SCREENS as WORK_SCREENS } from './worksite-model.mjs';
-import { DIRECTION_OPTIONS, SCOPE_OPTIONS, RELATION_OPTIONS } from './comparison-model.mjs';
+import { DIRECTION_OPTIONS, SCOPE_OPTIONS, RELATION_OPTIONS, classifyMaterialImport } from './comparison-model.mjs';
 
 export class ProductCommandError extends Error {
   constructor(code, message, status = 422) { super(message); this.code = code; this.status = status; }
@@ -128,12 +128,13 @@ function comparison(host, op) {
   const local = host.comparisons[op.sessionId];
   if (!local) fail('UNKNOWN_SESSION', '没有找到本次对照。', 404);
   if (local.model.request) fail('PENDING_REQUEST', '请先恢复上次未确认的请求。', 409);
+  const importDisposition = op.action.type === 'IMPORT_MATERIAL' ? classifyMaterialImport(local.model, op.action.material) : null;
   let next = checked(B.dispatchComparison(host, op));
   const model = next.comparisons[op.sessionId].model;
   if (['LINK','CONFIRM_REVISION','UNDO_REVISION'].includes(op.action.type)) {
     if (!model.request) invalid(model.notice || '没有可提交的对照动作。');
     next = checked(B.commitComparison(next, {sessionId: op.sessionId, requestId: model.request.id}));
-  } else if (op.action.type === 'IMPORT_MATERIAL' && model.catalog.length === local.model.catalog.length) invalid(model.notice);
+  } else if (op.action.type === 'IMPORT_MATERIAL' && model.catalog.length === local.model.catalog.length && importDisposition !== 'same') invalid(model.notice);
   else if (op.action.type === 'OPEN_REVISION' && !model.revision.open) invalid(model.notice);
   return next;
 }

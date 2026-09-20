@@ -158,6 +158,28 @@ function sourceOf(candidate) {
     ...(candidate.kind === 'external' ? {provider: candidate.provider, source: candidate.source, author: candidate.author,
       contentType: candidate.contentType, contentMode: candidate.contentMode, fetchedAt: candidate.fetchedAt} : {}) };
 }
+function stableSourceOf(candidate) {
+  const source = sourceOf(candidate);
+  delete source.fetchedAt;
+  return source;
+}
+function prepareMaterialImport(state, material = {}) {
+  if (!nonempty(material.excerpt)) return { disposition: 'invalid', imported: null, existing: null, external: false, generated: false };
+  const external = nonempty(material.provider) || nonempty(material.source) || material.url != null;
+  const generated = !nonempty(material.id);
+  const imported = normalizedCandidate({ ...material, id: generated ? `${state.sessionId}:${external ? 'external' : 'user'}-${state.nextId}` : material.id,
+    title: nonempty(material.title) ? material.title : external ? '联网来源' : '我带入的一段材料', kind: external ? 'external' : 'user',
+    scopes: external ? [material.source === 'authorized' ? 'authorized' : 'public'] : ['imported'],
+    relationship: undefined, comparison: undefined }, basisOf(state.matter).focus);
+  if (!imported) return { disposition: 'invalid', imported: null, existing: null, external, generated };
+  const existing = state.catalog.find(item => item.id === imported.id) || null;
+  const disposition = !existing ? 'new' : JSON.stringify(stableSourceOf(existing)) === JSON.stringify(stableSourceOf(imported)) ? 'same' : 'conflict';
+  return { disposition, imported, existing, external, generated };
+}
+/** Classifies an import without mutating the comparison or replacing its first source snapshot. */
+export function classifyMaterialImport(state, material = {}) {
+  return prepareMaterialImport(state, material).disposition;
+}
 function requestFor(state, kind, extra = {}) {
   const candidate = selected(state);
   const basis = basisTarget(state.matter);
@@ -218,17 +240,14 @@ export function reduceComparison(previous, action = {}) {
     case 'IMPORT_MATERIAL': {
       const material = action.material || {};
       if (!nonempty(material.excerpt)) return inform(state, '请粘贴一段实际摘录；仅填链接不会读取外部内容。');
-      const external = nonempty(material.provider) || nonempty(material.source) || material.url != null;
-      const imported = normalizedCandidate({ ...material, id: nonempty(material.id) ? material.id : `${state.sessionId}:${external ? 'external' : 'user'}-${state.nextId++}`,
-        title: nonempty(material.title) ? material.title : external ? '联网来源' : '我带入的一段材料', kind: external ? 'external' : 'user',
-        scopes: external ? [material.source === 'authorized' ? 'authorized' : 'public'] : ['imported'],
-        relationship: undefined, comparison: undefined }, basisOf(state.matter).focus);
-      const existing = state.catalog.find(item => item.id === imported.id);
+      const { disposition, imported, existing, external, generated } = prepareMaterialImport(state, material);
+      if (disposition === 'invalid') return inform(state, '这份材料缺少可核对的内容，没有加入本次对照。');
       if (existing) {
-        if (JSON.stringify(sourceOf(existing)) !== JSON.stringify(sourceOf(imported))) return inform(state, '同一来源身份对应了不同内容；没有覆盖已打开的材料。');
+        if (disposition === 'conflict') return inform(state, '同一来源身份对应了不同内容；没有覆盖已打开的材料。');
         state.candidateIds = [...new Set([...state.candidateIds, existing.id])]; state.selectedId = existing.id; state.screen = 'compare';
         return inform(state, '这份来源已经在本次对照中；没有重复保存。');
       }
+      if (generated) state.nextId++;
       state.catalog.push(imported); state.candidateIds = [...new Set([...state.candidateIds, imported.id])];
       state.selectedId = imported.id; state.screen = 'compare'; state.search.status = 'ready'; state.revision.open = false;
       return inform(state, external ? '已带入本次选择的联网摘要；尚未接到原事项。' : '已带入你粘贴的材料；未读取外网，尚未接到原事项。');

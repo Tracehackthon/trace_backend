@@ -31,6 +31,9 @@ test('packaged runtime identity is safe for the desktop status API', () => {
     assert.equal(identity.source_identity.clean, true);
     assert.equal('dirty_paths' in identity.source_identity, false, 'API must not expose path inventory');
     assert.ok(identity.api_surface.host.length >= 20);
-    assert.ok(runtimeApiSurface().agent.includes('/api/agent/runs/:id/events'));
+    const agentRoutes = runtimeApiSurface().agent;
+    assert.ok(agentRoutes.includes('/api/agent/runs/:id/events'));
+    assert.ok(agentRoutes.includes('/api/agent/runs/:id/approval'));
+    assert.ok(agentRoutes.includes('/api/agent/runs/:id/input'));
   } finally { fs.rmSync(directory, {recursive: true, force: true}); }
 });

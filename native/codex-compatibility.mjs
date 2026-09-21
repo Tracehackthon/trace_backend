@@ -123,6 +123,29 @@ function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * Compare installation paths by their real, normalized identity.  Windows
+ * file names are case-insensitive even when the qualification record or the
+ * current executable was discovered through differently cased APIs.  The
+ * helper never broadens a path boundary or joins user input; it is used only
+ * for equality checks after both values have been resolved.
+ */
+export function canonicalPathForComparison(value) {
+  if (typeof value !== 'string' || !value) return '';
+  const windowsStyle = process.platform === 'win32' || /^[A-Za-z]:[\\/]|^\\\\/.test(value);
+  const api = windowsStyle ? path.win32 : path;
+  let resolved = api.resolve(value);
+  try {
+    const real = fs.realpathSync.native(value);
+    if (typeof real === 'string' && real) resolved = api.resolve(real);
+  } catch {
+    // A qualification fixture may refer to a path that is unavailable on the
+    // current host.  The resolved spelling remains a bounded comparison key.
+  }
+  const normalized = api.normalize(resolved);
+  return windowsStyle ? normalized.toLowerCase() : normalized;
+}
+
 /** JSON canonicalization used for fingerprints and qualification records. */
 export function canonicalJson(value) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
@@ -311,7 +334,7 @@ export function validateCodexAppServerInitialize({ initializeResult, initializeP
   if (reportedVersion && userAgentVersion !== reportedVersion) {
     throw new Error(`Codex initialize userAgent version ${userAgentVersion} does not match executable version ${reportedVersion}`);
   }
-  if (expectedCodexHome && path.resolve(initializeResult.codexHome) !== path.resolve(expectedCodexHome)) {
+  if (expectedCodexHome && canonicalPathForComparison(initializeResult.codexHome) !== canonicalPathForComparison(expectedCodexHome)) {
     throw new Error('Codex initialize response points at a different CODEX_HOME');
   }
   const capabilities = initializeParams?.capabilities;
@@ -364,7 +387,7 @@ export function validateCodexAppServerProbe({ calls, expectedCwd, threadId, turn
   const actualThreadId = threadId ?? start.result?.thread?.id;
   if (typeof actualThreadId !== 'string' || !actualThreadId) throw new Error('Codex protocol probe thread/start returned no thread id');
   if (start.result?.thread?.ephemeral !== true) throw new Error('Codex protocol probe thread is not ephemeral');
-  if (expectedCwd && start.result?.cwd && path.resolve(start.result.cwd) !== path.resolve(expectedCwd)) throw new Error('Codex protocol probe returned a different cwd');
+  if (expectedCwd && start.result?.cwd && canonicalPathForComparison(start.result.cwd) !== canonicalPathForComparison(expectedCwd)) throw new Error('Codex protocol probe returned a different cwd');
   if (mode === 'no-model') {
     if (calls.some(item => item.method === 'turn/start' || item.method === 'turn/interrupt')) throw new Error('no-model Codex protocol probe must not start a turn');
     return { mode, checks: ['initialize', 'initialized', 'account/read', 'thread/start(ephemeral)', 'no-model-turn'],
@@ -421,7 +444,7 @@ export function validateCodexQualificationRecord(record, { schemaBundle, executa
   const actualFingerprint = schemaBundle ? codexAppServerSchemaFingerprint(schemaBundle) : null;
   if (actualFingerprint && actualFingerprint !== record.schema?.fingerprint) throw new Error('Codex qualification schema fingerprint is stale');
   if (executableIdentity && executableIdentity.sha256 !== record.executable?.sha256) throw new Error('Codex qualification executable identity is stale');
-  if (executableIdentity?.path && record.executable?.path && path.resolve(executableIdentity.path) !== path.resolve(record.executable.path)) throw new Error('Codex qualification executable path is stale');
+  if (executableIdentity?.path && record.executable?.path && canonicalPathForComparison(executableIdentity.path) !== canonicalPathForComparison(record.executable.path)) throw new Error('Codex qualification executable path is stale');
   if (initializeResult) {
     if (stableUserAgent(initializeResult.userAgent) !== stableUserAgent(record.user_agent)) throw new Error('Codex qualification userAgent is stale');
     validateCodexAppServerInitialize({ initializeResult, initializeParams, cliVersion: record.cli_version,

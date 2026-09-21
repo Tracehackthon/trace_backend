@@ -44,6 +44,30 @@ const mimeTypes = new Map([
   ['.json', 'application/json; charset=utf-8'],
 ])
 
+function rejectHeartbeatRequest(request, response) {
+  const address = request.socket.remoteAddress
+  const host = request.headers.host
+  const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address)
+  if (!loopback || typeof host !== 'string' || !/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i.test(host)) {
+    response.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
+    response.end(JSON.stringify({error: {code: 'LOCAL_ONLY', message: 'Trace 本机心跳只接受回环请求。'}}))
+    return true
+  }
+  const expected = `${request.socket.encrypted ? 'https' : 'http'}://${host}`
+  if (request.headers.origin !== undefined && request.headers.origin !== expected) {
+    response.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
+    response.end(JSON.stringify({error: {code: 'ORIGIN_REQUIRED', message: 'Trace 本机心跳必须使用本机同源地址。'}}))
+    return true
+  }
+  const site = request.headers['sec-fetch-site']
+  if (site !== undefined && site !== 'same-origin' && site !== 'none') {
+    response.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
+    response.end(JSON.stringify({error: {code: 'CROSS_SITE_REQUEST', message: 'Trace 本机心跳拒绝跨站请求。'}}))
+    return true
+  }
+  return false
+}
+
 function resolveAsset(url = '/') {
   const pathname = decodeURIComponent(new URL(url, 'http://127.0.0.1').pathname)
   if (pathname.startsWith('/runtime/product-workspace/')) {
@@ -66,6 +90,17 @@ const server = http.createServer(async (request, response) => {
     }
     response.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
     response.end(JSON.stringify(runtimeIdentity))
+    return
+  }
+  if (requestUrl.pathname === '/api/runtime/heartbeat') {
+    if (rejectHeartbeatRequest(request, response)) return
+    if (request.method !== 'GET') {
+      response.writeHead(405, {'content-type': 'application/json; charset=utf-8', allow: 'GET', 'cache-control': 'no-store'})
+      response.end(JSON.stringify({error: {code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 本机心跳。'}}))
+      return
+    }
+    response.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
+    response.end(JSON.stringify({status: 'ok'}))
     return
   }
   if (await productWorkspace.handle(request, response)) return

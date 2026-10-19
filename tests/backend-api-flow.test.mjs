@@ -7,6 +7,7 @@ import http from 'node:http';
 import {once} from 'node:events';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {backup, verify, restore} from '../scripts/maintain-product-state.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = path.resolve(here, '..');
@@ -126,8 +127,34 @@ test('API-only: product command -> public searches -> Agent retrieval/tools/SSE 
   const restoredRevisionRun=await (await fetch(`${desktop.origin}/api/agent/runs/${reviseId}`)).json();
   assert.equal(restoredProduct.revision, 2); assert.equal(restoredRun.status, 'succeeded'); assert.equal(restoredRun.usableAsCurrent, false);
   assert.equal(restoredRevisionRun.result.adoption,'applied');assert.equal(restoredProduct.host.chain.matters[0].understandingDraft,'API 可以从输入走到来源、Agent、事件、用户确认和持久化证据。');
-  // Stop the authoritative owners before copying the stable SQLite main/WAL/SHM
-  // set, so the evidence cannot change midway through the copy.
+  // Back up the two authoritative stores only after the server has released
+  // both owners, then diverge and restore at the same paths before rereading.
+  await stopDesktop(desktop);
+  const web = path.join(root, 'web.sqlite'), agent = path.join(root, 'agent.sqlite'), bundle = path.join(root, 'paired-backup');
+  const saved = backup({web, agent, out: bundle});
+  assert.equal(saved.manifest.databases.agent.present, true);
+  assert.equal(verify({bundle}).manifest.databases.web.snapshot.sha256, saved.manifest.databases.web.snapshot.sha256);
+  desktop = await startDesktop({port, root, profiles});
+  const diverged = await request('/api/product/commands', {protocolVersion: 1, commandId: 'api-flow-after-backup', expectedRevision: 2,
+    operations: [{type: 'capture.create', matterId: 'api-flow-after-backup-matter', text: '备份后新增，恢复后不应存在。'}]});
+  assert.equal(diverged.status, 200, JSON.stringify(diverged.body)); assert.equal(diverged.body.revision, 3);
+  const extraRun = await request('/api/agent/runs', {protocolVersion: 1, requestId: 'api-flow-after-backup-run', expectedRevision: 3,
+    matterId: 'api-flow-matter', contextMode: 'resume', contextEpoch: 0, purpose: 'discuss', input: '仅用于验证恢复后消失。'});
+  assert.equal(extraRun.status, 202, JSON.stringify(extraRun.body));
+  await (await fetch(`${origin}/api/agent/runs/${extraRun.body.run.runId}/events`, {headers: {origin}})).text();
+  await stopDesktop(desktop);
+  const recovered = restore({bundle, web, agent});
+  assert.equal(recovered.agentPresent, true); assert.ok(recovered.previous.length >= 2);
+  desktop = await startDesktop({port, root, profiles});
+  const afterRestore = await request('/api/product/workspace');
+  const receipt = await request('/api/product/commands/api-flow-create');
+  const afterRun = await request(`/api/agent/runs/${runId}`);
+  const goneRun = await request(`/api/agent/runs/${extraRun.body.run.runId}`);
+  assert.equal(afterRestore.body.revision, 2);
+  assert.equal(afterRestore.body.host.chain.matters[0].understandingDraft, 'API 可以从输入走到来源、Agent、事件、用户确认和持久化证据。');
+  assert.equal(receipt.body.receipt.status, 'committed'); assert.equal(receipt.body.receipt.afterRevision, 1);
+  assert.equal(afterRun.body.status, 'succeeded'); assert.equal(afterRun.body.result.adoption, 'not_applied');
+  assert.equal(goneRun.status, 404);
   await stopDesktop(desktop);
   const evidence = {protocolVersion: 1, transport: 'HTTP+SSE', frontendUsed: false,
     product: {initialRevision: 0, committedRevision: created.body.revision, adoptedRevision:adopted.body.product.revision,restoredRevision: restoredProduct.revision,
@@ -138,7 +165,9 @@ test('API-only: product command -> public searches -> Agent retrieval/tools/SSE 
       adoption: restoredRun.result.adoption, usableAsCurrent: restoredRun.usableAsCurrent, modelTurns: modelRequests.length,
       sseEvents: [...events.matchAll(/^event: (.+)$/gm)].map(match => match[1])},
     agentAdoption:{runId:reviseId,status:restoredRevisionRun.status,adoption:restoredRevisionRun.result.adoption,effect:adopted.body.product.receipt.effect},
-    persistence: {webSqlite: fs.statSync(path.join(root, 'web.sqlite')).size, agentSqlite: fs.statSync(path.join(root, 'agent.sqlite')).size}};
+    persistence: {webSqlite: fs.statSync(path.join(root, 'web.sqlite')).size, agentSqlite: fs.statSync(path.join(root, 'agent.sqlite')).size,
+      pairedBackupVerified: true, restoredAtOriginalPaths: true, divergedRevision: diverged.body.revision, restoredRevision: afterRestore.body.revision,
+      restoredReceipt: receipt.body.receipt.receiptId, restoredRun: afterRun.body.status, laterRunAbsent: goneRun.status === 404}};
   if (process.env.TRACE_API_FLOW_EVIDENCE) {
     const target = path.resolve(process.env.TRACE_API_FLOW_EVIDENCE); fs.mkdirSync(target, {recursive: true});
     fs.writeFileSync(path.join(target, 'api-flow.json'), JSON.stringify(evidence, null, 2));

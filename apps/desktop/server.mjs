@@ -7,23 +7,18 @@ import { createAgentBackend } from '../agent/backend.mjs'
 import { createZhihuBackend } from '../agent/zhihu.mjs'
 import { normalizeDesktopPort } from './runtime-port.mjs'
 import { loadRuntimeIdentity } from './runtime-identity.mjs'
+import { acquireStateOwner } from './state-owner.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(root, '../..')
 const defaultStateRoot = path.resolve(root, '../../..')
 const productModuleRoot = path.join(repositoryRoot, 'packages/product/workspace/src')
 const productBrowserAssets = new Set(['index.mjs', 'bridge.mjs', 'commands.mjs', 'demo-workspace.mjs', 'chain-model.mjs', 'comparison-model.mjs', 'worksite-model.mjs'])
-const productWorkspace = createProductWorkspace({
-  file: path.resolve(process.env.TRACE_WEB_STATE_FILE || path.join(defaultStateRoot, '.trace/state/web.sqlite')),
-  // Set only by the packaged Electron host. It is never exposed to a renderer,
-  // URL or command line and only unlocks the existing bounded snapshot parser.
-  ...(process.env.TRACE_DESKTOP_SNAPSHOT_TOKEN ? { desktopSnapshotToken: process.env.TRACE_DESKTOP_SNAPSHOT_TOKEN } : {}),
-})
+const productFile = path.resolve(process.env.TRACE_WEB_STATE_FILE || path.join(defaultStateRoot, '.trace/state/web.sqlite'))
+let productWorkspace, zhihu, agent, releaseOwner
 // Four explicit Web API domains: product state, public source search, Zhihu
 // account connection, and Agent runs. The Zhihu middleware owns `/api/search/*`
 // and `/api/zhihu/*`; the Agent receives its provider in-process only.
-const zhihu = createZhihuBackend()
-const agent = createAgentBackend({ productWorkspace, retrievalProvider: zhihu.provider })
 const runtimeIdentity = loadRuntimeIdentity(root)
 // Port 0 asks the OS for an available ephemeral loopback port. The packaged
 // desktop host uses this path and reads the selected port from `ready`.
@@ -81,6 +76,11 @@ function resolveAsset(url = '/') {
 
 const server = http.createServer(async (request, response) => {
   try {
+  if (!productWorkspace || !agent || !zhihu) {
+    response.writeHead(503, {'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store'})
+    response.end('Trace is starting or stopping')
+    return
+  }
   const requestUrl = new URL(request.url || '/', 'http://127.0.0.1')
   if (requestUrl.pathname === '/api/runtime/identity') {
     if (request.method !== 'GET') {
@@ -142,24 +142,46 @@ const server = http.createServer(async (request, response) => {
 export const ready = new Promise((resolve, reject) => {
   const fail = error => reject(error)
   server.once('error', fail)
-  server.listen(port, '127.0.0.1', () => {
+  server.listen(port, '127.0.0.1', async () => {
     server.off('error', fail)
-    const address = server.address()
-    const listeningPort = address && typeof address === 'object' ? address.port : port
-    console.log(`Trace Web: http://127.0.0.1:${listeningPort}/`)
-    console.log(`Local Web data: ${productWorkspace.file}`)
-    console.log('Product writes: command protocol v1; legacy snapshot/reset writes disabled')
-    resolve({ port: listeningPort, file: productWorkspace.file })
+    try {
+      // Reserve the real listening port before opening either database. A port
+      // conflict must not create a fresh empty store or leave an Agent owner.
+      fs.mkdirSync(path.dirname(productFile), { recursive: true })
+      releaseOwner = acquireStateOwner(productFile)
+      productWorkspace = createProductWorkspace({
+        file: productFile,
+        // Set only by the packaged Electron host, never by a renderer or URL.
+        ...(process.env.TRACE_DESKTOP_SNAPSHOT_TOKEN ? { desktopSnapshotToken: process.env.TRACE_DESKTOP_SNAPSHOT_TOKEN } : {}),
+      })
+      zhihu = createZhihuBackend()
+      agent = createAgentBackend({ productWorkspace, retrievalProvider: zhihu.provider })
+      const address = server.address()
+      const listeningPort = address && typeof address === 'object' ? address.port : port
+      console.log(`Trace Web: http://127.0.0.1:${listeningPort}/`)
+      console.log(`Local Web data: ${productWorkspace.file}`)
+      console.log('Product writes: command protocol v1; legacy snapshot/reset writes disabled')
+      resolve({ port: listeningPort, file: productWorkspace.file })
+    } catch (error) {
+      try { await close() } catch (cleanupError) { console.error('Trace 启动收尾失败：', cleanupError) }
+      reject(error)
+    }
   })
 })
 
-let closing = false
+let closingPromise
 export async function close() {
-  if (closing) return
-  closing = true
-  const stopped = new Promise(resolve => server.close(resolve))
-  try { await agent.close() } finally { zhihu.close() }
-  await stopped
-  productWorkspace.close()
+  if (closingPromise) return closingPromise
+  closingPromise = (async () => {
+    const stopped = new Promise(resolve => server.close(resolve))
+    let firstError
+    try { await agent?.close() } catch (error) { firstError = error }
+    try { zhihu?.close() } catch (error) { firstError ??= error }
+    await stopped
+    try { productWorkspace?.close() } catch (error) { firstError ??= error }
+    releaseOwner?.()
+    if (firstError) throw firstError
+  })()
+  return closingPromise
 }
-for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, close)
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void close().catch(error => { console.error(error); process.exitCode = 1 }) })

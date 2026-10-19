@@ -14,7 +14,7 @@
 
 现有 `node apps/desktop/server.mjs` / package 内 `dev` 命令继续兼容；新入口增加参数校验、明确的配置输出和占用端口预检。预检与正式监听之间仍可能有竞争，不代表数据库或服务健康检查。
 
-**看到 `Trace Web:` 才表示已监听成功。** 地址默认 `http://127.0.0.1:4173`。新入口沿用原数据位置：runtime 仓库的上一级目录下 `.trace/state/web.sqlite`。Host Session、WorkflowFinding、RoutingProposal、activation receipt、Guard journal、PublicationPolicy 和 CapabilityTrial 都由该 `web.sqlite` 负责；Agent 的 run/profile/event/result hash 另存相邻的 `agent.sqlite`。不要把换启动命令误当作迁移数据库。
+**看到 `Trace Web:` 才表示监听及本轮存储/Agent 初始化成功。** 地址默认 `http://127.0.0.1:4173`。新入口沿用原数据位置：runtime 仓库的上一级目录下 `.trace/state/web.sqlite`。Host Session、WorkflowFinding、RoutingProposal、activation receipt、Guard journal、PublicationPolicy 和 CapabilityTrial 都由该 `web.sqlite` 负责；Agent 的 run/profile/event/result hash 另存相邻的 `agent.sqlite`。不要把换启动命令误当作迁移数据库。端口冲突在建库前失败；正常退出释放两库 owner，异常中断后只在确认旧 PID 已死亡时回收 owner。
 
 ## 只有选旧库或改端口时才配环境变量
 
@@ -45,6 +45,8 @@ POST /api/agent/sensemaking/drain   {"protocolVersion":1,"limit":16}
 
 健康结果区分 mode、profile/service identity、队列深度、失败数、lease/预算、shadow 标记和最近错误；`drain` 只处理已入队的有限 job，不改变路由或采用状态。Host Session 页面为 `/?view=host`，原始 prompt/final 默认折叠；页面只显示 Product Workspace 投影和回执，不另存浏览器副本。
 
+`GET /api/runtime/heartbeat` 只证明 HTTP 进程能响应，**不是**产品库、Agent 库或 worker 的健康结论。应分别读取 `GET /api/product/workspace`、需要的 Agent run/结果和 `/api/agent/sensemaking/health`；`disabled` 仍是未启用，不是 worker 正常执行。
+
 ## 开启 Agent 后怎样判断真的可用
 
 1. 访问 `GET /api/agent/capabilities`：`enabled=true` 只证明开关。
@@ -71,6 +73,16 @@ POST 必须有匹配 URL 的 `Origin` 和 `Content-Type: application/json`，脚
 ## 停用、备份与回退
 
 - 正常停止自己启动的终端服务使用 `Ctrl+C`，确认进程退出和端口释放。只需停用生成时，在服务停止后设 `TRACE_AGENT_ENABLED=0`，再不带 `--agent` 启动。该操作不删除已有候选。
-- **CLI 的 `trace backup` 仅覆盖项目认知账本，不覆盖 Web / Agent 库。** 目前两库没有统一的在线备份恢复命令；不要对运行中的 SQLite 只复制主文件就声称备份完成。
-- 临时离线备份：确认相关 writer 全部停止后，保留整个实际状态目录（包括存在的 `-wal` / `-shm`）、配置与源码版本。恢复先在隔离副本验证完整性和业务读取，再确认是否替换。备份包含私人正文与结果，不公开上传。
+- **CLI 的 `trace backup` 仅覆盖项目认知账本，不覆盖 Web / Agent 库。** 本仓库另有维护者源码命令 `scripts/maintain-product-state.mjs`，只处理 `web.sqlite` 与 `agent.sqlite`，不属于公共 HTTP API 或已打包桌面版。不要对运行中的 SQLite 只复制主文件。
+- 先正常停止本机 HTTP 服务、独立 Agent、hooks、其他读取或写入进程，并确认真实绝对路径。该命令的 `.owner` 检查能拒绝当前 Runtime 的占用，但无法证明所有不遵守 owner 约定的外部写入者均已停止；两库没有跨数据库事务，**离线**是成对一致性的前提。
+
+```powershell
+node scripts/maintain-product-state.mjs backup --web 'D:\TraceData\web.sqlite' --agent 'D:\TraceData\agent.sqlite' --out 'D:\TraceBackups\pair-2026-10-19'
+node scripts/maintain-product-state.mjs verify --bundle 'D:\TraceBackups\pair-2026-10-19'
+node scripts/maintain-product-state.mjs restore --bundle 'D:\TraceBackups\pair-2026-10-19' --web 'D:\TraceData\web.sqlite' --agent 'D:\TraceData\agent.sqlite'
+```
+
+- `--out` 必须是不存在的新目录；两库分别用 SQLite `VACUUM INTO` 形成独立完整快照。清单记录原绝对路径、文件大小与 SHA-256；Agent 库原本不存在时记录 `present=false`，恢复后也保持不存在。路径只能恢复到原路径，不迁移或猜测新位置。
+- `verify` 检查两份已声明快照的摘要、SQLite 完整性、库身份及必需表。摘要不是签名，备份目录必须保持私有且可信；恢复前再次核验，并先把原主库及存在的 WAL/SHM 暂存为 `.pre-restore-<id>`，成功后仍保留这些原件，不自动清理。缺件、篡改、错路径、被当前 Runtime 占用均拒绝覆盖。
+- 恢复后**重启相同来源版本的服务**，检查产品 revision、事项、理解与命令回执，并读取 Agent run/结果。只核对文件哈希或 heartbeat 不算恢复验收。符号链接数据库不在本命令支持范围；不对真实用户库先做首次演练。备份含私人正文与结果，不公开上传。
 - 源码回退不等于数据回退。不要自动执行降级迁移，不删除 `.owner` 绕过可能还活着的进程。Host Session 表迁移必须 additive 且不改变 workspace snapshot revision；Agent 库与产品库分别备份，不能把一份复制品宣称为两库一致恢复。可恢复备份、升级/回退演练仍是[生产阶段](production-plan.md)的必需交付。

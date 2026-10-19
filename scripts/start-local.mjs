@@ -52,7 +52,7 @@ async function main() {
   process.env.TRACE_AGENT_ENABLED = config.agent ? '1' : '0';
   // Keep the existing host and its shutdown handlers in this process. No shell,
   // second service, port fallback, database migration or global configuration.
-  await import('../apps/desktop/server.mjs');
+  await (await import('../apps/desktop/server.mjs')).ready;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

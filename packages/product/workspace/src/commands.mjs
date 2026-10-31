@@ -1,6 +1,7 @@
 // Shared command contract. The server always evaluates it against its own stored
 // snapshot. Browser evaluation is only a preview; it cannot issue commit receipts.
 import * as B from './bridge.mjs';
+import {isWorkbenchOperation,validateWorkbenchOperation,applyWorkbenchOperations,WorkbenchError} from './workbench-model.mjs';
 import { createDemoWorkspace } from './demo-workspace.mjs';
 import { SCREENS as CHAIN_SCREENS } from './chain-model.mjs';
 import { SCREENS as WORK_SCREENS } from './worksite-model.mjs';
@@ -105,7 +106,10 @@ export function validateProductOperations(operations) {
     }
   }
   requireThat(Array.isArray(operations) && operations.length > 0 && operations.length <= 256, '每次提交需要 1—256 个明确动作。');
-  for (const op of operations) requireThat(plain(op) && Object.hasOwn(OPERATION, op.type) && shape(op, {type: text, ...OPERATION[op.type]}), '不支持的动作、字段或字段值。');
+  for (const op of operations) {
+    if (isWorkbenchOperation(op)) validateWorkbenchOperation(op);
+    else requireThat(plain(op) && Object.hasOwn(OPERATION, op.type) && shape(op, {type: text, ...OPERATION[op.type]}), '不支持的动作、字段或字段值。');
+  }
   requireThat(!operations.some(op => op.type === 'workspace.reset') || operations.length === 1, '重置必须独立确认，不能混入普通提交。');
   return operations;
 }
@@ -175,6 +179,10 @@ function worksite(host, op) {
 
 export function applyProductOperations(previous, operations) {
   validateProductOperations(operations);
+  if (previous?.schemaVersion === 2 || operations.some(isWorkbenchOperation)) {
+    if (!operations.every(isWorkbenchOperation)) throw new WorkbenchError('LEGACY_COMMAND_REQUIRES_ADAPTER','旧动作尚未映射到新内容协议；未改写工作区。',409);
+    return applyWorkbenchOperations(previous,operations);
+  }
   let host = structuredClone(previous || B.createBridge());
   // A historical view error is not a new command failure.
   host.error = null;

@@ -3,6 +3,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { applyProductOperations, validateProductCommand, ProductCommandError } from './commands.mjs';
+import {validateWorkbench,WorkbenchError} from './workbench-model.mjs';
+import {CANVAS_TABLES,ensureCanvasSchema,createCanvasResourceStore} from './canvas-store.mjs';
 import {
   CodexBridgeError,
   codexRequestFingerprint,
@@ -24,10 +26,12 @@ export {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST
 // This database is deliberately independent of the cognitive/adopted ledgers.
 // The caller owns TRACE_WEB_STATE_FILE and chooses an explicit absolute path.
 const APPLICATION_ID = 0x54525731; // TRW1
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_ENTITIES = 10000;
-const KINDS = ['host-meta', 'chain-meta', 'matter', 'source', 'chain-session', 'comparison', 'worksite-meta', 'work', 'worksite-session', 'work-guard'];
+const LEGACY_KINDS = ['host-meta', 'chain-meta', 'matter', 'source', 'chain-session', 'comparison', 'worksite-meta', 'work', 'worksite-session', 'work-guard'];
+const CONTENT_CATALOGS = ['resources','materials','expressions','relations','capabilities','sessions','tasks'];
+const KINDS = [...LEGACY_KINDS,...CONTENT_CATALOGS.map(key=>'content-'+key)];
 const CORE_TABLES = ['web_workspace', 'web_snapshots', 'web_entities', 'web_commands'];
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -72,6 +76,7 @@ function objectMap(items, name) {
 /** Canonical entities plus separately scoped recovery state, never an opaque host blob. */
 function normalizeHost(input) {
   checkTree(input);
+  if (input?.schemaVersion === 2) return validateWorkbench(structuredClone(input));
   demand(plain(input) && input.schemaVersion === 1, 'INVALID_HOST', '需要 schemaVersion 1 的工作区对象。');
   const allowed = new Set(['schemaVersion', 'chain', 'comparisons', 'worksite', 'workGuards', 'preferences', 'route', 'error']);
   demand(Object.keys(input).every(key => allowed.has(key)), 'INVALID_HOST', '工作区包含未支持的顶层字段。');
@@ -129,6 +134,12 @@ function normalizeHost(input) {
 
 function splitHost(host) {
   const rows = []; const add = (kind, id, payload, ordinal = 0) => rows.push({ kind, id, ordinal, payload: stableJson(payload) });
+  if(host.schemaVersion===2){
+    const {resources,materials,expressions,relations,capabilities,sessions,tasks,...meta}=host;
+    add('host-meta','$',meta);
+    for(const key of CONTENT_CATALOGS)Object.entries(host[key]).forEach(([id,payload],ordinal)=>add('content-'+key,id,payload,ordinal));
+    return rows;
+  }
   add('host-meta', '$', { schemaVersion: host.schemaVersion, ...(host.preferences === undefined ? {} : { preferences: host.preferences }) });
   const { matters, sources, sessions, ...chainMeta } = host.chain;
   add('chain-meta', '$', chainMeta);
@@ -145,7 +156,7 @@ function splitHost(host) {
 }
 
 function databaseError(error) {
-  if (error instanceof WebStoreError || error instanceof ProductCommandError || error instanceof CodexBridgeError || error instanceof HostIngestError || error instanceof HostWorkflowError) return error;
+  if (error instanceof WorkbenchError || error instanceof WebStoreError || error instanceof ProductCommandError || error instanceof CodexBridgeError || error instanceof HostIngestError || error instanceof HostWorkflowError) return error;
   if (/SQLITE_BUSY|database is locked|database is busy/i.test(String(error))) return new WebStoreError(503, 'STORAGE_BUSY', '工作区存储正忙，请保留草稿并稍后重试。');
   return new WebStoreError(503, 'STORAGE_FAILURE', '工作区存储读取或写入失败，未重置原数据。');
 }
@@ -154,11 +165,11 @@ function assertDatabase(db, allowEmpty) {
   demand(integrity.length === 1 && integrity[0].quick_check === 'ok', 'STORAGE_CORRUPT', '工作区数据库损坏，未重置。', 503);
   const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
   if (allowEmpty && tables.length === 0 && db.prepare('PRAGMA application_id').get().application_id === 0) return false;
-  demand(db.prepare('PRAGMA application_id').get().application_id === APPLICATION_ID && db.prepare('PRAGMA user_version').get().user_version === SCHEMA_VERSION, 'WRONG_DATABASE', '这不是独立 Trace Web 数据库，未写入。', 503);
+  demand(db.prepare('PRAGMA application_id').get().application_id === APPLICATION_ID && [1,SCHEMA_VERSION].includes(db.prepare('PRAGMA user_version').get().user_version), 'WRONG_DATABASE', '这不是独立 Trace Web 数据库，未写入。', 503);
   // Host ingest is an additive extension. Older v1 web databases are valid
   // and receive the extension in the startup transaction below; arbitrary
   // tables still fail closed so a ledger cannot be mistaken for web.sqlite.
-  const allowed = new Set([...CORE_TABLES, ...HOST_SESSION_TABLES, ...HOST_WORKFLOW_TABLES]);
+  const allowed = new Set([...CORE_TABLES, ...HOST_SESSION_TABLES, ...HOST_WORKFLOW_TABLES,...CANVAS_TABLES]);
   demand(CORE_TABLES.every(table => tables.includes(table)) && tables.every(table => allowed.has(table)), 'STORAGE_CORRUPT', '工作区数据表缺失或不一致，未重置。', 503);
   return true;
 }
@@ -233,9 +244,16 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
         demand(plain(payload), 'STORAGE_CORRUPT', '实体格式损坏，未重置。', 503);
         groups[row.kind].push({ id: row.object_id, payload }); counts[row.kind]++;
       }
-      demand(stableJson(counts) === stableJson(expected), 'STORAGE_CORRUPT', '实体数量不一致，未重置。', 503);
+      demand(Object.keys(expected).every(key=>KINDS.includes(key))&&stableJson(counts) === stableJson(Object.fromEntries(KINDS.map(key=>[key,expected[key]??0]))), 'STORAGE_CORRUPT', '实体数量不一致，未重置。', 503);
       const meta = kind => { demand(groups[kind].length === 1 && groups[kind][0].id === '$', 'STORAGE_CORRUPT', '工作区恢复元数据缺失。', 503); return groups[kind][0].payload; };
       const map = kind => Object.fromEntries(groups[kind].map(row => [row.id, row.payload]));
+      if(meta('host-meta').schemaVersion===2){
+        demand(LEGACY_KINDS.filter(key=>key!=='host-meta').every(key=>groups[key].length===0),'STORAGE_CORRUPT','新内容不能同时持有旧正文副本。',503);
+        const host={...meta('host-meta'),...Object.fromEntries(CONTENT_CATALOGS.map(key=>[key,map('content-'+key)]))};
+        for(const key of CONTENT_CATALOGS)for(const row of groups['content-'+key])demand(row.payload.id===row.id,'STORAGE_CORRUPT','内容实体身份不一致。',503);
+        return {revision,host:normalizeHost(host),storage};
+      }
+      demand(CONTENT_CATALOGS.every(key=>groups['content-'+key].length===0),'STORAGE_CORRUPT','旧工作区不能混入新内容实体。',503);
       for (const kind of ['matter', 'source', 'work']) for (const row of groups[kind]) demand(row.payload.id === row.id, 'STORAGE_CORRUPT', '实体 ID 与数据库行不一致。', 503);
       const host = { ...meta('host-meta'), chain: { ...meta('chain-meta'), matters: groups.matter.map(row => row.payload), sources: groups.source.map(row => row.payload), sessions: map('chain-session') }, comparisons: map('comparison'), worksite: { ...meta('worksite-meta'), works: map('work'), sessions: map('worksite-session') }, workGuards: map('work-guard'), route: { view: 'home' }, error: null };
       return { revision, host: normalizeHost(host), storage };
@@ -259,6 +277,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
   }
   try {
     const exists = assertDatabase(db, true);
+    if(exists)readSnapshot(currentRevision());
     db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
     if (!exists) transaction(() => {
       db.exec(`PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=${SCHEMA_VERSION};
@@ -267,11 +286,12 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
         CREATE TABLE web_snapshots(revision INTEGER PRIMARY KEY CHECK(revision>0),entity_counts TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE web_entities(workspace_revision INTEGER NOT NULL REFERENCES web_snapshots(revision),kind TEXT NOT NULL,object_id TEXT NOT NULL,ordinal INTEGER NOT NULL,payload TEXT NOT NULL,payload_sha256 TEXT NOT NULL,PRIMARY KEY(workspace_revision,kind,object_id));
         CREATE TABLE web_commands(command_id TEXT PRIMARY KEY,request_sha256 TEXT NOT NULL,committed_revision INTEGER NOT NULL REFERENCES web_snapshots(revision),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
-      ensureHostSessionSchema(db);
+      ensureHostSessionSchema(db);ensureCanvasSchema(db);
     });
-    else transaction(() => ensureHostSessionSchema(db));
+    else transaction(() => {ensureHostSessionSchema(db);ensureCanvasSchema(db);db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);});
     readSnapshot(currentRevision()); // A corrupt stored workspace must fail startup, not become empty.
   } catch (error) { db.close(); throw error; }
+  const canvasResources=createCanvasResourceStore({db,directory:path.join(path.dirname(file),path.basename(file)+'.resources'),readProduct:()=>readSnapshot(currentRevision()),transaction});
   function persist(host, fingerprint, commandId, revision) {
     demand(revision < Number.MAX_SAFE_INTEGER, 'REVISION_EXHAUSTED', '工作区修订已达上限。', 503);
     const next = revision + 1, rows = splitHost(host), counts = Object.fromEntries(KINDS.map(kind => [kind, rows.filter(row => row.kind === kind).length]));
@@ -283,13 +303,14 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     return { revision: next, host, storage };
   }
   function put(body) {
+    demand(body?.host?.schemaVersion!==2,'LEGACY_WRITE_DISABLED','新内容只接受明确命令，不能整份覆盖。',410);
     demand(plain(body) && Number.isSafeInteger(body.expectedRevision) && body.expectedRevision >= 0 && identity(body.commandId) && body.commandId.length <= 200, 'INVALID_COMMAND', '需要有效的 expectedRevision、commandId 和 host。', 400);
     demand(Object.keys(body).every(key => ['expectedRevision', 'host', 'commandId'].includes(key)), 'INVALID_COMMAND', '请求包含未支持的字段。', 400);
     const host = normalizeHost(body.host), fingerprint = sha(stableJson({ expectedRevision: body.expectedRevision, host }));
     return transaction(() => {
       const revision = currentRevision();
       // Validate the authoritative current snapshot before accepting any replacement.
-      readSnapshot(revision);
+      demand(readSnapshot(revision).host?.schemaVersion!==2,'LEGACY_WRITE_DISABLED','新内容工作区不能被旧快照覆盖。',410);
       const known = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(body.commandId);
       if (known) {
         if (known.request_sha256 !== fingerprint) throw new WebStoreError(409, 'COMMAND_CONFLICT', '相同 commandId 不能提交不同内容。', revision);
@@ -322,6 +343,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       // All domain guards and mutations run under the same SQLite write lock.
       // No caller-supplied host, receipt or final state is accepted.
       const next = applyProductOperations(current.host, body.operations);
+      canvasResources.verifyResources(next,body.operations.flatMap(op=>op.type==='resource.register'?[op.resource.id]:op.type==='material.create'&&op.value.resourceId?[op.value.resourceId]:[]));
       persist(normalizeHost(next), fingerprint, body.commandId, revision);
       return productResult(body.commandId, {request_sha256: fingerprint, committed_revision: revision + 1}, revision + 1);
     });
@@ -497,6 +519,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     try {
       if (closed) throw new WebStoreError(503, 'STORE_CLOSED', '工作区存储已关闭。');
       checkOrigin(req, ['PUT', 'POST'].includes(req.method));
+      if(product&&await canvasResources.handle(req,res,rawPath,readBody))return true;
       if (product) {
         const commandMatch = /^\/api\/product\/commands\/([^/]+)$/.exec(rawPath);
         const codexKind = rawPath === '/api/product/codex/receive' ? 'receive' : rawPath === '/api/product/codex/return' ? 'return' : null;
@@ -596,7 +619,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     }
     return true;
   }
-  return { file, handle,
+  return { file, handle,canvasResources,
     // User-level Codex host stream. These methods share the Product Workspace
     // SQLite handle but use independent append-only tables/revisions.
     hostSessions,

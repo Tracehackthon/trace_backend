@@ -9,6 +9,8 @@ export {
 } from './commands.mjs';
 export {createDemoWorkspace} from './demo-workspace.mjs';
 export * from './scope-contract.mjs';
+export * from './workbench-model.mjs';
+export * from './canvas-model.mjs';
 export {
   SCREENS as CHAIN_SCREENS,
   createChainState,

@@ -98,7 +98,7 @@ function normalizedCandidate(candidate, focus, fallbackId, defaultFixture = fals
     context: string(candidate.context) || (external ? '这是本次明确选择的联网结果摘要；可沿原文地址核验，不冒充全文。' : kind === 'user' ? '这是你主动粘贴的摘录；未读取外部原文。' : '本地演示内容，不对应真实作者或搜索结果。'),
     url: external && typeof candidate.url === 'string' ? candidate.url : null,
     ...(external ? {provider: string(candidate.provider), source: string(candidate.source), author: string(candidate.author),
-      contentType: string(candidate.contentType), contentMode: string(candidate.contentMode) || 'summary', fetchedAt: string(candidate.fetchedAt)} : {}),
+      contentType: string(candidate.contentType), contentMode: string(candidate.contentMode) || 'unknown', fetchedAt: string(candidate.fetchedAt)} : {}),
     scopes: Array.isArray(candidate.scopes) ? candidate.scopes.filter((scope) => member(SCOPE_OPTIONS, scope))
       : (external ? [candidate.source === 'authorized' ? 'authorized' : 'public'] : kind === 'user' ? ['imported'] : ['prior', 'public']),
     relationship: { type: member(RELATION_OPTIONS, relation.type) ? relation.type : 'possibility', target: string(relation.target) || focus.text,
@@ -378,7 +378,7 @@ export function selectComparisonView(state) {
   const selectedCandidate = candidates.find((item) => item.id === state.selectedId) || null;
   const basis = basisOf(state.matter);
   return { screen: state.screen, isDemo: state.isDemo, notice: state.notice,
-    matter: { id: state.matter.id, title: state.matter.title, understanding: state.matter.understanding,
+    matter: { id: state.matter.id, title: state.matter.title, originalText: state.matter.originalText, understanding: state.matter.understanding,
       version: state.matter.version, focus: clone(basis.focus), basis: clone(basis), unresolved: clone(state.matter.unresolved ?? '') },
     query: { ...clone(state.query), shortQuestion: state.fixtureQuestion && state.query.question === DEMO_QUESTION ? '不写附言，也能接回来吗？' : state.query.question }, search: clone(state.search), candidates,
     selectedId: state.selectedId, selectedCandidate, comparisonDraft: noteFor(state), savedComparisonNote: entry(state.notes, state.selectedId),

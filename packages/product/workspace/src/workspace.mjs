@@ -11,6 +11,8 @@ import {
   returnCodexResult,
   validateCodexReceiveRequest,
   validateCodexReturnRequest,
+  findAgentWorksiteResponse,
+  returnAgentWorksiteResult,
 } from './codex-bridge.mjs';
 import {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError} from './host-ingest.mjs';
 import {createHostWorkflowService, ensureHostWorkflowSchema, HOST_WORKFLOW_TABLES, HostWorkflowError, computeRepositoryPreflight} from './host-workflow.mjs';
@@ -291,7 +293,9 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       const known = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(body.commandId);
       if (known) {
         if (known.request_sha256 !== fingerprint) throw new WebStoreError(409, 'COMMAND_CONFLICT', '相同 commandId 不能提交不同内容。', revision);
-        return readSnapshot(known.committed_revision);
+        const committed = readSnapshot(known.committed_revision);
+        // A replay proves the original commit, not that its snapshot is still head.
+        return revision === known.committed_revision ? committed : { ...committed, headRevision: revision };
       }
       if (body.expectedRevision !== revision) throw new WebStoreError(409, 'REVISION_CONFLICT', '工作区已有更新，未覆盖；请重新读取并保留当前草稿。', revision);
       return persist(host, fingerprint, body.commandId, revision);
@@ -403,6 +407,49 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       }
       persist(normalizeHost(outcome.host), fingerprint, body.commandId, revision);
       return codexResult(kind, body.commandId, { request_sha256: fingerprint, committed_revision: revision + 1 }, revision + 1);
+    });
+  }
+  function agentWorksiteResult(commandId, known, headRevision) {
+    const snapshot = readSnapshot(known.committed_revision);
+    const bridge = findAgentWorksiteResponse(snapshot.host, commandId);
+    const productReceipt = { protocolVersion: 1, receiptId: `product:${commandId}`, commandId,
+      status: 'committed', beforeRevision: snapshot.revision - 1, afterRevision: snapshot.revision,
+      requestHash: known.request_sha256.slice('agent-worksite-v1:'.length), hostDelivery: 'not_requested',
+      agentRunId: bridge.receipt.runId, resultHash: bridge.receipt.resultHash, effect: 'result-draft-only' };
+    return {
+      protocolVersion: 1,
+      revision: snapshot.revision,
+      headRevision,
+      ...snapshot,
+      receipt: {...bridge.receipt, beforeRevision: snapshot.revision - 1, afterRevision: snapshot.revision},
+      productReceipt,
+    };
+  }
+  function executeAgentWorksite(candidate) {
+    demand(plain(candidate) && identity(candidate.commandId) && identity(candidate.runId) && identity(candidate.workId)
+      && identity(candidate.matterId) && Number.isSafeInteger(candidate.expectedRevision) && candidate.expectedRevision >= 0,
+      'INVALID_WORKSITE_RETURN', 'Agent 工作现场回接请求无效。', 400);
+    const fingerprint = `agent-worksite-v1:${sha(stableJson(candidate))}`;
+    return transaction(() => {
+      const revision = currentRevision();
+      const current = readSnapshot(revision);
+      const known = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(candidate.commandId);
+      if (known) {
+        if (known.request_sha256 !== fingerprint) throw new WebStoreError(409, 'COMMAND_CONFLICT', '同一 Agent 工作现场命令不能对应不同结果。', revision);
+        demand(known.request_sha256.startsWith('agent-worksite-v1:'), 'COMMAND_CONFLICT', '命令 ID 已用于另一类操作。', 409);
+        return agentWorksiteResult(candidate.commandId, known, revision);
+      }
+      demand(candidate.expectedRevision === revision, 'REVISION_CONFLICT', '工作区已经变化；旧 Agent 结果没有覆盖当前内容。', 409);
+      const outcome = returnAgentWorksiteResult(current.host, candidate);
+      if (!outcome.changed) {
+        const original = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(outcome.receipt.commandId);
+        demand(original?.request_sha256.startsWith('agent-worksite-v1:'), 'STORAGE_CORRUPT', 'Agent 原始工作现场命令缺失。', 503);
+        return agentWorksiteResult(outcome.receipt.commandId, original, revision);
+      }
+      demand(outcome.changed === true, 'RESULT_REJECTED', 'Agent 结果未进入工作现场复核区。', 409);
+      persist(normalizeHost(outcome.host), fingerprint, candidate.commandId, revision);
+      const result = agentWorksiteResult(candidate.commandId, {request_sha256: fingerprint, committed_revision: revision + 1}, revision + 1);
+      return result;
     });
   }
   // Host-session receipts use their own append-only command table and never
@@ -558,5 +605,6 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     read() { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return readSnapshot(currentRevision()); },
     execute(command) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return executeProduct(command); },
     adoptAgentCandidate(candidate) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return applyAgentCandidate(candidate); },
+    returnAgentWorksiteResult(candidate) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return executeAgentWorksite(candidate); },
     close() { if (closed) return; closed = true; db.close(); } };
 }

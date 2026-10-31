@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {SCOPE_CONTRACT_MIGRATION_ID, SCOPE_CONTRACT_MIGRATION_VERSION, scopeContractFromFindingRow, projectRefsFromContract, upcastLegacyScope} from './scope-contract.mjs';
 
 /**
  * Second-stage host workflow state.  This module deliberately has no model or
@@ -23,6 +24,7 @@ export const HOST_WORKFLOW_TABLES = Object.freeze([
   'capability_orchestrations',
   'capability_trials',
   'publication_events',
+  'trace_schema_migrations',
 ]);
 
 export const ROUTING_TARGET_KINDS = Object.freeze([
@@ -101,6 +103,32 @@ function addColumn(db, table, column, declaration) {
   if (!tableColumns(db, table).has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
 }
 
+/**
+ * Additive scope-contract migration.  The Product Workspace schema keeps its
+ * existing PRAGMA user_version stable; extension migrations are recorded in a
+ * table so web.sqlite upgrades do not rewrite or copy the authoritative
+ * workflow_findings rows.  A project trace.sqlite is not opened here.
+ */
+export function ensureScopeContractSchema(db) {
+  addColumn(db, 'workflow_findings', 'scope_contract_json', 'TEXT');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trace_schema_migrations(
+      migration_id TEXT PRIMARY KEY,
+      component TEXT NOT NULL,
+      version INTEGER NOT NULL CHECK(version>0),
+      applied_at TEXT NOT NULL,
+      details_json TEXT NOT NULL
+    );
+  `);
+  const existing = db.prepare('SELECT migration_id,component,version,details_json FROM trace_schema_migrations WHERE migration_id=?').get(SCOPE_CONTRACT_MIGRATION_ID);
+  if (!existing) {
+    const details = JSON.stringify({protocol_id: 'trace.scope-contract', protocol_version: 1, additive: true, nullable_column: 'workflow_findings.scope_contract_json'});
+    db.prepare('INSERT INTO trace_schema_migrations(migration_id,component,version,applied_at,details_json) VALUES(?,?,?,?,?)').run(SCOPE_CONTRACT_MIGRATION_ID, 'product-workspace', SCOPE_CONTRACT_MIGRATION_VERSION, now(), details);
+  } else if (existing.component !== 'product-workspace' || existing.version !== SCOPE_CONTRACT_MIGRATION_VERSION) {
+    fail('STORAGE_CORRUPT', `scope contract migration record ${SCOPE_CONTRACT_MIGRATION_ID} is incompatible`, 503);
+  }
+}
+
 /** Create the append-only workflow extension and safely migrate stage-one DBs. */
 export function ensureHostWorkflowSchema(db) {
   // Stage one created workflow_findings with only the capture columns.  Additive
@@ -113,6 +141,7 @@ export function ensureHostWorkflowSchema(db) {
   addColumn(db, 'workflow_findings', 'input_hash', 'TEXT');
   addColumn(db, 'workflow_findings', 'result_hash', 'TEXT');
   addColumn(db, 'workflow_findings', 'target_hint', 'TEXT');
+  ensureScopeContractSchema(db);
   db.exec(`
     CREATE INDEX IF NOT EXISTS workflow_findings_origin_idx ON workflow_findings(origin, created_at);
     CREATE TABLE IF NOT EXISTS sensemaking_jobs(
@@ -368,6 +397,7 @@ function jobView(row) {
 }
 function findingView(row) {
   if (!row) return null;
+  const scopeContract = scopeContractFromFindingRow(row, {project_ref: row.attached_project_ref ?? null});
   return {
     finding_id: row.finding_id, host: row.host, session_id: row.session_id, turn_id: row.turn_id,
     observation: row.observation, desired_behavior: row.desired_behavior ?? null, desiredBehavior: row.desired_behavior ?? null,
@@ -376,6 +406,8 @@ function findingView(row) {
     source_refs: parseJson(row.source_refs, 'source_refs', []), run_id: row.run_id ?? null,
     input_hash: row.input_hash ?? null, result_hash: row.result_hash ?? null, target_hint: row.target_hint ?? null,
     source_event_key: row.source_event_key ?? null, created_at: row.created_at,
+    scope_contract: scopeContract,
+    scopeContract,
   };
 }
 function proposalView(row) {
@@ -550,10 +582,51 @@ function commandInput(input, operation, fields = {}) {
   const normalized = {operation, command_id: commandId, ...fields};
   return {commandId, normalized, requestHash: workflowHash(normalized)};
 }
-function readFinding(db, findingId) { return db.prepare('SELECT * FROM workflow_findings WHERE finding_id=?').get(findingId); }
+function readFinding(db, findingId) {
+  return db.prepare(`SELECT f.*, s.project_ref AS attached_project_ref
+    FROM workflow_findings f LEFT JOIN host_sessions s
+      ON s.host=f.host AND s.session_id=f.session_id
+    WHERE f.finding_id=?`).get(findingId);
+}
 function readProposal(db, proposalId) { return db.prepare('SELECT * FROM routing_proposals WHERE proposal_id=?').get(proposalId); }
 
 function heuristicRoute(finding) {
+  const scopeContract = finding.scope_contract ?? finding.scopeContract ?? null;
+  if (scopeContract !== null) {
+    const contentKind = scopeContract.content_scope.kind;
+    const activationMode = scopeContract.activation_policy.mode;
+    if (contentKind === 'personal') {
+      const scope = activationMode === 'cross-project' || activationMode === 'selected-projects' ? 'cross-project' : 'personal';
+      return {
+        targetKind: 'personal-policy', scope,
+        rationale: 'scope contract 明确将内容归属于个人；项目仅作为来源或关联上下文。',
+        applicability: ['仅在 scope contract 的个人归属、适用项目和采用条件满足时适用。'],
+        nonApplicability: ['不把项目来源自动解释为项目私有内容，也不绕过用户采用或发现策略。'],
+        requiredEvidence: ['scope contract、项目来源和用户明确的采用或试用决定。'],
+        risks: ['个人判断仍可能只适用于其声明的项目链接；跨项目激活必须再次验证。'],
+      };
+    }
+    if (contentKind === 'project') {
+      return {
+        targetKind: 'project-policy', scope: 'project',
+        rationale: 'scope contract 明确将内容归属于一个项目上下文；不会提升为个人跨项目规则。',
+        applicability: ['仅在内容 scope 的项目绑定与当前宿主项目一致时适用。'],
+        nonApplicability: ['不适用于未绑定项目或其他项目。'],
+        requiredEvidence: ['scope contract 中的项目绑定和用户明确的采用或试用决定。'],
+        risks: ['项目上下文变化后必须停止回带，不能只看来源文本。'],
+      };
+    }
+    if (contentKind === 'task') {
+      return {
+        targetKind: 'current-task', scope: 'task',
+        rationale: 'scope contract 将内容限制在当前任务。',
+        applicability: ['仅在同一 Host Session/Task 上下文内适用。'],
+        nonApplicability: ['不向其他项目或个人空间自动激活。'],
+        requiredEvidence: ['当前任务身份和用户明确的采用或试用决定。'],
+        risks: ['任务标识缺失时必须保持未知，不能猜测。'],
+      };
+    }
+  }
   const haystack = `${finding.observation}\n${finding.desired_behavior ?? ''}\n${finding.target_hint ?? ''}`.toLowerCase();
   let targetKind = 'unresolved';
   if (/runtime-guard|branch|git|仓库|分支|脏工作区|发布|worktree/.test(haystack)) targetKind = 'runtime-guard';
@@ -661,8 +734,10 @@ export function createHostWorkflowService({db, transaction, faultInjector = null
       if (result.kind === 'candidate') {
         const findingId = `workflow-finding:sensemaking:${jobId}:${resultHash.slice(0, 24)}`;
         const sourceRefs = [{type: 'host-turn', host: row.host, session_id: row.session_id, turn_id: row.turn_id}, {type: 'sensemaking-run', run_id: runId}];
-        db.prepare(`INSERT OR IGNORE INTO workflow_findings(finding_id,host,session_id,turn_id,observation,desired_behavior,scope,target_kind,status,source_event_key,created_at,finding_kind,origin,source_refs,run_id,input_hash,result_hash,target_hint)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(findingId, row.host, row.session_id, row.turn_id, result.observation, result.desired_behavior, 'unknown', 'unresolved', 'captured', null, timestamp, 'candidate', 'sensemaking', jsonColumn(sourceRefs, 'source_refs'), runId, row.input_hash, resultHash, result.target_hint ?? null);
+        const attachedProject = db.prepare('SELECT project_ref FROM host_sessions WHERE host=? AND session_id=?').get(row.host, row.session_id)?.project_ref ?? null;
+        const scopeContract = upcastLegacyScope({scope: 'unknown', project_ref: attachedProject, host: row.host, session_id: row.session_id, turn_id: row.turn_id, source_refs: sourceRefs, status: 'candidate'});
+        db.prepare(`INSERT OR IGNORE INTO workflow_findings(finding_id,host,session_id,turn_id,observation,desired_behavior,scope,target_kind,status,source_event_key,created_at,finding_kind,origin,source_refs,run_id,input_hash,result_hash,target_hint,scope_contract_json)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(findingId, row.host, row.session_id, row.turn_id, result.observation, result.desired_behavior, 'unknown', 'unresolved', 'captured', null, timestamp, 'candidate', 'sensemaking', jsonColumn(sourceRefs, 'source_refs'), runId, row.input_hash, resultHash, result.target_hint ?? null, jsonColumn(scopeContract, 'scope_contract'));
         finding = findingView(readFinding(db, findingId));
         if (input.route !== false && row.execution_mode !== 'shadow') proposal = ensureRoutingProposal(db, finding, timestamp);
       }
@@ -731,11 +806,15 @@ export function createHostWorkflowService({db, transaction, faultInjector = null
 
   function listFindings({host, sessionId, status} = {}) {
     const clauses = [], values = [];
-    if (host !== undefined) { identity(host, 'host'); clauses.push('host=?'); values.push(host); }
-    if (sessionId !== undefined) { identity(sessionId, 'session_id'); clauses.push('session_id=?'); values.push(sessionId); }
-    if (status !== undefined) { text(status, 'status', 32); clauses.push('status=?'); values.push(status); }
+    if (host !== undefined) { identity(host, 'host'); clauses.push('f.host=?'); values.push(host); }
+    if (sessionId !== undefined) { identity(sessionId, 'session_id'); clauses.push('f.session_id=?'); values.push(sessionId); }
+    if (status !== undefined) { text(status, 'status', 32); clauses.push('f.status=?'); values.push(status); }
     const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
-    return db.prepare(`SELECT * FROM workflow_findings${where} ORDER BY created_at DESC`).all(...values).map(findingView);
+    const rows = db.prepare(`SELECT f.*, s.project_ref AS attached_project_ref
+      FROM workflow_findings f LEFT JOIN host_sessions s
+      ON s.host=f.host AND s.session_id=f.session_id${where}
+      ORDER BY f.created_at DESC`).all(...values);
+    return rows.map(findingView);
   }
 
   function ensureRoutingProposal(dbHandle, finding, timestamp = now()) {
@@ -837,21 +916,30 @@ export function createHostWorkflowService({db, transaction, faultInjector = null
     if (session.status === 'ended') fail('HOST_SESSION_ENDED', 'ended host sessions cannot receive activation', 409);
     if (projectRef !== null && session.project_ref !== null && projectRef !== session.project_ref) fail('HOST_SESSION_BINDING_CONFLICT', 'activation project binding does not match the attached session', 409);
     const boundProject = projectRef ?? session.project_ref ?? null;
-    const rows = db.prepare(`SELECT p.*, f.observation, f.desired_behavior, f.source_refs, f.run_id, f.finding_kind, f.origin
+    const rows = db.prepare(`SELECT p.*, f.observation, f.desired_behavior, f.source_refs, f.run_id, f.finding_kind, f.origin, f.scope_contract_json, s.project_ref AS attached_project_ref
       FROM routing_proposals p JOIN workflow_findings f ON f.finding_id=p.finding_id
+      LEFT JOIN host_sessions s ON s.host=f.host AND s.session_id=f.session_id
       WHERE p.status IN ('adopted'${includeTrial ? ",'trial'" : ''}) ORDER BY CASE p.status WHEN 'adopted' THEN 0 ELSE 1 END, p.updated_at DESC`).all();
     const items = []; let budget = 0;
     const intentTokens = taskIntent === null ? [] : taskIntent.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(token => token.length > 1).slice(0, 16);
     for (const row of rows) {
+      const scopeContract = scopeContractFromFindingRow(row, {project_ref: row.attached_project_ref ?? null});
+      const linkedProjects = projectRefsFromContract(scopeContract);
       if (row.status === 'trial' && !includeTrial) continue;
       if (row.scope === 'task' && (row.host !== host || row.session_id !== sessionId)) continue;
       if (row.scope === 'project' && (boundProject === null || sessionProject(row.host, row.session_id) !== boundProject)) continue;
-      if (row.scope === 'unknown') continue;
+      if (scopeContract.discovery_policy.mode === 'private' && (row.host !== host || row.session_id !== sessionId)) continue;
+      if (scopeContract.discovery_policy.mode === 'current-project' && (boundProject === null || !scopeContract.discovery_policy.project_refs.includes(boundProject))) continue;
+      if (scopeContract.discovery_policy.mode === 'explicit-projects' && (boundProject === null || !scopeContract.discovery_policy.project_refs.includes(boundProject))) continue;
+      if (scopeContract.activation_policy.mode === 'project' && (boundProject === null || !linkedProjects.includes(boundProject))) continue;
+      if (scopeContract.activation_policy.mode === 'selected-projects' && (boundProject === null || !scopeContract.activation_policy.project_refs.includes(boundProject))) continue;
+      if (row.scope === 'unknown' && (scopeContract.content_scope.kind === 'unknown' || scopeContract.activation_policy.mode === 'unknown')) continue;
       const haystack = `${row.target_kind} ${row.rationale} ${row.observation} ${row.desired_behavior ?? ''}`.toLowerCase();
       if (intentTokens.length > 0 && row.scope === 'task' && !intentTokens.some(token => haystack.includes(token))) continue;
       const item = {
         proposal_id: row.proposal_id, finding_id: row.finding_id, target_kind: row.target_kind, scope: row.scope,
         status: row.status, trial: row.status === 'trial', observation: row.observation, desired_behavior: row.desired_behavior ?? null,
+        scope_contract: scopeContract,
         why_shown: row.status === 'adopted' ? '用户已采用，且当前会话/稳定项目绑定满足适用范围。' : '用户已设为试用，明确标记为 trial；不会当作已采用规则。',
         provenance_refs: [{type: 'workflow-finding', finding_id: row.finding_id}, {type: 'host-turn', host: row.host, session_id: row.session_id, turn_id: row.turn_id}, ...parseJson(row.source_refs, 'source_refs', [])],
         stop_condition: '用户 dismiss/snooze/release、会话结束或本次预算耗尽后停止回带。',

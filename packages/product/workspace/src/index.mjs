@@ -8,11 +8,13 @@ export {
   validateProductOperations,
 } from './commands.mjs';
 export {createDemoWorkspace} from './demo-workspace.mjs';
+export * from './scope-contract.mjs';
 export {
   SCREENS as CHAIN_SCREENS,
   createChainState,
   reduceChain,
   selectChainView,
+  createChainDemo,
 } from './chain-model.mjs';
 export {
   DIRECTION_OPTIONS,
@@ -21,6 +23,9 @@ export {
   createComparisonState,
   reduceComparison,
   selectComparisonView,
+  createComparisonDemo,
+  classifyMaterialImport,
+  applyComparisonRequest,
 } from './comparison-model.mjs';
 export {
   SCREENS as WORK_SCREENS,

@@ -6,8 +6,19 @@ Trace Web 产品状态的权威 Module。它集中维护事项、原表达、理
 
 - `src/index.mjs`：浏览器安全的状态转换、选择器与产品命令。没有文件、数据库或网络访问。
 - `src/workspace.mjs`：Node 本机 Adapter，导出 `createProductWorkspace()`；封装 `web.sqlite`、事务、CAS、幂等回执和同源 HTTP 处理。
+- `@trace/product-workspace/{bridge,chain-model,comparison-model,worksite-model}`：显式纯模块子入口，保留已有Web导出面；不得从浏览器导入`./node`。
 
 `apps/desktop` 只负责页面和本机宿主组装；`apps/agent` 只通过产品快照读取能力使用这里的状态，不导入 desktop 实现。
+
+### 固定本地Web包（完整前端重做 W1）
+
+`0.2.0-frontend.5`合并网页公开来源/阅读摘录/完整原话与能力投影，以及Runtime跨事项来源核验、历史带入和现场发现/修订状态。保持schema 1、已有ID和事务owner，不代表多媒体/布局新schema已经实现。新增严格命令`source.keep-public`、`source.provenance.attach`和既有事项的capture staging；来源不一致与不支持动作不能通过whole-host旁路提交。两个来源入口复用同一首次快照，明确不同的正文/URL/作者仍拒绝；未提供的元信息不制造冲突、也不伪造为summary或metadata，显式excerpt不混为unknown。手工导入/旧来源的provider可不同，取得时间缺失保留未知而不伪造；真正搜索结果的保留命令仍要求完整来路。
+
+`npm run build:types`从同一纯入口生成`types/*.d.mts`，子入口包含明确的types/default导出条件；不是在Web加一个全any声明绕过缺失API。类型产物也随包固定hash，更新源码后须重新生成和验收。
+
+Web消费项目内固定tarball及integrity，四份旧路径只薄导出；包身份记录源HEAD、dirty源文件hash及完整归档hash，不从相邻工作树路径动态加载。每次已消费字节改变必须产生新包身份并回归，不能反复用同版本覆盖；staged Runtime/安装包需另行对齐，不能靠改标识冒充包含新命令。
+
+包为Trace内部私有代码，`UNLICENSED`不授予对外开源或再分发许可，也不继承Infinite Canvas的MIT。第三方库的许可与声明仍分别管理。
 
 ## Codex Host Session Ingest
 
@@ -33,6 +44,13 @@ Host Session 允许 `project_ref = null`，因此不依赖 `.trace/` 或 cwd；�
 捕获并指向已接收 HostTurn 时保存，初始固定为
 `scope=unknown / target_kind=unresolved / status=captured`，不会自动生成 Skill、
 修改理解或发布规则。
+
+Finding 现在还可以携带 `trace.scope-contract@1` 多维作用域：它分别记录 owner、来源与
+Host attachment、content scope、project links、discovery/activation policy、classification
+和 lifecycle。项目附着只是工作现场，不会自动把个人判断变成项目事实；项目私有事实也不会
+因为由个人创建就跨项目回带。旧 `scope=personal|project|team|domain` 只在读取时保守
+upcast，owner/classification/不明确的 activation 保持 `unknown`。实现和迁移边界见
+[`Trace 多维 Scope Contract`](../../../docs/scope-contract.md)。
 
 ## Host workflow second stage
 

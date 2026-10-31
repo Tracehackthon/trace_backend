@@ -1,4 +1,5 @@
-/** Pure, session-only prototype state. No storage, network, or model calls. */
+/** Pure, session-only chain state. Handoff snapshots are historical context,
+ * not delivery evidence; current delivery belongs to worksite.connection. */
 export const SCREENS = Object.freeze(['reading', 'resume', 'discussion', 'comparison', 'understanding', 'paused', 'reentry', 'handoff', 'work', 'results', 'revised']);
 const RELATIONS = ['challenge', 'supplement', 'limitation', 'branch'];
 const ROLES = ['trial', 'reference', 'exclude'];
@@ -174,7 +175,7 @@ export function reduceChain(previous, action = {}) {
       s.discussion.messages.push({ id: nextId(state, 'message'), role: 'user', text: s.composer.text, focus, contextMode: s.contextMode, contextEpoch: s.contextEpoch });
       s.composer.text = '';
       state.screen = 'discussion';
-      return inform(state, '你的表达已留在本次会话；原型不会伪造模型回复。');
+      return inform(state, '你的表达已经留下。当前没有 Agent 回答，可以继续自己写。');
     }
     case 'FOCUS': {
       const focus = { field: action.field, start: action.start, end: action.end, text: string(action.text), ...(action.objectId ? { objectId: action.objectId } : {}) };
@@ -324,10 +325,14 @@ export function reduceChain(previous, action = {}) {
       if (!Object.values(h.destination).every(nonempty) || !nonempty(h.selectedText)) return inform(state, '请确认 Agent、项目、任务及本次选中的内容。');
       if (s.handoff.confirmed && s.handoffSnapshot) { state.screen = 'work'; return state; }
       h.confirmed = true;
-      // This is an in-prototype handoff, not proof of native Agent delivery.
+      // This snapshot records the user's historical selection only. It is not
+      // the current delivery state; worksite.connection is authoritative once
+      // the Codex bridge receives or returns a result.
       h.evidenceLevel = 'none';
       s.handoff = h;
-      s.handoffSnapshot = { id: nextId(state, 'handoff'), matterId: m.id, ...copy(h), capturedUnderstanding: h.selectionBasisUnderstanding, currentVersionAtConfirmation: m.understandingVersion, stop: m.stop, origin: state.isDemo ? 'example' : 'prototype-confirmation', actualDelivery: false };
+      s.handoffSnapshot = { id: nextId(state, 'handoff'), matterId: m.id, ...copy(h), snapshotKind: 'historical', historical: true,
+        capturedUnderstanding: h.selectionBasisUnderstanding, currentVersionAtConfirmation: m.understandingVersion, stop: m.stop,
+        origin: state.isDemo ? 'example' : 'user-confirmed' };
       s.handoffHistory.push(copy(s.handoffSnapshot));
       state.screen = 'work';
       return inform(state, '本次带入快照已确认；尚未向真实 Agent 发送。');

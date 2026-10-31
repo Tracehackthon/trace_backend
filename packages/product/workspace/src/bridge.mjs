@@ -10,7 +10,33 @@ const matter = (host, id) => host.chain.matters.find(item => item.id === id);
 const failure = (host, code, message) => ({ ...host, error: { code, message } });
 const withoutMatters = ({ matters, ...local }) => local;
 const keyOK = value => nonempty(value) && !['__proto__', 'constructor', 'prototype'].includes(value);
-const titleOf = item => item.title || String(item.originalText || '').split(/\r?\n/)[0];
+const titleOf = item => item.title || String(item.whyCare || item.originalText || '').split(/\r?\n/)[0];
+const comparisonContentMode = value => ['metadata', 'provider-metadata'].includes(value) ? 'metadata'
+  : ['summary', 'openapi-summary'].includes(value) ? 'summary' : value === 'excerpt' ? 'excerpt' : 'unknown';
+const sameOptionalField = (actual, offered, normalize = value => value.trim()) => offered == null ||
+  typeof offered === 'string' && (offered.trim() === '' || normalize(typeof actual === 'string' ? actual : '') === normalize(offered));
+function comparisonSource(source) {
+  if (source?.kind !== 'external') return source;
+  return { ...source, source: source.source || source.searchSource || '',
+    contentMode: comparisonContentMode(source.contentMode), contentType: source.contentType || '' };
+}
+function sameExternalSnapshot(source, material) {
+  const canonical = comparisonSource(source);
+  // Query, acquisition time and per-entry display context do not create a new
+  // immutable source. Body, URL, provider/author and content identity do.
+  return source?.kind === 'external' && canonical.provider === material.provider && canonical.source === material.source &&
+    typeof material.excerpt === 'string' && canonical.excerpt === material.excerpt.trim() && canonical.url === material.url &&
+    sameOptionalField(canonical.title, material.title) && sameOptionalField(canonical.author, material.author) &&
+    sameOptionalField(canonical.contentType, material.contentType) &&
+    sameOptionalField(canonical.contentMode, material.contentMode, comparisonContentMode);
+}
+/** Resolve an explicit repeated import to its first saved snapshot. No I/O,
+ * inferred relationship or mutation; command and preview use the same input. */
+export function resolveComparisonMaterial(host, material) {
+  const canonical = host.chain.sources.find(source => source.id === material?.id);
+  return canonical && sameExternalSnapshot(canonical, material)
+    ? { ...material, ...comparisonSource(canonical) } : material;
+}
 
 export function createBridge() {
   const chain = createChainState();
@@ -53,13 +79,94 @@ export function captureInput(host, { matterId, text, source } = {}) {
   return next;
 }
 
+/**
+ * Preserve explicit provider provenance to a source that was already captured through
+ * the normal product command path. This does not fetch, link, adopt or revise
+ * anything or verify an author; it preserves the declared public snapshot origin.
+ */
+export function attachProviderSourceProvenance(host, { matterId, sourceId, provenance } = {}) {
+  const current = matter(host, matterId);
+  const existing = host.chain.sources.find(item => item.id === sourceId);
+  let parsed;
+  try { parsed = new URL(provenance?.url); } catch { parsed = null; }
+  const zhihuHost = parsed && (parsed.hostname === 'zhihu.com' || parsed.hostname.endsWith('.zhihu.com'));
+  if (!current || !existing || existing.ownerMatterId !== matterId)
+    return failure(host, 'unknown_source', '没有找到属于这件事的来源，未写入来路。');
+  if (provenance?.provider !== 'zhihu' || !nonempty(provenance.author) || !nonempty(provenance.query) ||
+      !nonempty(provenance.fetchedAt) || Number.isNaN(Date.parse(provenance.fetchedAt)) || parsed?.protocol !== 'https:' ||
+      parsed.username || parsed.password || !zhihuHost)
+    return failure(host, 'invalid_provenance', '来源来路无效，未把它标记为知乎公开内容。');
+  const next = copy(host);
+  Object.assign(next.chain.sources.find(item => item.id === sourceId), {
+    origin: 'provider-snapshot',
+    provider: 'zhihu',
+    author: provenance.author.trim(),
+    query: provenance.query.trim(),
+    fetchedAt: provenance.fetchedAt,
+    contentMode: 'openapi-summary',
+    url: parsed.href,
+  });
+  next.error = null;
+  return next;
+}
+
+/** Keep one explicit public-search result as material for an existing matter.
+ * Search never mutates the original expression or infers a relationship. */
+export function keepPublicSource(host, { matterId, source, query } = {}) {
+  const current = matter(host, matterId);
+  if (!current || !source || source.provider !== 'zhihu' || !['zhihu', 'global'].includes(source.source) ||
+      !keyOK(source.id) || !nonempty(source.excerpt) || !nonempty(query) || !nonempty(source.fetched_at) ||
+      source.content_mode != null && !['', 'summary', 'metadata', 'excerpt', 'unknown'].includes(source.content_mode))
+    return failure(host, 'invalid_public_source', '这份公开来源缺少可核对的摘要或来路，未保存。');
+  let parsed;
+  try { parsed = new URL(source.url); } catch { parsed = null; }
+  const validUrl = parsed && parsed.protocol === 'https:' && !parsed.username && !parsed.password &&
+    (source.source !== 'zhihu' || parsed.hostname === 'zhihu.com' || parsed.hostname.endsWith('.zhihu.com'));
+  if (!validUrl || Number.isNaN(Date.parse(source.fetched_at))) return failure(host, 'invalid_public_source', '来源链接或获取时间无效，未保存。');
+  const existing = host.chain.sources.find(item => item.id === source.id);
+  if (existing) {
+    const same = sameExternalSnapshot(existing, { ...source, url: parsed.href,
+      title: nonempty(source.title) ? source.title.trim() : undefined,
+      contentType: source.content_type, contentMode: source.content_mode });
+    if (!same || existing.ownerMatterId != null && !host.chain.matters.some(item => item.id === existing.ownerMatterId))
+      return failure(host, 'source_conflict', '同一来源身份的内容或来处不一致；未覆盖原件，也未建立引用。');
+    // Retrieval time and the new query do not rewrite the first snapshot.
+    if (current.sourceIds.includes(source.id)) return host;
+    const next = copy(host);
+    matter(next, matterId).sourceIds = [...current.sourceIds, source.id];
+    next.error = null;
+    return next;
+  }
+  const next = copy(host);
+  next.chain.sources.push({
+    id: source.id, title: nonempty(source.title) ? source.title.trim() : '公开来源', kind: 'external',
+    sourceType: source.source === 'zhihu' ? '知乎公开内容' : '全网公开内容', excerpt: source.excerpt.trim(),
+    context: `${source.source === 'zhihu' ? '知乎' : '全网'}公开搜索摘要${nonempty(source.author) ? ` · 作者：${source.author.trim()}` : ''}。关系尚未确认。`,
+    url: parsed.href, ownerMatterId: matterId, origin: 'provider-snapshot', provider: 'zhihu', searchSource: source.source,
+    author: nonempty(source.author) ? source.author.trim() : '', query: query.trim(), fetchedAt: source.fetched_at,
+    contentMode: source.content_mode === 'summary' ? 'openapi-summary' : source.content_mode === 'metadata' ? 'provider-metadata'
+      : source.content_mode === 'excerpt' ? 'excerpt' : 'unknown', contentType: source.content_type || 'unknown',
+    contentId: nonempty(source.content_id) ? source.content_id.trim() : null,
+    voteUpCount: Number.isSafeInteger(source.vote_up_count) && source.vote_up_count >= 0 ? source.vote_up_count : null,
+    commentCount: Number.isSafeInteger(source.comment_count) && source.comment_count >= 0 ? source.comment_count : null,
+    authorityLevel: nonempty(source.authority_level) ? source.authority_level.trim() : null,
+    editedAt: nonempty(source.edited_at) && !Number.isNaN(Date.parse(source.edited_at)) ? source.edited_at : null,
+  });
+  const target = matter(next, matterId);
+  target.sourceIds = [...new Set([...(target.sourceIds || []), source.id])];
+  next.error = null;
+  return next;
+}
+
 /** Existing chain actions, explicitly addressed to an object rather than a UI selection. */
 export function dispatchChain(host, { matterId, action, expectedUnderstandingVersion } = {}) {
   const current = matter(host, matterId);
   if (!current) return failure(host, 'unknown_matter', '没有找到这件事；保持原页面与草稿。');
   if (expectedUnderstandingVersion !== undefined && expectedUnderstandingVersion !== current.understandingVersion)
     return failure(host, 'version_conflict', '理解已有后来修改；未覆盖新版本。');
-  if (!action || ['CAPTURE', 'CAPTURE_DRAFT', 'CAPTURE_EXCERPT', 'TOGGLE_SOURCE'].includes(action.type))
+  // Staging a reading excerpt does not create a second matter. The command
+  // boundary separately validates the selected source and the exact text.
+  if (!action || action.type === 'CAPTURE')
     return failure(host, 'unsupported_action', '新输入请使用明确的宿主捕获入口。');
   if (action.type === 'OPEN' && action.id !== matterId) return failure(host, 'matter_mismatch', '打开对象与事项 ID 不一致。');
   // Do not let the old chain result/handoff screen create a second work/result owner.
@@ -95,7 +202,7 @@ export function selectChain(host, matterId) {
 }
 
 function comparisonMatter(current, focus, basis) {
-  return { id: current.id, title: titleOf(current), understanding: current.understanding,
+  return { id: current.id, title: titleOf(current), originalText: current.originalText, understanding: current.understanding,
     version: current.understandingVersion, focus: copy(focus), ...(basis ? { basis: copy(basis) } : {}), unresolved: current.stop,
     links: copy(current.links || []), revisions: copy(current.revisions.filter(r => r.kind === 'comparison')),
     comparisonRequests: copy(current.comparisonRequests || []) };
@@ -171,9 +278,38 @@ export function dispatchComparison(host, { sessionId, action } = {}) {
   if (!session) return failure(host, 'unknown_session', '没有找到本次对照。');
   if (action?.type === 'COMMIT_RESULT') return failure(host, 'host_receipt_only', '页面动作不能伪造宿主成功回执。');
   if (action?.type === 'SEARCH') return failure(host, 'capability_missing', '尚未连接搜索；可以粘贴已有材料，不返回演示候选。');
+  if (action?.type === 'IMPORT_MATERIAL' && (action.material?.provider || action.material?.source || action.material?.url != null)) {
+    let parsed;
+    try { parsed = new URL(action.material.url); } catch { parsed = null; }
+    // A user-selected external excerpt may declare another provider, or have
+    // no acquisition time in legacy data. Do not invent one or discard it.
+    // This is declared provenance, not proof of a fetch or author verification.
+    const validTime = action.material.fetchedAt == null || action.material.fetchedAt === '' ||
+      nonempty(action.material.fetchedAt) && !Number.isNaN(Date.parse(action.material.fetchedAt));
+    const valid = nonempty(action.material.provider) && ['zhihu', 'global', 'authorized'].includes(action.material.source) &&
+      keyOK(action.material.id) && nonempty(action.material.excerpt) && validTime &&
+      parsed?.protocol === 'https:' && !parsed.username && !parsed.password &&
+      (action.material.source !== 'zhihu' || action.material.provider === 'zhihu' &&
+        (parsed.hostname === 'zhihu.com' || parsed.hostname.endsWith('.zhihu.com')));
+    if (!valid) return failure(host, 'invalid_public_source', '这份公开来源缺少可核对的摘要或来路，未加入对照。');
+  }
+  let reuse = false;
+  if (action?.type === 'IMPORT_MATERIAL') {
+    const resolved = resolveComparisonMaterial(host, action.material);
+    if (resolved !== action.material) {
+      // Both keep-public and comparison imports reference the first canonical
+      // snapshot. Do not manufacture a second origin or rewrite its context.
+      action = { ...action, material: resolved };
+      reuse = true;
+    }
+  }
   const next = copy(host);
   const local = next.comparisons[sessionId];
+  const alreadyPresent = action?.type === 'IMPORT_MATERIAL' && local.model.catalog.some(candidate => candidate.id === action.material?.id);
   local.model = reduceComparison(local.model, action);
+  if (reuse) local.model.notice = alreadyPresent
+    ? '这份材料已经在本次对照中，仍使用首次保存的来源快照；未改写其来路。'
+    : '已复用首次保存的来源快照；本次查询未改写其来路。';
   if (action?.type === 'IMPORT_MATERIAL') {
     const candidate = selectComparisonView(local.model).selectedCandidate;
     if (candidate && !next.chain.sources.some(source => source.id === candidate.id))
@@ -187,14 +323,15 @@ export function dispatchComparison(host, { sessionId, action } = {}) {
   return next;
 }
 
-export function selectComparison(host, sessionId) {
+export function selectComparison(host, sessionId, capability = {}) {
   const local = host.comparisons[sessionId];
   if (!local) return null;
   const view = selectComparisonView(local.model);
   // The imported module hardcodes isDemo:true even for user-only input.
   // This facade has no demo provider/catalog and never mutates the raw reducer's labels.
-  return { ...view, notice: host.error?.message || view.notice, isDemo: false, search: { ...view.search, isDemo: false, provider: 'unconnected',
-    capabilityAvailable: false }, currentUnderstandingVersion: matter(host, local.matterId)?.understandingVersion,
+  const capabilityAvailable = capability.capabilityAvailable === true;
+  return { ...view, notice: host.error?.message || view.notice, isDemo: false, search: { ...view.search, isDemo: false,
+    provider: capabilityAvailable ? capability.provider || 'connected' : 'unconnected', capabilityAvailable }, currentUnderstandingVersion: matter(host, local.matterId)?.understandingVersion,
     returnTarget: copy(local.returnTarget), hostError: copy(host.error) };
 }
 
@@ -208,7 +345,22 @@ export function applyPendingComparison(host, { sessionId, requestId } = {}) {
   if (!current || request.matterId !== local.matterId) return reject('matter_mismatch', '请求不属于原事项。');
   if (request.kind !== 'undo') {
     const source = host.chain.sources.find(s => s.id === request.source?.id);
-    if (!source || source.ownerMatterId !== current.id || source.excerpt !== request.source.excerpt || source.kind !== request.source.kind)
+    const canonical = comparisonSource(source);
+    // Reusing a captured observation as comparison material projects it as a
+    // user candidate; its canonical source keeps the more specific provenance.
+    const sameKind=source?.kind===request.source.kind || request.source.kind==='user'&&['user-observation','work-finding'].includes(source?.kind);
+    const originExists=source?.ownerMatterId==null || host.chain.matters.some(item=>item.id===source.ownerMatterId);
+    const userProjection=source?.kind==='user-observation'
+      ? {sourceType:'本次观察',context:'这是你先留下的观察，尚未核对与当前问题的具体关系。'}
+      : source?.kind==='work-finding'
+        ? {sourceType:'工作中发现',context:'这是工作中留下的发现，尚未自动成为理解。'} : null;
+    const sameProvenance=userProjection
+      ? request.source.sourceType===userProjection.sourceType && request.source.context===userProjection.context
+      : ['sourceType','context','provider','source','author','contentType','contentMode'].every(key=>(canonical?.[key]??'')===(request.source[key]??''));
+    // A source has one origin, but may be related to several matters. Importing
+    // it into this comparison is the explicit selection; do not copy its record.
+    if (!source || !originExists || source.excerpt !== request.source.excerpt || source.title !== request.source.title ||
+      (source.url || null) !== (request.source.url || null) || !sameKind || !sameProvenance)
       return reject('source_conflict', '原材料缺失或来处不一致；未关联也未修订。');
   }
   const known = (current.comparisonRequests || []).find(receipt => receipt.requestId === request.id);

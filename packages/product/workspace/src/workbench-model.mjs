@@ -25,8 +25,11 @@ const locator = x => plainObject(x) && (
 const url = x => { try { return typeof x === 'string' && ['http:','https:'].includes(new URL(x).protocol); } catch { return false; } };
 const origin = x => strictObject(x,{kind:one('manual','local','web','legacy'),url:optional(url),fileName:optional(text),legacyId:optional(identity),locator:optional(locator)});
 export const validContentRef = x => strictObject(x,{kind:one('material','expression','capability'),id:identity,version:integer,anchor:optional(locator)});
+export const validCanvasContentRef = x => strictObject(x,{kind:one('material','expression','capability'),id:identity,version:v=>v===null||integer(v),anchor:optional(locator)}) && !(x.version===null&&x.anchor);
+export function freezeCanvasContentRef(host,ref){need(validCanvasContentRef(ref),'INVALID_REFERENCE','画布引用不正确。');const key={material:'materials',expression:'expressions',capability:'capabilities'}[ref.kind],item=host[key]?.[ref.id];need(item,'REFERENCE_UNAVAILABLE','画布内容不可用。',409);return {...structuredClone(ref),version:ref.version===null?item.version:ref.version};}
 const refs = list(validContentRef,256);
 const resource = x => strictObject(x,{id:identity,sha256:x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x),mime:x=>typeof x==='string'&&/^[\w.+-]+\/[\w.+-]+$/.test(x),bytes:integer}) && x.id === x.sha256;
+export const validResourceDescriptor=resource;
 const ink = x => strictObject(x,{points:list(p=>strictObject(p,{x:finite,y:finite}),20000),width:n=>finite(n)&&n>0&&n<=64,color:x=>typeof x==='string'&&/^#[a-fA-F0-9]{6}$/.test(x)}) && x.points.length>=2;
 const materialValue = x => strictObject(x,{text,resourceId:x=>x===null||identity(x),origin});
 const expressionValue = x => strictObject(x,{text,refs,ink:optional(ink)});
@@ -34,9 +37,10 @@ const capabilityValue = x => strictObject(x,{title:text,purpose:text,scope:text,
 const catalogs = ['resources','materials','expressions','relations','capabilities','sessions','tasks'];
 const operations = {
   'workspace.upgrade': {},
+  'workbench.preferences': {displayName:x=>text(x)&&x.length<=200,reduceMotion:x=>typeof x==='boolean'},
   'resource.register': {resource},
   'material.create': {id:identity,kind:one('text','dialogue','code','image','audio','video','web','pdf','ink'),title:text,value:materialValue},
-  'expression.create': {id:identity,kind:one('note','question','understanding','ink'),title:text,value:expressionValue,author:one('user','agent')},
+  'expression.create': {id:identity,kind:one('note','annotation','question','understanding','ink'),title:text,value:expressionValue,author:one('user','agent')},
   'expression.edit': {id:identity,expectedVersion:integer,title:text,value:expressionValue},
   'expression.decide': {id:identity,expectedVersion:integer,decision:one('accepted','saved','rejected')},
   'relation.create': {id:identity,from:validContentRef,to:validContentRef,reason:text,evidence:text,difference:text,uncertainty:text,kind:one('supplement','support','limit','challenge','alternative','branch','unknown'),author:one('user','agent')},
@@ -117,7 +121,7 @@ export function validateWorkbench(host) {
     const fields=['id','kind','title','version','versions','status',...(name==='expressions'?['author']:[]),...(name==='capabilities'?['publishedVersions','changes']:[])];
     need(plainObject(item)&&Object.keys(item).every(key=>fields.includes(key)),'INVALID_CONTENT','内容包含未知字段。');
     need(item.id===id&&integer(item.version)&&text(item.title)&&plainObject(item.versions)&&Object.hasOwn(item.versions,String(item.version)),'INVALID_CONTENT','内容身份或版本不正确。');
-    need(name==='materials'?one('text','dialogue','code','image','audio','video','web','pdf','ink')(item.kind)&&item.status==='current':name==='expressions'?one('note','question','understanding','ink')(item.kind)&&one('user','agent')(item.author)&&one('current','pending','accepted','saved','rejected')(item.status):item.kind==='capability'&&one('draft','trial','published','disabled')(item.status)&&Array.isArray(item.publishedVersions)&&item.publishedVersions.every(integer)&&Array.isArray(item.changes),'INVALID_CONTENT','内容类型或状态无效。');
+    need(name==='materials'?one('text','dialogue','code','image','audio','video','web','pdf','ink')(item.kind)&&item.status==='current':name==='expressions'?one('note','annotation','question','understanding','ink')(item.kind)&&one('user','agent')(item.author)&&one('current','pending','accepted','saved','rejected')(item.status):item.kind==='capability'&&one('draft','trial','published','disabled')(item.status)&&Array.isArray(item.publishedVersions)&&item.publishedVersions.every(integer)&&Array.isArray(item.changes),'INVALID_CONTENT','内容类型或状态无效。');
     for(const [v,value]of Object.entries(item.versions)){need(/^(0|[1-9]\d*)$/.test(v)&&validate(value),'INVALID_CONTENT','内容版本无效。');if(value.resourceId)need(Object.hasOwn(host.resources,value.resourceId),'RESOURCE_UNAVAILABLE','原件引用尚未保存。');if(value.refs)checkRefs(host,value.refs);}
   }
   for(const [id,relation]of Object.entries(host.relations)){need(strictObject(relation,{id:identity,from:validContentRef,to:validContentRef,reason:text,evidence:text,difference:text,uncertainty:text,kind:one('supplement','support','limit','challenge','alternative','branch','unknown'),author:one('user','agent'),version:integer,status:one('pending','accepted','saved','rejected','detached')})&&relation.id===id,'INVALID_RELATION','关系结构不正确。');resolveContentRef(host,relation.from);resolveContentRef(host,relation.to);}
@@ -134,6 +138,7 @@ export function applyWorkbenchOperations(previous,ops) {
   for(const op of ops){
     switch(op.type){
       case 'workspace.upgrade':break;
+      case 'workbench.preferences':host.preferences={displayName:op.displayName,reduceMotion:op.reduceMotion};break;
       case 'resource.register': {const old=host.resources[op.resource.id];need(!old||stableWorkbenchJson(old)===stableWorkbenchJson(op.resource),'RESOURCE_CONFLICT','同一原件身份不能对应不同内容。',409);host.resources[op.resource.id]=structuredClone(op.resource);break;}
       case 'material.create': if(op.value.resourceId)need(host.resources[op.value.resourceId],'RESOURCE_UNAVAILABLE','请先保存并核验原件。');add(host,'materials',op.id,versioned(op.id,op.kind,op.title,op.value,{status:'current'}));break;
       case 'expression.create':checkRefs(host,op.value.refs);add(host,'expressions',op.id,versioned(op.id,op.kind,op.title,op.value,{author:op.author,status:op.author==='agent'?'pending':'current'}));break;

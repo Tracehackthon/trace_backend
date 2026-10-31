@@ -10,7 +10,17 @@ Trace Web 产品状态的权威 Module。它集中维护事项、原表达、理
 
 `apps/desktop` 只负责页面和本机宿主组装；`apps/agent` 只通过产品快照读取能力使用这里的状态，不导入 desktop 实现。
 
-### 固定本地Web包（完整前端重做 W1）
+### 内容schema 2与独立资源/布局（完整前端重做 W1，实施中）
+
+当前候选包为 `0.3.0-frontend.2`。`frontend.1`已消费并冻结；本次因实际核查发现画布文档/历史读取验证与原件等长损坏验证缺口，提升新版本，不覆盖旧包字节。
+
+- `workbench-model.mjs`维护材料、独立用户表达、关系、能力正文版本、人工思考与任务准备的纯规则。布局中的`version:null`只跟随当前内容呈现；交给协作时必须冻结数字版本。
+- `canvas-model.mjs`维护独立布局revision、CAS和撤销；严格验证当前文档及历史。移动卡片不增加内容revision。`canvas-store.mjs`使用同一SQLite owner下的独立表、二进制资源目录与同源接口；不把原件塞入业务JSON。
+- 旧schema 1的正文/ID/草稿可在测试副本中显式迁入2；旧动作不得通过whole-host覆盖2。旧Codex/Agent/深链mutation适配尚未完成，因此个人已有数据的UI转换仍关闭；不是宣称正式迁移完成。
+- 能力发布仅代表个人库的固定正文版本；当前未接完整定向包/反馈/试用证据。人工讨论/准备记录不代表真实Agent执行；外部Skill文件仍由既有Publisher拥有。
+
+### 旧schema 1固定包的兼容来源
+
 
 `0.2.0-frontend.5`合并网页公开来源/阅读摘录/完整原话与能力投影，以及Runtime跨事项来源核验、历史带入和现场发现/修订状态。保持schema 1、已有ID和事务owner，不代表多媒体/布局新schema已经实现。新增严格命令`source.keep-public`、`source.provenance.attach`和既有事项的capture staging；来源不一致与不支持动作不能通过whole-host旁路提交。两个来源入口复用同一首次快照，明确不同的正文/URL/作者仍拒绝；未提供的元信息不制造冲突、也不伪造为summary或metadata，显式excerpt不混为unknown。手工导入/旧来源的provider可不同，取得时间缺失保留未知而不伪造；真正搜索结果的保留命令仍要求完整来路。
 

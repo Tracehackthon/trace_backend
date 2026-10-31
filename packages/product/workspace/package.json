@@ -1,20 +1,40 @@
 {
   "name": "@trace/product-workspace",
-  "version": "0.2.0-frontend.5",
+  "version": "0.3.0-frontend.2",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
   "types": "./types/index.d.mts",
   "description": "Authoritative Trace Product Workspace state, commands, persistence and handoff records",
   "exports": {
-    ".": {"types": "./types/index.d.mts", "default": "./src/index.mjs"},
-    "./bridge": {"types": "./types/bridge.d.mts", "default": "./src/bridge.mjs"},
-    "./chain-model": {"types": "./types/chain-model.d.mts", "default": "./src/chain-model.mjs"},
-    "./comparison-model": {"types": "./types/comparison-model.d.mts", "default": "./src/comparison-model.mjs"},
-    "./worksite-model": {"types": "./types/worksite-model.d.mts", "default": "./src/worksite-model.mjs"},
+    ".": {
+      "types": "./types/index.d.mts",
+      "default": "./src/index.mjs"
+    },
+    "./bridge": {
+      "types": "./types/bridge.d.mts",
+      "default": "./src/bridge.mjs"
+    },
+    "./chain-model": {
+      "types": "./types/chain-model.d.mts",
+      "default": "./src/chain-model.mjs"
+    },
+    "./comparison-model": {
+      "types": "./types/comparison-model.d.mts",
+      "default": "./src/comparison-model.mjs"
+    },
+    "./worksite-model": {
+      "types": "./types/worksite-model.d.mts",
+      "default": "./src/worksite-model.mjs"
+    },
     "./node": "./src/workspace.mjs"
   },
-  "files": ["src/*.mjs", "types/*.d.mts", "tsconfig.types.json", "README.md"],
+  "files": [
+    "src/*.mjs",
+    "types/*.d.mts",
+    "tsconfig.types.json",
+    "README.md"
+  ],
   "scripts": {
     "build": "node --check src/index.mjs && node --check src/bridge.mjs && node --check src/commands.mjs && node --check src/workspace.mjs && node --check src/host-ingest.mjs && node --check src/host-workflow.mjs && node --check src/scope-contract.mjs && node --check src/codex-bridge.mjs && npm run build:types",
     "build:types": "tsc -p tsconfig.types.json"

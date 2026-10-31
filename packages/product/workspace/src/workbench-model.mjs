@@ -33,7 +33,10 @@ export const validResourceDescriptor=resource;
 const ink = x => strictObject(x,{points:list(p=>strictObject(p,{x:finite,y:finite}),20000),width:n=>finite(n)&&n>0&&n<=64,color:x=>typeof x==='string'&&/^#[a-fA-F0-9]{6}$/.test(x)}) && x.points.length>=2;
 const materialValue = x => strictObject(x,{text,resourceId:x=>x===null||identity(x),origin});
 const expressionValue = x => strictObject(x,{text,refs,ink:optional(ink)});
-const capabilityValue = x => strictObject(x,{title:text,purpose:text,scope:text,steps:text,evidence:text,examples:text,refs});
+const step = x => strictObject(x,{id:identity,text,checked:x=>typeof x==='boolean'});
+const stepItems = x => list(step,256)(x) && new Set(x.map(s=>s.id)).size===x.length;
+const instructionRefs = x => refs(x) && x.length<=32 && x.every(r=>r.kind==='capability'&&r.version>=1&&!r.anchor) && new Set(x.map(r=>r.id)).size===x.length;
+const capabilityValue = x => strictObject(x,{title:text,purpose:text,scope:text,steps:text,evidence:text,examples:text,refs,usage:optional(one('method','template','instruction')),prompt:optional(text),stepItems:optional(stepItems)}) && (x.stepItems===undefined || x.steps===x.stepItems.map(s=>s.text).join('\n\n'));
 const catalogs = ['resources','materials','expressions','relations','capabilities','sessions','tasks'];
 const operations = {
   'workspace.upgrade': {},
@@ -49,8 +52,9 @@ const operations = {
   'capability.edit': {id:identity,expectedVersion:integer,value:capabilityValue,reason:text},
   'capability.state': {id:identity,expectedVersion:integer,state:one('trial','published','disabled','restored'),reason:text},
   'thinking.create': {id:identity,title:text,refs,excluded:refs},
-  'thinking.message': {id:identity,messageId:identity,text,author:one('user')},
-  'task.prepare': {id:identity,title:text,goal:text,refs,excluded:refs,destination:text},
+  'thinking.instructions': {id:identity,instructions:instructionRefs},
+  'thinking.message': {id:identity,messageId:identity,text,author:one('user'),template:optional(validContentRef)},
+  'task.prepare': {id:identity,title:text,goal:text,refs,excluded:refs,destination:text,instructions:optional(instructionRefs),plan:optional(stepItems),template:optional(validContentRef)},
   'task.cancel': {id:identity},
 };
 export const isWorkbenchOperation = x => plainObject(x) && Object.hasOwn(operations,x.type);
@@ -82,6 +86,8 @@ export function resolveContentRef(host,ref,{forUse=false}={}) {
   return {item,value};
 }
 function checkRefs(host,items,forUse=false){for(const ref of items)resolveContentRef(host,ref,{forUse});}
+function checkInstructions(host,items,forUse=false){for(const ref of items){const {value}=resolveContentRef(host,ref,{forUse});need(ref.kind==='capability'&&value.usage==='instruction'&&value.prompt?.trim(),'INVALID_INSTRUCTION','指令需引用有正文的准确能力库指令版本。');}}
+function checkTemplate(host,ref,forUse=false){const {value}=resolveContentRef(host,ref,{forUse});need(ref.kind==='capability'&&value.usage!=='instruction','INVALID_TEMPLATE','模板必须来自能力库的方法或模板版本。');}
 export function migrateWorkbench(previous) {
   if(previous?.schemaVersion===2)return validateWorkbench(structuredClone(previous));
   const host=emptyWorkbench();if(!previous)return host;
@@ -125,8 +131,8 @@ export function validateWorkbench(host) {
     for(const [v,value]of Object.entries(item.versions)){need(/^(0|[1-9]\d*)$/.test(v)&&validate(value),'INVALID_CONTENT','内容版本无效。');if(value.resourceId)need(Object.hasOwn(host.resources,value.resourceId),'RESOURCE_UNAVAILABLE','原件引用尚未保存。');if(value.refs)checkRefs(host,value.refs);}
   }
   for(const [id,relation]of Object.entries(host.relations)){need(strictObject(relation,{id:identity,from:validContentRef,to:validContentRef,reason:text,evidence:text,difference:text,uncertainty:text,kind:one('supplement','support','limit','challenge','alternative','branch','unknown'),author:one('user','agent'),version:integer,status:one('pending','accepted','saved','rejected','detached')})&&relation.id===id,'INVALID_RELATION','关系结构不正确。');resolveContentRef(host,relation.from);resolveContentRef(host,relation.to);}
-  for(const [id,s]of Object.entries(host.sessions)){need(strictObject(s,{id:identity,title:text,refs,excluded:refs,messages:list(m=>strictObject(m,{id:identity,text,author:one('user')})),status:one('manual')})&&s.id===id&&new Set(s.messages.map(m=>m.id)).size===s.messages.length,'INVALID_SESSION','讨论结构不正确。');checkRefs(host,s.refs);checkRefs(host,s.excluded);}
-  for(const [id,t]of Object.entries(host.tasks)){need(strictObject(t,{id:identity,title:text,goal:text,refs,excluded:refs,destination:text,status:one('prepared','cancelled'),results:x=>Array.isArray(x)&&x.length===0})&&t.id===id,'INVALID_TASK','任务结构不正确；未验证执行结果不能写成已返回。');checkRefs(host,t.refs);checkRefs(host,t.excluded);}
+  for(const [id,s]of Object.entries(host.sessions)){need(strictObject(s,{id:identity,title:text,refs,excluded:refs,instructions:optional(instructionRefs),messages:list(m=>strictObject(m,{id:identity,text,author:one('user'),instructions:optional(instructionRefs),template:optional(validContentRef)})),status:one('manual')})&&s.id===id&&new Set(s.messages.map(m=>m.id)).size===s.messages.length,'INVALID_SESSION','讨论结构不正确。');checkRefs(host,s.refs);checkRefs(host,s.excluded);checkInstructions(host,s.instructions||[]);for(const m of s.messages){checkInstructions(host,m.instructions||[]);if(m.template)checkTemplate(host,m.template);}}
+  for(const [id,t]of Object.entries(host.tasks)){need(strictObject(t,{id:identity,title:text,goal:text,refs,excluded:refs,destination:text,instructions:optional(instructionRefs),plan:optional(stepItems),template:optional(validContentRef),status:one('prepared','cancelled'),results:x=>Array.isArray(x)&&x.length===0})&&t.id===id,'INVALID_TASK','任务结构不正确；未验证执行结果不能写成已返回。');checkRefs(host,t.refs);checkRefs(host,t.excluded);checkInstructions(host,t.instructions||[]);if(t.template)checkTemplate(host,t.template);}
   need(strictObject(host.migration,{version:one(1),matterRefs:plainObject,sourceRefs:plainObject}),'INVALID_MIGRATION','迁移映射不完整。');
   if(host.legacy){need(host.legacy.schemaVersion===1&&Array.isArray(host.legacy.chain?.matters)&&Array.isArray(host.legacy.chain?.sources),'INVALID_MIGRATION','旧恢复结构无效。');for(const m of host.legacy.chain.matters){need(!Object.hasOwn(m,'understanding')&&!Object.hasOwn(m,'originalText'),'DUPLICATE_CONTENT_OWNER','旧对象不能另存当前正文。');const map=host.migration.matterRefs[m.id];need(map&&map.legacyId===m.id,'INVALID_MIGRATION','事项迁移映射缺失。');resolveContentRef(host,map.original);need(host.expressions[map.understanding?.id],'INVALID_MIGRATION','理解迁移映射缺失。');}for(const s of host.legacy.chain.sources){need(!Object.hasOwn(s,'excerpt'),'DUPLICATE_CONTENT_OWNER','旧来源不能另存摘录正文。');resolveContentRef(host,host.migration.sourceRefs[s.id]);}}
   need(catalogs.reduce((count,key)=>count+Object.keys(host[key]).length,0)<=10000,'CONTENT_TOO_COMPLEX','内容对象数量超过当前边界。');
@@ -150,8 +156,9 @@ export function applyWorkbenchOperations(previous,ops) {
       case 'capability.edit': {const item=host.capabilities[op.id];assertVersion(item,op.expectedVersion);need(item.status!=='disabled','CAPABILITY_DISABLED','先明确恢复后再修订。');checkRefs(host,op.value.refs);item.version++;item.title=op.value.title;item.versions[String(item.version)]=structuredClone(op.value);item.status='draft';item.changes.push({version:item.version,reason:op.reason});break;}
       case 'capability.state': {const item=host.capabilities[op.id];assertVersion(item,op.expectedVersion);if(op.state==='restored'){need(item.status==='disabled','INVALID_TRANSITION','只有停用能力可恢复。');item.status='draft';}else {need(item.status!=='disabled','CAPABILITY_DISABLED','停用能力不能直接启用。');if(op.state==='published'){const value=current(item);need(value.title.trim()&&value.purpose.trim()&&value.scope.trim()&&value.steps.trim(),'CAPABILITY_INCOMPLETE','发布前补齐名称、用途、范围和方法。');if(!item.publishedVersions.includes(item.version))item.publishedVersions.push(item.version);}item.status=op.state;}item.changes.push({version:item.version,state:op.state,reason:op.reason});break;}
       case 'thinking.create':checkRefs(host,op.refs,true);checkRefs(host,op.excluded);need(!op.refs.some(r=>op.excluded.some(e=>stableWorkbenchJson(r)===stableWorkbenchJson(e))),'REFERENCE_CONFLICT','同一引用不能同时包含和排除。');add(host,'sessions',op.id,{id:op.id,title:op.title,refs:structuredClone(op.refs),excluded:structuredClone(op.excluded),messages:[],status:'manual'});break;
-      case 'thinking.message': {const s=host.sessions[op.id];need(s,'CONTENT_NOT_FOUND','讨论不存在。',404);need(op.text.trim(),'EMPTY_MESSAGE','请先写下内容。');need(!s.messages.some(m=>m.id===op.messageId),'DUPLICATE_CONTENT','消息身份已存在。',409);s.messages.push({id:op.messageId,text:op.text,author:'user'});break;}
-      case 'task.prepare':checkRefs(host,op.refs,true);checkRefs(host,op.excluded);add(host,'tasks',op.id,{id:op.id,title:op.title,goal:op.goal,refs:structuredClone(op.refs),excluded:structuredClone(op.excluded),destination:op.destination,status:'prepared',results:[]});break;
+      case 'thinking.instructions': {const session=host.sessions[op.id];need(session,'CONTENT_NOT_FOUND','讨论不存在。',404);checkInstructions(host,op.instructions,true);session.instructions=structuredClone(op.instructions);break;}
+      case 'thinking.message': {const s=host.sessions[op.id];need(s,'CONTENT_NOT_FOUND','讨论不存在。',404);need(op.text.trim(),'EMPTY_MESSAGE','请先写下内容。');need(!s.messages.some(m=>m.id===op.messageId),'DUPLICATE_CONTENT','消息身份已存在。',409);checkInstructions(host,s.instructions||[],true);if(op.template)checkTemplate(host,op.template,true);s.messages.push({id:op.messageId,text:op.text,author:'user',instructions:structuredClone(s.instructions||[]),...(op.template?{template:structuredClone(op.template)}:{})});break;}
+      case 'task.prepare':checkRefs(host,op.refs,true);checkRefs(host,op.excluded);checkInstructions(host,op.instructions||[],true);if(op.template)checkTemplate(host,op.template,true);add(host,'tasks',op.id,{id:op.id,title:op.title,goal:op.goal,refs:structuredClone(op.refs),excluded:structuredClone(op.excluded),destination:op.destination,status:'prepared',results:[],...(op.instructions?{instructions:structuredClone(op.instructions)}:{}),...(op.plan?{plan:structuredClone(op.plan)}:{}),...(op.template?{template:structuredClone(op.template)}:{})});break;
       case 'task.cancel': {const task=host.tasks[op.id];need(task&&task.status==='prepared','INVALID_TRANSITION','只能取消尚未交接的准备。');task.status='cancelled';break;}
     }
   }

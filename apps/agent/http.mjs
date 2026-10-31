@@ -46,7 +46,7 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, maxS
           const executors = service?.executorCapabilities ?? { defaultProfileId: null, profiles: [] };
           reply(res, 200, { protocolVersion: 1, enabled: !!service, runtime: 'trace-agent-runtime', ...executors,
             purposes: PURPOSES, contextTools: ['trace_context_read', 'trace_context_search'], streaming: 'sse',
-            cancellation: true, externalRetrieval: (service?.searchSources.length ?? 0) > 0, searchSources: service?.searchSources ?? [],
+            receipt: 'paged-json-v1', cancellation: true, externalRetrieval: (service?.searchSources.length ?? 0) > 0, searchSources: service?.searchSources ?? [],
             retrievalDefault: 'disabled', fileExecution: false, autoApply: false, authenticationChecked: false,
             candidateAdoption: !!service?.candidateAdoption,
             boundary: 'single-user-loopback-same-origin', sensemaking: sensemakingWorker?.health?.() ?? {status: 'disabled', mode: 'disabled'} }); return true;
@@ -103,6 +103,11 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, maxS
               'INVALID_REQUEST', '采纳或撤销需要有效的 commandId 与 expectedRevision。', 400);
             reply(res, 200, body.action === 'accept' ? service.adopt(runMatch[1], body) : service.undoAdoption(runMatch[1], body));
           }
+        } else if (runMatch[2] === 'receipt') {
+          const run=service.get(runMatch[1]),url=new URL(req.url,'http://127.0.0.1'),cursor=url.searchParams.get('after')??'0';
+          demand(/^(0|[1-9]\d*)$/.test(cursor)&&Number.isSafeInteger(Number(cursor))&&Number(cursor)<=run.lastEventId,'INVALID_CURSOR','事件游标无效或超过已保存回执。',400);
+          const events=service.events(run.runId,Number(cursor)).filter(event=>event.sequence<=run.lastEventId),next=events.at(-1)?.sequence??Number(cursor);
+          reply(res,200,{protocolVersion:1,run,events,after:Number(cursor),next,hasMore:next<run.lastEventId});
         } else if (runMatch[2] !== 'events') reply(res, 200, service.get(runMatch[1]));
         else {
           const runId = runMatch[1], run = service.get(runId), url = new URL(req.url, 'http://127.0.0.1');

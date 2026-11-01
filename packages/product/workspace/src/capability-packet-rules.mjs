@@ -23,7 +23,7 @@ export function createCapabilityPacketRules(v) {
     need(Array.isArray(sourceRefs)&&sourceRefs.length<=256&&Array.isArray(originalIds)&&new Set(originalIds).size===originalIds.length,'INVALID_CAPABILITY_PACKET','分享范围无效。');
     const sources=sourceRefs.map(ref=>{
       need(value.refs.some(r=>stable(r)===stable(ref)),'INVALID_CAPABILITY_PACKET','分享来源不在这个能力版本的明确引用内。');
-      const {item:source,value:body}=resolve(host,ref);let excerpt=ref.kind==='capability'?stable(body):body.text;
+      const {item:source,value:body}=resolve(host,ref);let excerpt=ref.kind==='capability'?(['instruction','template'].includes(body.usage)?body.prompt||'':body.steps):body.text;
       if(ref.anchor?.type==='text')excerpt=excerpt.slice(ref.anchor.start,ref.anchor.end);
       const located=body.origin?structuredClone(body.origin):ref.anchor?{kind:'manual'}:undefined;
       if(located?.locator?.type==='text'&&ref.anchor?.type==='text')located.locator={type:'text',start:located.locator.start+ref.anchor.start,end:located.locator.start+ref.anchor.end};

@@ -122,3 +122,12 @@ New/changed feedback citations use the shared rule in Browser and SQLite. Histor
 ### frontend.10：每段原话的独立冻结范围
 
 新消息保存 refs/excluded/historyIds 的 scope，讨论起始引用不改写。历史字段缺失仍可读，不能反推当时精确范围；新调用需另留原话核对，旧运行仍按原冻结payload。包含/排除按范围相交校验，不以JSON不相等绕过局部排除。任务与反馈使用同一准确范围规则；消息来源反馈读取该消息冻结范围，后续默认指令/选区不改旧来源。新增 message-reference-scope-v1 特性，不创建新DDL或业务store。实际只读输入预览由消费端生产Native owner构建，无模型执行，不以静态检查代证E2E。
+
+
+## frontend.11：写回表达与关系历史
+
+- 内容schema仍为2，无新DDL。新增`attempt`用户表达类型；它不是已执行任务，也不自动发布能力。
+- 关系可带准确`sources`引用；`relation.edit`及状态变更先保留旧完整说明/两端/版本/状态，再写新版本。`modifiedBy`区分用户改写，旧关系没有历史时仍可读，不编造更早版本。
+- 原件、布局、Agent结果账本仍是独立owner。AI原稿不可编辑；后端核对真实运行与原稿后，才以既有原子命令保存用户选择的写回。
+- `.10`已被消费，不覆写其归档。新字段对新reader是显式增量，旧严格reader不得作为`.11`数据的回退writer；没有自动升级个人库或安装。
+- 本段是契约说明，不代表端到端验收或provider已使用能力；以Trace完整前端任务的对应冻结源/实际运行证据为准。

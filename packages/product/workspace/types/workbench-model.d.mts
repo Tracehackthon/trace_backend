@@ -18,6 +18,63 @@ export declare function validateMessageScope(host: any, scope: any, session: any
 }): any;
 declare const resource: (x: any) => boolean;
 export declare const validResourceDescriptor: typeof resource;
+export declare function projectThinkingMessageSource(host: any, value: any): {
+    status: string;
+    reason?: undefined;
+    text?: undefined;
+    locator?: undefined;
+    sessionId?: undefined;
+    messageId?: undefined;
+    title?: undefined;
+} | {
+    status: string;
+    reason: string;
+    text?: undefined;
+    locator?: undefined;
+    sessionId?: undefined;
+    messageId?: undefined;
+    title?: undefined;
+} | {
+    reason?: undefined;
+    status: string;
+    text: any;
+    locator: any;
+    sessionId: any;
+    messageId: any;
+    title: any;
+};
+export declare function prepareThinkingMessageCapture(host: any, { id, sessionId, messageId, selection, title }: {
+    id: any;
+    messageId: any;
+    selection: any;
+    sessionId: any;
+    title: any;
+}): {
+    operation: {
+        type: string;
+        id: any;
+        kind: string;
+        title: any;
+        value: {
+            text: any;
+            resourceId: any;
+            origin: {
+                kind: string;
+                message: {
+                    sessionId: any;
+                    messageId: any;
+                };
+                locator: any;
+            };
+        };
+    };
+    source: {
+        kind: string;
+        id: any;
+        version: number;
+    };
+    excerpt: any;
+};
 export declare const validateCapabilityPacket: (manifest: any) => any;
 export declare const prepareCapabilityPacket: (host: any, { ref: chosen, packetId, createdAt, sender, recipient, sourceRefs, originalIds, omittedFields }: {
     createdAt: any;

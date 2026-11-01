@@ -10,6 +10,7 @@ export {
 export {createDemoWorkspace} from './demo-workspace.mjs';
 export * from './scope-contract.mjs';
 export * from './workbench-model.mjs';
+export * from './writeback-plan.mjs';
 export * from './canvas-model.mjs';
 export {
   SCREENS as CHAIN_SCREENS,

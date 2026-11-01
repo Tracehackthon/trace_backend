@@ -4,8 +4,10 @@ export function createCapabilityPacketRules(v) {
   const {need,strictObject:shape,identity,text,integer,one,list,optional,resource,origin,ink,capabilityValue,validContentRef:ref,stableWorkbenchJson:stable,resolveContentRef:resolve,tree}=v;
   const stamp=x=>typeof x==='string'&&Number.isFinite(Date.parse(x));
   const person=x=>typeof x==='string'&&x.trim().length>0&&x.length<=200&&!/[\x00-\x1f\x7f]/.test(x);
-  const source=x=>shape(x,{ref,kind:one('text','dialogue','code','image','audio','video','web','pdf','ink','note','annotation','question','understanding','attempt','capability'),title:text,excerpt:text,author:optional(one('user','agent')),origin:optional(origin),original:optional(resource),ink:optional(ink)})&&(x.ref.kind==='material'?['text','dialogue','code','image','audio','video','web','pdf','ink'].includes(x.kind):x.ref.kind==='expression'?['note','annotation','question','understanding','attempt','ink'].includes(x.kind):x.kind==='capability');
-  const validManifest=x=>shape(x,{format:one('trace.capability.packet'),version:one(1),packetId:identity,createdAt:stamp,sender:person,recipient:person,capability:c=>shape(c,{ref:r=>ref(r)&&r.kind==='capability'&&r.version>=1,value:capabilityValue,sourceStatus:one('draft','trial','published','disabled','received'),sourceRefCount:integer,omittedFields:list(one('evidence','examples','prompt'),3)}),sources:list(source,256),resources:list(resource,64)});
+  const withheld=x=>shape(x,{kind:one('withheld'),reason:one('thinking-message')});
+  const packetOrigin=x=>withheld(x)||origin(x)&&x.kind!=='thinking-message';
+  const source=x=>shape(x,{ref,kind:one('text','dialogue','code','image','audio','video','web','pdf','ink','note','annotation','question','understanding','attempt','capability'),title:text,excerpt:text,author:optional(one('user','agent')),origin:optional(packetOrigin),original:optional(resource),ink:optional(ink)})&&(x.ref.kind==='material'?['text','dialogue','code','image','audio','video','web','pdf','ink'].includes(x.kind):x.ref.kind==='expression'?['note','annotation','question','understanding','attempt','ink'].includes(x.kind):x.kind==='capability')&&(!withheld(x.origin)||x.ref.kind==='material'&&x.kind==='dialogue'&&!x.original);
+  const validManifest=x=>shape(x,{format:one('trace.capability.packet'),version:one(1,2),packetId:identity,createdAt:stamp,sender:person,recipient:person,capability:c=>shape(c,{ref:r=>ref(r)&&r.kind==='capability'&&r.version>=1,value:capabilityValue,sourceStatus:one('draft','trial','published','disabled','received'),sourceRefCount:integer,omittedFields:list(one('evidence','examples','prompt'),3)}),sources:list(source,256),resources:list(resource,64)})&&x.version===(x.sources.some(s=>withheld(s.origin))?2:1);
   function validate(manifest) {
     tree(manifest);need(validManifest(manifest),'INVALID_CAPABILITY_PACKET','版本包格式、声明身份、字段或版本无效。');
     need(new Set(manifest.sources.map(s=>stable(s.ref))).size===manifest.sources.length,'INVALID_CAPABILITY_PACKET','版本包包含重复来源。');
@@ -25,15 +27,15 @@ export function createCapabilityPacketRules(v) {
       need(value.refs.some(r=>stable(r)===stable(ref)),'INVALID_CAPABILITY_PACKET','分享来源不在这个能力版本的明确引用内。');
       const {item:source,value:body}=resolve(host,ref);let excerpt=ref.kind==='capability'?(['instruction','template'].includes(body.usage)?body.prompt||'':body.steps):body.text;
       if(ref.anchor?.type==='text')excerpt=excerpt.slice(ref.anchor.start,ref.anchor.end);
-      const located=body.origin?structuredClone(body.origin):ref.anchor?{kind:'manual'}:undefined;
+      const located=body.origin?.kind==='thinking-message'||body.origin?.packet?.withheld==='thinking-message'?{kind:'withheld',reason:'thinking-message'}:body.origin?structuredClone(body.origin):ref.anchor?{kind:'manual'}:undefined;
       if(located?.locator?.type==='text'&&ref.anchor?.type==='text')located.locator={type:'text',start:located.locator.start+ref.anchor.start,end:located.locator.start+ref.anchor.end};
-      if(located&&ref.anchor&&ref.anchor.type!=='text')located.locator=structuredClone(ref.anchor);
+      if(located&&located.kind!=='withheld'&&ref.anchor&&ref.anchor.type!=='text')located.locator=structuredClone(ref.anchor);
       const original=body.resourceId?host.resources[body.resourceId]:undefined;
       return {ref:structuredClone(ref),kind:source.kind,title:ref.kind==='capability'?body.title:source.title,excerpt,...(source.author?{author:source.author}:{}),...(located?{origin:located}:{}),...(original?{original:structuredClone(original)}:{}),...(body.ink?{ink:structuredClone(body.ink)}:{})};
     });
     const resources=originalIds.map(id=>{const s=sources.find(s=>s.original?.id===id);need(s,'INVALID_CAPABILITY_PACKET','原件必须由明确勾选的来源带入。');return structuredClone(s.original);});
     const shared=structuredClone(value);shared.refs=structuredClone(sourceRefs);for(const field of omittedFields){need(['evidence','examples','prompt'].includes(field),'INVALID_CAPABILITY_PACKET','不能省略核心方法字段。');shared[field]='';}
-    return validate({format:'trace.capability.packet',version:1,packetId,createdAt,sender,recipient,capability:{ref:structuredClone(chosen),value:shared,sourceStatus:item.status,sourceRefCount:value.refs.length,omittedFields:structuredClone(omittedFields)},sources,resources});
+    return validate({format:'trace.capability.packet',version:sources.some(s=>withheld(s.origin))?2:1,packetId,createdAt,sender,recipient,capability:{ref:structuredClone(chosen),value:shared,sourceStatus:item.status,sourceRefCount:value.refs.length,omittedFields:structuredClone(omittedFields)},sources,resources});
   }
   const transfer=t=>shape(t,{direction:one('outgoing','incoming'),packetResourceId:x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x),packetId:identity,createdAt:stamp,sender:person,recipient:person,source:r=>ref(r)&&r.kind==='capability'&&r.version>=1,omittedFields:list(one('evidence','examples','prompt'),3)});
   const change=c=>shape(c,{version:integer,reason:text,state:optional(one('trial','published','disabled','restored','adopted')),transfer:optional(transfer)})&&!(c.transfer&&c.state);
@@ -60,7 +62,7 @@ export function createCapabilityPacketRules(v) {
     const refs=op.manifest.sources.map((s,index)=>{
       const id='shared-'+op.packetResourceId.slice(0,32)+'-'+index,original=s.original&&op.manifest.resources.find(r=>r.id===s.original.id);
       if(original)need(stable(host.resources[original.id])===stable(original),'RESOURCE_UNAVAILABLE','所选原件尚未完整核验，未接收能力。',409);
-      const origin={kind:'shared',...(s.origin?.url?{url:s.origin.url}:{}),...(s.origin?.fileName?{fileName:s.origin.fileName}:{}),...(s.origin?.locator?{locator:structuredClone(s.origin.locator)}:{}),packet:{resourceId:op.packetResourceId,source:structuredClone(s.ref),...(s.author?{sourceAuthor:s.author}:{})}};
+      const origin={kind:'shared',...(s.origin?.url?{url:s.origin.url}:{}),...(s.origin?.fileName?{fileName:s.origin.fileName}:{}),...(s.origin?.locator?{locator:structuredClone(s.origin.locator)}:{}),packet:{resourceId:op.packetResourceId,source:structuredClone(s.ref),...(s.author?{sourceAuthor:s.author}:{}),...(withheld(s.origin)?{withheld:s.origin.reason}:{})}};
       const value={text:s.excerpt,resourceId:original?.id||null,origin,...(s.ink?{ink:structuredClone(s.ink)}:{})},kind=s.ref.kind==='material'?s.kind:s.ink?'ink':'dialogue';
       if(host.materials[id])need(stable(host.materials[id].versions[1])===stable(value),'PACKET_CONTENT_CONFLICT','共享来源身份冲突，未覆盖。',409);else add(host,'materials',id,versioned(id,kind,s.title,value,{status:'current'}));
       return {kind:'material',id,version:1};

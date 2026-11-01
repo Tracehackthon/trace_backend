@@ -131,3 +131,11 @@ New/changed feedback citations use the shared rule in Browser and SQLite. Histor
 - 原件、布局、Agent结果账本仍是独立owner。AI原稿不可编辑；后端核对真实运行与原稿后，才以既有原子命令保存用户选择的写回。
 - `.10`已被消费，不覆写其归档。新字段对新reader是显式增量，旧严格reader不得作为`.11`数据的回退writer；没有自动升级个人库或安装。
 - 本段是契约说明，不代表端到端验收或provider已使用能力；以Trace完整前端任务的对应冻结源/实际运行证据为准。
+
+## frontend.12：用户原话摘录与包内隐私边界
+
+- `prepareThinkingMessageCapture`构造明确选取的dialogue材料；`material.create`在同一纯规则中核对准确用户消息及UTF-16选段，禁止越界、截断代理对、正文不匹配、假资源或将AI结果伪作用户原话。原消息不改写，摘录可独立保留，不要求形成结论。
+- `origin.kind=thinking-message`只携准确本地消息身份及范围；原件仍是既有append-only消息，不另建媒体Blob或第四种ContentRef。只读`projectThinkingMessageSource`区分可定位、不可用与片段变化，不猜同文/同名替代来源，不自动展开到协作输入。
+- `prepareContentWriteback`统一人工表达及经复核AI返回的目标构造；原件创建与正文/关系使用同一原子命令，布局另存。该构造器不执行或持久化；命令规则与CAS仍是实际权限/完整性边界。
+- 分享新原话摘录时，仅携所选摘录；本地讨论ID/消息ID/原话范围不会迁出，包内以`{"kind":"withheld","reason":"thinking-message"}`明确说明未带原讨论。此包manifest版本2；普通包继续版本1。接收只形成shared材料，保留`origin.packet.withheld`的说明，不按发送方ID读取本地消息。
+- 新reader严格接受v1/v2对应格式；旧v1读端明确拒绝v2，而非被宣称兼容。内容schema2/无新DDL不等于旧writer可写12的新字段；回退使用升级前副本，不自动升级个人库。构建/类型生成不代表功能或分享隐私端到端通过。

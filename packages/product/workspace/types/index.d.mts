@@ -3,6 +3,7 @@ export { ProductCommandError, applyProductOperations, validateProductCommand, va
 export { createDemoWorkspace } from './demo-workspace.mjs';
 export * from './scope-contract.mjs';
 export * from './workbench-model.mjs';
+export * from './writeback-plan.mjs';
 export * from './canvas-model.mjs';
 export { SCREENS as CHAIN_SCREENS, createChainState, reduceChain, selectChainView, createChainDemo, } from './chain-model.mjs';
 export { DIRECTION_OPTIONS, RELATION_OPTIONS, SCOPE_OPTIONS, createComparisonState, reduceComparison, selectComparisonView, createComparisonDemo, classifyMaterialImport, applyComparisonRequest, } from './comparison-model.mjs';

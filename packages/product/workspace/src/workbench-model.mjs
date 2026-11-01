@@ -25,7 +25,9 @@ const locator = x => plainObject(x) && (
   x.type === 'image' && strictObject(x,{type:one('image'),rect})
 );
 const url = x => { try { return typeof x === 'string' && ['http:','https:'].includes(new URL(x).protocol); } catch { return false; } };
-const origin = x => strictObject(x,{kind:one('manual','local','web','legacy','shared'),url:optional(url),fileName:optional(text),legacyId:optional(identity),locator:optional(locator),packet:optional(x=>strictObject(x,{resourceId:digest,source:validContentRef,sourceAuthor:optional(one('user','agent'))}))});
+const origin = x => x?.kind==='thinking-message'
+  ? strictObject(x,{kind:one('thinking-message'),message:m=>strictObject(m,{sessionId:identity,messageId:identity}),locator:l=>locator(l)&&l.type==='text'&&l.end>l.start})
+  : strictObject(x,{kind:one('manual','local','web','legacy','shared'),url:optional(url),fileName:optional(text),legacyId:optional(identity),locator:optional(locator),packet:optional(x=>strictObject(x,{resourceId:digest,source:validContentRef,sourceAuthor:optional(one('user','agent')),withheld:optional(one('thinking-message'))}))});
 export const validContentRef = x => strictObject(x,{kind:one('material','expression','capability'),id:identity,version:integer,anchor:optional(locator)});
 export const validCanvasContentRef = x => strictObject(x,{kind:one('material','expression','capability'),id:identity,version:v=>v===null||integer(v),anchor:optional(locator)}) && !(x.version===null&&x.anchor);
 export function freezeCanvasContentRef(host,ref){need(validCanvasContentRef(ref),'INVALID_REFERENCE','画布引用不正确。');const key={material:'materials',expression:'expressions',capability:'capabilities'}[ref.kind],item=host[key]?.[ref.id];need(item,'REFERENCE_UNAVAILABLE','画布内容不可用。',409);return {...structuredClone(ref),version:ref.version===null?item.version:ref.version};}
@@ -55,7 +57,25 @@ export function validateMessageScope(host,scope,session,before= session.messages
 const resource = x => strictObject(x,{id:identity,sha256:x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x),mime:x=>typeof x==='string'&&/^[\w.+-]+\/[\w.+-]+$/.test(x),bytes:integer}) && x.id === x.sha256;
 export const validResourceDescriptor=resource;
 const ink = x => strictObject(x,{points:list(p=>strictObject(p,{x:finite,y:finite}),20000),width:n=>finite(n)&&n>0&&n<=64,color:x=>typeof x==='string'&&/^#[a-fA-F0-9]{6}$/.test(x)}) && x.points.length>=2;
-const materialValue = x => strictObject(x,{text,resourceId:x=>x===null||identity(x),origin,ink:optional(ink)});
+const materialValue = x => strictObject(x,{text,resourceId:x=>x===null||identity(x),origin,ink:optional(ink)})&&(x.origin.kind!=='thinking-message'||x.resourceId===null&&!x.ink);
+const wholeTextBoundary=(text,at)=>Number.isSafeInteger(at)&&at>=0&&at<=text.length&&!(at>0&&at<text.length&&/[\uD800-\uDBFF]/.test(text[at-1])&&/[\uDC00-\uDFFF]/.test(text[at]));
+// A capture is an explicitly chosen immutable excerpt. The saved user message
+// remains the original; this projection never expands it into Agent context.
+export function projectThinkingMessageSource(host,value) {
+  if(value?.origin?.kind!=='thinking-message')return {status:'not-applicable'};
+  const {message,locator}=value.origin,session=host?.sessions?.[message.sessionId],original=session?.messages.find(m=>m.id===message.messageId);
+  if(!original||original.author!=='user')return {status:'unavailable',reason:'原讨论或准确原话暂不可用；摘录仍保留，没有改找同名或相同文字。'};
+  if(!wholeTextBoundary(original.text,locator.start)||!wholeTextBoundary(original.text,locator.end)||locator.end<=locator.start||original.text.slice(locator.start,locator.end)!==value.text)return {status:'changed',reason:'原话的记录范围与保存摘录不一致；未重新定位或覆盖摘录。'};
+  return {status:'available',text:original.text,locator:structuredClone(locator),sessionId:session.id,messageId:original.id,title:session.title};
+}
+export function prepareThinkingMessageCapture(host,{id,sessionId,messageId,selection,title}) {
+  need(identity(id)&&identity(sessionId)&&identity(messageId)&&text(title)&&title.trim()&&selection?.type==='text'&&locator(selection),'INVALID_MESSAGE_CAPTURE','请明确摘录身份、名称和原话文字范围。');
+  const message=host.sessions?.[sessionId]?.messages.find(m=>m.id===messageId);
+  need(message?.author==='user','MESSAGE_SOURCE_UNAVAILABLE','准确原话暂不可用，未创建摘录。',409);
+  need(wholeTextBoundary(message.text,selection.start)&&wholeTextBoundary(message.text,selection.end)&&selection.end>selection.start,'INVALID_MESSAGE_CAPTURE','摘录范围为空、越界或截断了Unicode字符，未改选其它位置。');
+  const value={text:message.text.slice(selection.start,selection.end),resourceId:null,origin:{kind:'thinking-message',message:{sessionId,messageId},locator:structuredClone(selection)}};
+  return {operation:{type:'material.create',id,kind:'dialogue',title,value},source:{kind:'material',id,version:1},excerpt:value.text};
+}
 const expressionValue = x => strictObject(x,{text,refs,ink:optional(ink)});
 const expressionKind = one('note','annotation','question','understanding','attempt','ink');
 const relationKind = one('supplement','support','limit','challenge','alternative','branch','unknown');
@@ -220,7 +240,7 @@ export function applyWorkbenchOperations(previous,ops,{feedbackEvidence={}}={}) 
       case 'workspace.upgrade':break;
       case 'workbench.preferences':host.preferences={displayName:op.displayName,reduceMotion:op.reduceMotion};break;
       case 'resource.register': {const old=host.resources[op.resource.id];need(!old||stableWorkbenchJson(old)===stableWorkbenchJson(op.resource),'RESOURCE_CONFLICT','同一原件身份不能对应不同内容。',409);host.resources[op.resource.id]=structuredClone(op.resource);break;}
-      case 'material.create': if(op.value.resourceId)need(host.resources[op.value.resourceId],'RESOURCE_UNAVAILABLE','请先保存并核验原件。');add(host,'materials',op.id,versioned(op.id,op.kind,op.title,op.value,{status:'current'}));break;
+      case 'material.create': if(op.value.resourceId)need(host.resources[op.value.resourceId],'RESOURCE_UNAVAILABLE','请先保存并核验原件。');if(op.value.origin.kind==='thinking-message')need(op.kind==='dialogue'&&projectThinkingMessageSource(host,op.value).status==='available','MESSAGE_SOURCE_MISMATCH','准确原话或选段与保存摘录不一致；没有写入、猜选来源或扩大范围。',409);add(host,'materials',op.id,versioned(op.id,op.kind,op.title,op.value,{status:'current'}));break;
       case 'expression.create':checkRefs(host,op.value.refs);add(host,'expressions',op.id,versioned(op.id,op.kind,op.title,op.value,{author:op.author,status:op.author==='agent'?'pending':'current'}));break;
       case 'expression.edit': {const item=host.expressions[op.id];assertVersion(item,op.expectedVersion);need(item.author==='user','ORIGINAL_PROTECTED','Agent原稿不能被用户编辑覆盖；请另存用户表达。');checkRefs(host,op.value.refs);item.version++;item.title=op.title;item.versions[String(item.version)]=structuredClone(op.value);break;}
       case 'expression.decide': {const item=host.expressions[op.id];assertVersion(item,op.expectedVersion);need(item.author==='agent'&&item.status==='pending','INVALID_TRANSITION','没有待处理的AI建议。');item.status=op.decision;break;}

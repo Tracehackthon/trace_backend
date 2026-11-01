@@ -1,6 +1,6 @@
 export declare function createCapabilityPacketRules(v: any): {
     validate: (manifest: any) => any;
-    validManifest: (x: any) => any;
+    validManifest: (x: any) => boolean;
     prepare: (host: any, { ref: chosen, packetId, createdAt, sender, recipient, sourceRefs, originalIds, omittedFields }: {
         createdAt: any;
         omittedFields?: any[];

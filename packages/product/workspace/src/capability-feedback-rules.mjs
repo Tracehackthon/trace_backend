@@ -1,6 +1,6 @@
 // Version-bound user feedback. Pure rules; no file, model, or second store.
 export function createCapabilityFeedbackRules(v) {
-  const {need,strictObject:shape,identity,text,integer,one,list,optional,validContentRef:ref,stableWorkbenchJson:stable,resolveContentRef:resolve,capabilityValue}=v;
+  const {need,strictObject:shape,identity,text,integer,one,list,optional,validContentRef:ref,stableWorkbenchJson:stable,resolveContentRef:resolve,validateReferenceSelection:selectReference,capabilityValue}=v;
   const stamp=x=>typeof x==='string'&&Number.isFinite(Date.parse(x));
   const digest=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   const refs=list(ref,256),capRef=x=>ref(x)&&x.kind==='capability'&&x.version>=1&&!x.anchor;
@@ -46,6 +46,7 @@ export function createCapabilityFeedbackRules(v) {
       if(previous?.kind==='native-result'&&stable(inputContext(previous))===stable(body.context))next.context=structuredClone(previous);
       else{need(proof&&stable(inputContext(proof))===stable(body.context)&&storedContext(proof),'FEEDBACK_RESULT_UNVERIFIED','尚未核验这次真实运行及返回；可保留人工观察，但不能伪造已核验来源。',409);next.context=structuredClone(proof);}
     }
+    for(const ref of next.refs)if(!old||!current(old).refs.some(prior=>stable(prior)===stable(ref)))selectReference(host,ref);
     next.resolution={action:'open',reason:'',ref:null,at:body.observedAt};checkSource(host,next);return next;
   }
   const current=f=>f.versions[f.version];

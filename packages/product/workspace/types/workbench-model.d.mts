@@ -47,6 +47,10 @@ export declare function emptyWorkbench(): {
         sourceRefs: {};
     };
 };
+export declare function validateReferenceSelection(host: any, ref: any): {
+    item: any;
+    value: any;
+};
 export declare function resolveContentRef(host: any, ref: any, { forUse }?: {
     forUse?: boolean;
 }): {

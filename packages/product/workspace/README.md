@@ -111,3 +111,10 @@ The optional schema-2 `feedbacks` catalog stores immutable observations, interpr
 A native result requires the trusted Node composition root to supply `resolveFeedbackEvidence` (or `configureFeedbackEvidenceResolver`). The resolver must read the actual run ledger and verify task/input/result hashes and frozen fragments. This callback is not an HTTP or renderer capability. Browser manual feedback remains available without it; unverified result claims are rejected. Existing verified historical records can be annotated without rerunning a model.
 
 No DDL migration is required for the new catalog; previous snapshots are conservatively read with it absent. Old frontend readers are not a rollback mechanism for profiles containing the new kind/counts: use a pre-upgrade copy. This version is an implementation checkpoint, not acceptance of live execution, old-user-profile migration or the full frontend replacement. End-to-end evidence belongs to the consuming project.
+
+
+## Frontend.9: exact reference selections
+
+`validateReferenceSelection` validates a new precise citation against its saved version. Text offsets refer to `value.text` and preserve whole characters. Media anchors use original coordinates/time, can only narrow a known saved material range, and preserve PDF page/rotation. Unknown time/page bounds cannot be guessed. The wire format and schema remain2; no DDL or new content owner.
+
+New/changed feedback citations use the shared rule in Browser and SQLite. Historical reads are not silently rewritten, and the same old citation can be retained while annotating its observation. Effective future uses also validate selection bounds. Do not treat old readers as equivalent enforcement or point them at an upgraded user profile as a rollback. Product build/identity does not replace consuming-app E2E evidence.

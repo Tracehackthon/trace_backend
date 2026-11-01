@@ -46,7 +46,7 @@ const packets=createCapabilityPacketRules({need,strictObject,identity,text,integ
 export const validateCapabilityPacket=packets.validate;
 export const prepareCapabilityPacket=packets.prepare;
 export const findReceivedCapabilityPacket=packets.received;
-const feedbacks=createCapabilityFeedbackRules({need,strictObject,identity,text,integer,one,list,optional,validContentRef,stableWorkbenchJson,resolveContentRef,capabilityValue});
+const feedbacks=createCapabilityFeedbackRules({need,strictObject,identity,text,integer,one,list,optional,validContentRef,stableWorkbenchJson,resolveContentRef,validateReferenceSelection,capabilityValue});
 export const validCapabilityFeedbackInput=feedbacks.input;
 export const capabilityFeedbackNeedsProof=feedbacks.requiresProof;
 export const feedbackContextReferences=feedbacks.sourceRefs;
@@ -93,6 +93,17 @@ const current = entity => entity.versions[String(entity.version)];
 function versioned(id,kind,title,value,extra={}) {return {id,kind,title,version:1,versions:{'1':structuredClone(value)},...extra};}
 function assertVersion(item,version) {need(item,'CONTENT_NOT_FOUND','没有找到这个对象。',404);need(item.version===version,'CONTENT_CONFLICT','对象已更新；保留草稿后重新比较。',409);}
 function add(host,collection,id,item) {need(!Object.hasOwn(host[collection],id),'DUPLICATE_CONTENT','对象身份已经存在，未覆盖。',409);host[collection][id]=item;}
+// New explicit selections narrow a saved object; historical locators stay intact.
+function checkReferenceAnchor(item,value,ref) {
+  const a=ref.anchor;if(!a)return;
+  const base=value.origin?.locator,inside=(r,b={x:0,y:0,width:1,height:1})=>r.x>=b.x-1e-6&&r.y>=b.y-1e-6&&r.x+r.width<=b.x+b.width+1e-6&&r.y+r.height<=b.y+b.height+1e-6;
+  if(a.type==='text'){need(typeof value.text==='string'&&a.end>a.start,'INVALID_ANCHOR','请引用该保存版本中非空的完整文字选段。',409);return;}
+  if(a.type==='image'){need(item.kind==='image'&&(!base||base.type==='image')&&inside(a.rect,base?.rect),'ANCHOR_OUTSIDE_SOURCE','图片引用不能超出这份材料已保存的范围。',409);return;}
+  if(a.type==='time'){need(['audio','video'].includes(item.kind)&&base?.type==='time','ANCHOR_RANGE_UNKNOWN','先保存明确的音视频片段范围，再选择其中局部；不猜原件时长。',409);need(a.startMs>=base.startMs&&a.endMs<=base.endMs,'ANCHOR_OUTSIDE_SOURCE','引用时间不能超出这份材料已保存的片段。',409);return;}
+  need(a.type==='pdf'&&item.kind==='pdf'&&base?.type==='pdf','ANCHOR_RANGE_UNKNOWN','先保存明确PDF页/区域，再引用其中局部；不猜页数。',409);
+  need(a.page===base.page&&a.rotation===base.rotation&&(!base.rect||a.rect)&&(!a.rect||inside(a.rect,base.rect)),'ANCHOR_OUTSIDE_SOURCE','PDF引用必须保留原页与旋转，区域不能超出已保存局部。',409);
+}
+export function validateReferenceSelection(host,ref) {const result=resolveContentRef(host,ref);checkReferenceAnchor(result.item,result.value,ref);return result;}
 export function resolveContentRef(host,ref,{forUse=false}={}) {
   need(validContentRef(ref),'INVALID_REFERENCE','内容引用不完整。');
   const collection={material:'materials',expression:'expressions',capability:'capabilities'}[ref.kind], item=host[collection]?.[ref.id];
@@ -105,6 +116,7 @@ export function resolveContentRef(host,ref,{forUse=false}={}) {
     const splits=n=>n>0&&n<s.length&&/[\uD800-\uDBFF]/.test(s[n-1])&&/[\uDC00-\uDFFF]/.test(s[n]);
     need(!splits(a.start)&&!splits(a.end),'INVALID_ANCHOR','选段不能切断完整字符。');
   }
+  if(forUse)checkReferenceAnchor(item,value,ref);
   return {item,value};
 }
 function checkRefs(host,items,forUse=false){for(const ref of items)resolveContentRef(host,ref,{forUse});}

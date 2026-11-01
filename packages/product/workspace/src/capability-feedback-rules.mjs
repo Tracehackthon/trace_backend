@@ -1,6 +1,6 @@
 // Version-bound user feedback. Pure rules; no file, model, or second store.
 export function createCapabilityFeedbackRules(v) {
-  const {need,strictObject:shape,identity,text,integer,one,list,optional,validContentRef:ref,stableWorkbenchJson:stable,resolveContentRef:resolve,validateReferenceSelection:selectReference,capabilityValue}=v;
+  const {need,strictObject:shape,identity,text,integer,one,list,optional,validContentRef:ref,stableWorkbenchJson:stable,resolveContentRef:resolve,validateReferenceSelection:selectReference,contentReferencesOverlap:overlap,capabilityValue}=v;
   const stamp=x=>typeof x==='string'&&Number.isFinite(Date.parse(x));
   const digest=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   const refs=list(ref,256),capRef=x=>ref(x)&&x.kind==='capability'&&x.version>=1&&!x.anchor;
@@ -15,11 +15,11 @@ export function createCapabilityFeedbackRules(v) {
     if(source.kind==='manual')return null;
     if(source.kind==='thinking'){
       const session=host.sessions[source.id],message=session?.messages.find(m=>m.id===source.messageId);need(message,'FEEDBACK_SOURCE_UNAVAILABLE','原讨论消息不可用，没有用当前消息替代。',409);
-      return [...session.refs,...(message.instructions||[]),...(message.template?[message.template]:[])].filter(r=>!session.excluded.some(e=>stable(e)===stable(r)));
+      const scope=message.scope||session;return [...scope.refs,...(message.instructions||[]),...(message.template?[message.template]:[])].filter(r=>!scope.excluded.some(e=>overlap(e,r)));
     }
     if(source.kind==='task'){
       const task=host.tasks[source.id];need(task,'FEEDBACK_SOURCE_UNAVAILABLE','原任务准备不可用，没有用另一任务替代。',409);
-      return [...task.refs,...(task.instructions||[]),...(task.template?[task.template]:[])].filter(r=>!task.excluded.some(e=>stable(e)===stable(r)));
+      return [...task.refs,...(task.instructions||[]),...(task.template?[task.template]:[])].filter(r=>!task.excluded.some(e=>overlap(e,r)));
     }
     return source.refs;
   }

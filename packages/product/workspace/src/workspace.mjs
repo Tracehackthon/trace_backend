@@ -225,7 +225,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file); let closed = false;
-  const storage = { kind: 'sqlite', location: file, features:['capability-packet-v1','capability-feedback-v1',...(resolveFeedbackEvidence?['capability-feedback-result-v1']:[])] };
+  const storage = { kind: 'sqlite', location: file, features:['capability-packet-v1','capability-feedback-v1','message-reference-scope-v1',...(resolveFeedbackEvidence?['capability-feedback-result-v1']:[])] };
   function transaction(fn) {
     db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); db.exec('COMMIT'); return result; }

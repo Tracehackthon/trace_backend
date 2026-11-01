@@ -118,3 +118,7 @@ No DDL migration is required for the new catalog; previous snapshots are conserv
 `validateReferenceSelection` validates a new precise citation against its saved version. Text offsets refer to `value.text` and preserve whole characters. Media anchors use original coordinates/time, can only narrow a known saved material range, and preserve PDF page/rotation. Unknown time/page bounds cannot be guessed. The wire format and schema remain2; no DDL or new content owner.
 
 New/changed feedback citations use the shared rule in Browser and SQLite. Historical reads are not silently rewritten, and the same old citation can be retained while annotating its observation. Effective future uses also validate selection bounds. Do not treat old readers as equivalent enforcement or point them at an upgraded user profile as a rollback. Product build/identity does not replace consuming-app E2E evidence.
+
+### frontend.10：每段原话的独立冻结范围
+
+新消息保存 refs/excluded/historyIds 的 scope，讨论起始引用不改写。历史字段缺失仍可读，不能反推当时精确范围；新调用需另留原话核对，旧运行仍按原冻结payload。包含/排除按范围相交校验，不以JSON不相等绕过局部排除。任务与反馈使用同一准确范围规则；消息来源反馈读取该消息冻结范围，后续默认指令/选区不改旧来源。新增 message-reference-scope-v1 特性，不创建新DDL或业务store。实际只读输入预览由消费端生产Native owner构建，无模型执行，不以静态检查代证E2E。

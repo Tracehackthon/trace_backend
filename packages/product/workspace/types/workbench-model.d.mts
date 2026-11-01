@@ -10,6 +10,12 @@ export declare const strictObject: (x: any, fields: any) => boolean;
 export declare const validContentRef: (x: any) => boolean;
 export declare const validCanvasContentRef: (x: any) => boolean;
 export declare function freezeCanvasContentRef(host: any, ref: any): any;
+export declare const validMessageScope: (x: any) => boolean;
+export declare function contentReferencesOverlap(a: any, b: any): boolean;
+export declare function effectiveContentReferences(included: any, excluded?: any[]): any;
+export declare function validateMessageScope(host: any, scope: any, session: any, before?: any, { forUse }?: {
+    forUse?: boolean;
+}): any;
 declare const resource: (x: any) => boolean;
 export declare const validResourceDescriptor: typeof resource;
 export declare const validateCapabilityPacket: (manifest: any) => any;

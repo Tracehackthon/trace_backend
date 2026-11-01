@@ -200,7 +200,7 @@ export function validateWorkbench(host) {
   for(const capability of Object.values(host.capabilities))for(const c of capability.changes)if(c.transfer)need(host.resources[c.transfer.packetResourceId]&&c.version<=capability.version,'INVALID_CONTENT','版本交接记录缺少原件或准确本地版本。');
   for(const [id,relation]of Object.entries(host.relations)){
     need(strictObject(relation,{id:identity,...relationBody,author:one('user','agent'),version:integer,status:relationStatus,modifiedBy:optional(one('user')),history:optional(list(relationSnapshot))})&&relation.id===id,'INVALID_RELATION','关系结构不正确。');
-    let previous=0;
+    let previous=-1;
     for(const value of [...(relation.history||[]),relation]){need(value.version>previous&&value.version<=relation.version,'INVALID_RELATION','关系历史版本次序不正确。');previous=value.version;checkRefs(host,[value.from,value.to,...(value.sources||[])]);}
   }
   for(const [id,s]of Object.entries(host.sessions)){need(strictObject(s,{id:identity,title:text,refs,excluded:refs,instructions:optional(instructionRefs),messages:list(m=>strictObject(m,{id:identity,text,author:one('user'),instructions:optional(instructionRefs),template:optional(validContentRef),scope:optional(validMessageScope)})),status:one('manual')})&&s.id===id&&new Set(s.messages.map(m=>m.id)).size===s.messages.length,'INVALID_SESSION','讨论结构不正确。');checkRefs(host,s.refs);checkRefs(host,s.excluded);checkInstructions(host,s.instructions||[]);for(const [index,m]of s.messages.entries()){if(m.scope)validateMessageScope(host,m.scope,s,index);checkInstructions(host,m.instructions||[]);if(m.template)checkTemplate(host,m.template);}}

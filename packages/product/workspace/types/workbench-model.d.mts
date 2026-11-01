@@ -24,10 +24,15 @@ export declare const prepareCapabilityPacket: (host: any, { ref: chosen, packetI
     sourceRefs?: any[];
 }) => any;
 export declare const findReceivedCapabilityPacket: (host: any, packetResourceId: any) => any;
+export declare const validCapabilityFeedbackInput: (x: any) => boolean;
+export declare const capabilityFeedbackNeedsProof: (op: any, host: any) => boolean;
+export declare const feedbackContextReferences: (host: any, source: any) => any;
+export declare const capabilityFeedbackInputContext: (source: any) => any;
 export declare const isWorkbenchOperation: (x: any) => boolean;
 export declare function validateWorkbenchOperation(op: any): any;
 export declare function emptyWorkbench(): {
     schemaVersion: number;
+    feedbacks: {};
     resources: {};
     materials: {};
     expressions: {};
@@ -51,5 +56,7 @@ export declare function resolveContentRef(host: any, ref: any, { forUse }?: {
 export declare function migrateWorkbench(previous: any): any;
 export declare function projectLegacyWorkbench(host: any): any;
 export declare function validateWorkbench(host: any): any;
-export declare function applyWorkbenchOperations(previous: any, ops: any): any;
+export declare function applyWorkbenchOperations(previous: any, ops: any, { feedbackEvidence }?: {
+    feedbackEvidence?: {};
+}): any;
 export {};

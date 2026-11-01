@@ -177,11 +177,11 @@ function worksite(host, op) {
   return next;
 }
 
-export function applyProductOperations(previous, operations) {
+export function applyProductOperations(previous, operations, options = {}) {
   validateProductOperations(operations);
   if (previous?.schemaVersion === 2 || operations.some(isWorkbenchOperation)) {
     if (!operations.every(isWorkbenchOperation)) throw new WorkbenchError('LEGACY_COMMAND_REQUIRES_ADAPTER','旧动作尚未映射到新内容协议；未改写工作区。',409);
-    return applyWorkbenchOperations(previous,operations);
+    return applyWorkbenchOperations(previous,operations,options);
   }
   let host = structuredClone(previous || B.createBridge());
   // A historical view error is not a new command failure.

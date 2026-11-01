@@ -100,3 +100,14 @@ The existing schema-2 catalogs and database tables remain. Typed transfer events
 
 
 Frontend.7 fixes the UI-proven referenced-method privacy defect found in the unreleased frontend.6 checkpoint: selecting a capability as a source exports only the displayed method/prompt excerpt, never a JSON dump of its optional evidence/examples or references. The package wire format stays v1; existing material-only packet fixtures remain readable. The consuming project retains the failing actual-download evidence and must rerun the real sender/receiver journeys. Never overwrite a consumed frontend.6 tarball or equate this package build with release acceptance.
+
+
+## Frontend.8: version-bound capability feedback
+
+The optional schema-2 `feedbacks` catalog stores immutable observations, interpretation, scope, exact capability version (or explicit unknown), source context and subsequent decisions. It shares Product commands and `web_entities`; it is not a second feedback store. Manual observations, saved messages, prepared tasks and verified native results have different evidence strengths. A frozen reference is not proof that an Agent followed the method or that the method is generally valid.
+
+`feedback.record/edit/state/apply` use command identity and revision CAS. Explicit keep, revise and disable append feedback history; revise/disable update the current method atomically, retaining the original target version and a causal link to the exact feedback revision. Withdrawing a feedback record does not undo a previously adopted method revision. Capability packets do not silently include the feedback catalog.
+
+A native result requires the trusted Node composition root to supply `resolveFeedbackEvidence` (or `configureFeedbackEvidenceResolver`). The resolver must read the actual run ledger and verify task/input/result hashes and frozen fragments. This callback is not an HTTP or renderer capability. Browser manual feedback remains available without it; unverified result claims are rejected. Existing verified historical records can be annotated without rerunning a model.
+
+No DDL migration is required for the new catalog; previous snapshots are conservatively read with it absent. Old frontend readers are not a rollback mechanism for profiles containing the new kind/counts: use a pre-upgrade copy. This version is an implementation checkpoint, not acceptance of live execution, old-user-profile migration or the full frontend replacement. End-to-end evidence belongs to the consuming project.

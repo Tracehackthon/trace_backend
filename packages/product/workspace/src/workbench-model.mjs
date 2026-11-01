@@ -1,3 +1,4 @@
+import {createCapabilityPacketRules} from './capability-packet-rules.mjs';
 // Trace content schema 2. Browser-safe rules, shared by IDB and SQLite.
 // Files and canvas placement have separate owners; neither is a second body.
 export class WorkbenchError extends Error {
@@ -23,7 +24,7 @@ const locator = x => plainObject(x) && (
   x.type === 'image' && strictObject(x,{type:one('image'),rect})
 );
 const url = x => { try { return typeof x === 'string' && ['http:','https:'].includes(new URL(x).protocol); } catch { return false; } };
-const origin = x => strictObject(x,{kind:one('manual','local','web','legacy'),url:optional(url),fileName:optional(text),legacyId:optional(identity),locator:optional(locator)});
+const origin = x => strictObject(x,{kind:one('manual','local','web','legacy','shared'),url:optional(url),fileName:optional(text),legacyId:optional(identity),locator:optional(locator),packet:optional(x=>strictObject(x,{resourceId:digest,source:validContentRef,sourceAuthor:optional(one('user','agent'))}))});
 export const validContentRef = x => strictObject(x,{kind:one('material','expression','capability'),id:identity,version:integer,anchor:optional(locator)});
 export const validCanvasContentRef = x => strictObject(x,{kind:one('material','expression','capability'),id:identity,version:v=>v===null||integer(v),anchor:optional(locator)}) && !(x.version===null&&x.anchor);
 export function freezeCanvasContentRef(host,ref){need(validCanvasContentRef(ref),'INVALID_REFERENCE','画布引用不正确。');const key={material:'materials',expression:'expressions',capability:'capabilities'}[ref.kind],item=host[key]?.[ref.id];need(item,'REFERENCE_UNAVAILABLE','画布内容不可用。',409);return {...structuredClone(ref),version:ref.version===null?item.version:ref.version};}
@@ -31,7 +32,7 @@ const refs = list(validContentRef,256);
 const resource = x => strictObject(x,{id:identity,sha256:x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x),mime:x=>typeof x==='string'&&/^[\w.+-]+\/[\w.+-]+$/.test(x),bytes:integer}) && x.id === x.sha256;
 export const validResourceDescriptor=resource;
 const ink = x => strictObject(x,{points:list(p=>strictObject(p,{x:finite,y:finite}),20000),width:n=>finite(n)&&n>0&&n<=64,color:x=>typeof x==='string'&&/^#[a-fA-F0-9]{6}$/.test(x)}) && x.points.length>=2;
-const materialValue = x => strictObject(x,{text,resourceId:x=>x===null||identity(x),origin});
+const materialValue = x => strictObject(x,{text,resourceId:x=>x===null||identity(x),origin,ink:optional(ink)});
 const expressionValue = x => strictObject(x,{text,refs,ink:optional(ink)});
 const step = x => strictObject(x,{id:identity,text,checked:x=>typeof x==='boolean'});
 const stepItems = x => list(step,256)(x) && new Set(x.map(s=>s.id)).size===x.length;
@@ -40,6 +41,10 @@ const executionRef=x=>strictObject(x,{source:one('trace-agent-runtime'),runId:x=
 const digest=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
 const adoptedResult=x=>strictObject(x,{source:one('trace-workbench-agent'),runId:identity,inputHash:digest,resultHash:digest,ref:validContentRef,mode:one('new-expression','append-expression','append-capability'),adoptedAt:x=>typeof x==='string'&&Number.isFinite(Date.parse(x))});
 const capabilityValue = x => strictObject(x,{title:text,purpose:text,scope:text,steps:text,evidence:text,examples:text,refs,usage:optional(one('method','template','instruction')),prompt:optional(text),stepItems:optional(stepItems)}) && (x.stepItems===undefined || x.steps===x.stepItems.map(s=>s.text).join('\n\n'));
+const packets=createCapabilityPacketRules({need,strictObject,identity,text,integer,one,list,optional,resource,origin,ink,capabilityValue,validContentRef,stableWorkbenchJson,resolveContentRef,tree});
+export const validateCapabilityPacket=packets.validate;
+export const prepareCapabilityPacket=packets.prepare;
+export const findReceivedCapabilityPacket=packets.received;
 const catalogs = ['resources','materials','expressions','relations','capabilities','sessions','tasks'];
 const operations = {
   'workspace.upgrade': {},
@@ -53,7 +58,9 @@ const operations = {
   'relation.decide': {id:identity,expectedVersion:integer,decision:one('accepted','saved','rejected','detached'),reason:optional(text)},
   'capability.create': {id:identity,value:capabilityValue},
   'capability.edit': {id:identity,expectedVersion:integer,value:capabilityValue,reason:text},
-  'capability.state': {id:identity,expectedVersion:integer,state:one('trial','published','disabled','restored'),reason:text},
+  'capability.state': {id:identity,expectedVersion:integer,state:one('trial','published','disabled','restored','adopted'),reason:text},
+  'capability.package.export': {id:identity,expectedVersion:integer,packetResourceId:digest,manifest:packets.validManifest},
+  'capability.package.receive': {id:identity,expectedVersion:optional(integer),packetResourceId:digest,manifest:packets.validManifest,mode:one('new','update'),retainOmitted:x=>typeof x==='boolean',reason:text},
   'thinking.create': {id:identity,title:text,refs,excluded:refs},
   'thinking.instructions': {id:identity,instructions:instructionRefs},
   'thinking.message': {id:identity,messageId:identity,text,author:one('user'),template:optional(validContentRef)},
@@ -80,7 +87,7 @@ export function resolveContentRef(host,ref,{forUse=false}={}) {
   need(validContentRef(ref),'INVALID_REFERENCE','内容引用不完整。');
   const collection={material:'materials',expression:'expressions',capability:'capabilities'}[ref.kind], item=host[collection]?.[ref.id];
   need(item&&Object.hasOwn(item.versions,String(ref.version)),'REFERENCE_UNAVAILABLE','引用的对象或准确版本不可用。',409);
-  if(forUse)need(item.status!=='disabled'&&item.status!=='rejected'&&item.status!=='detached','REFERENCE_INACTIVE','内容已停用、拒绝或解除，不能作为本次有效参考。',409);
+  if(forUse)need(item.status!=='disabled'&&item.status!=='received'&&item.status!=='rejected'&&item.status!=='detached','REFERENCE_INACTIVE','内容已停用、拒绝或解除，不能作为本次有效参考。',409);
   const value=item.versions[String(ref.version)];
   if(ref.anchor?.type==='text') {
     const s=value.text||''; const a=ref.anchor;
@@ -132,9 +139,10 @@ export function validateWorkbench(host) {
     const fields=['id','kind','title','version','versions','status',...(name==='expressions'?['author']:[]),...(name==='capabilities'?['publishedVersions','changes']:[])];
     need(plainObject(item)&&Object.keys(item).every(key=>fields.includes(key)),'INVALID_CONTENT','内容包含未知字段。');
     need(item.id===id&&integer(item.version)&&text(item.title)&&plainObject(item.versions)&&Object.hasOwn(item.versions,String(item.version)),'INVALID_CONTENT','内容身份或版本不正确。');
-    need(name==='materials'?one('text','dialogue','code','image','audio','video','web','pdf','ink')(item.kind)&&item.status==='current':name==='expressions'?one('note','annotation','question','understanding','ink')(item.kind)&&one('user','agent')(item.author)&&one('current','pending','accepted','saved','rejected')(item.status):item.kind==='capability'&&one('draft','trial','published','disabled')(item.status)&&Array.isArray(item.publishedVersions)&&item.publishedVersions.every(integer)&&Array.isArray(item.changes),'INVALID_CONTENT','内容类型或状态无效。');
-    for(const [v,value]of Object.entries(item.versions)){need(/^(0|[1-9]\d*)$/.test(v)&&validate(value),'INVALID_CONTENT','内容版本无效。');if(value.resourceId)need(Object.hasOwn(host.resources,value.resourceId),'RESOURCE_UNAVAILABLE','原件引用尚未保存。');if(value.refs)checkRefs(host,value.refs);}
+    need(name==='materials'?one('text','dialogue','code','image','audio','video','web','pdf','ink')(item.kind)&&item.status==='current':name==='expressions'?one('note','annotation','question','understanding','ink')(item.kind)&&one('user','agent')(item.author)&&one('current','pending','accepted','saved','rejected')(item.status):item.kind==='capability'&&one('draft','trial','published','disabled','received')(item.status)&&Array.isArray(item.publishedVersions)&&item.publishedVersions.every(integer)&&Array.isArray(item.changes)&&item.changes.every(packets.change),'INVALID_CONTENT','内容类型或状态无效。');
+    for(const [v,value]of Object.entries(item.versions)){need(/^(0|[1-9]\d*)$/.test(v)&&validate(value),'INVALID_CONTENT','内容版本无效。');if(value.resourceId)need(Object.hasOwn(host.resources,value.resourceId),'RESOURCE_UNAVAILABLE','原件引用尚未保存。');if(value.refs)checkRefs(host,value.refs);if(value.origin?.packet)need(host.resources[value.origin.packet.resourceId],'RESOURCE_UNAVAILABLE','共享来源的版本包原件未登记。');}
   }
+  for(const capability of Object.values(host.capabilities))for(const c of capability.changes)if(c.transfer)need(host.resources[c.transfer.packetResourceId]&&c.version<=capability.version,'INVALID_CONTENT','版本交接记录缺少原件或准确本地版本。');
   for(const [id,relation]of Object.entries(host.relations)){need(strictObject(relation,{id:identity,from:validContentRef,to:validContentRef,reason:text,evidence:text,difference:text,uncertainty:text,kind:one('supplement','support','limit','challenge','alternative','branch','unknown'),author:one('user','agent'),version:integer,status:one('pending','accepted','saved','rejected','detached')})&&relation.id===id,'INVALID_RELATION','关系结构不正确。');resolveContentRef(host,relation.from);resolveContentRef(host,relation.to);}
   for(const [id,s]of Object.entries(host.sessions)){need(strictObject(s,{id:identity,title:text,refs,excluded:refs,instructions:optional(instructionRefs),messages:list(m=>strictObject(m,{id:identity,text,author:one('user'),instructions:optional(instructionRefs),template:optional(validContentRef)})),status:one('manual')})&&s.id===id&&new Set(s.messages.map(m=>m.id)).size===s.messages.length,'INVALID_SESSION','讨论结构不正确。');checkRefs(host,s.refs);checkRefs(host,s.excluded);checkInstructions(host,s.instructions||[]);for(const m of s.messages){checkInstructions(host,m.instructions||[]);if(m.template)checkTemplate(host,m.template);}}
   for(const [id,t]of Object.entries(host.tasks)){need(strictObject(t,{id:identity,title:text,goal:text,refs,excluded:refs,destination:text,instructions:optional(instructionRefs),plan:optional(stepItems),template:optional(validContentRef),execution:optional(executionRef),status:one('prepared','cancelled'),results:x=>list(adoptedResult,256)(x)&&new Set(x.map(r=>r.runId)).size===x.length})&&t.id===id,'INVALID_TASK','任务结构不正确；未验证执行结果不能写成已返回。');checkRefs(host,t.refs);checkRefs(host,t.excluded);checkRefs(host,t.results.map(r=>r.ref));checkInstructions(host,t.instructions||[]);if(t.template)checkTemplate(host,t.template);}
@@ -158,8 +166,10 @@ export function applyWorkbenchOperations(previous,ops) {
       case 'relation.create':checkRefs(host,[op.from,op.to]);need(stableWorkbenchJson(op.from)!==stableWorkbenchJson(op.to),'INVALID_RELATION','不能把同一引用连接到自身。');add(host,'relations',op.id,{...structuredClone(op),type:undefined,version:1,status:op.author==='agent'?'pending':'accepted'});delete host.relations[op.id].type;break;
       case 'relation.decide': {const item=host.relations[op.id];assertVersion(item,op.expectedVersion);need(item.status!=='detached','INVALID_TRANSITION','关联已经解除。');if(op.decision==='accepted')checkRefs(host,[item.from,item.to],true);item.status=op.decision;item.version++;if(op.reason!==undefined)item.reason=op.reason;break;}
       case 'capability.create':checkRefs(host,op.value.refs);add(host,'capabilities',op.id,versioned(op.id,'capability',op.value.title,op.value,{status:'draft',publishedVersions:[],changes:[]}));break;
-      case 'capability.edit': {const item=host.capabilities[op.id];assertVersion(item,op.expectedVersion);need(item.status!=='disabled','CAPABILITY_DISABLED','先明确恢复后再修订。');checkRefs(host,op.value.refs);item.version++;item.title=op.value.title;item.versions[String(item.version)]=structuredClone(op.value);item.status='draft';item.changes.push({version:item.version,reason:op.reason});break;}
-      case 'capability.state': {const item=host.capabilities[op.id];assertVersion(item,op.expectedVersion);if(op.state==='restored'){need(item.status==='disabled','INVALID_TRANSITION','只有停用能力可恢复。');item.status='draft';}else {need(item.status!=='disabled','CAPABILITY_DISABLED','停用能力不能直接启用。');if(op.state==='published'){const value=current(item);need(value.title.trim()&&value.purpose.trim()&&value.scope.trim()&&value.steps.trim(),'CAPABILITY_INCOMPLETE','发布前补齐名称、用途、范围和方法。');if(!item.publishedVersions.includes(item.version))item.publishedVersions.push(item.version);}item.status=op.state;}item.changes.push({version:item.version,state:op.state,reason:op.reason});break;}
+      case 'capability.edit': {const item=host.capabilities[op.id];assertVersion(item,op.expectedVersion);need(item.status!=='disabled'&&item.status!=='received','CAPABILITY_DISABLED','先明确采用或恢复后再修订。');checkRefs(host,op.value.refs);item.version++;item.title=op.value.title;item.versions[String(item.version)]=structuredClone(op.value);item.status='draft';item.changes.push({version:item.version,reason:op.reason});break;}
+      case 'capability.state': {const item=host.capabilities[op.id];assertVersion(item,op.expectedVersion);if(op.state==='adopted'){need(item.status==='received','INVALID_TRANSITION','只有未采用的接收能力需要明确采用。');item.status='draft';}else if(op.state==='restored'){need(item.status==='disabled','INVALID_TRANSITION','只有停用能力可恢复。');item.status='draft';}else {need(item.status!=='disabled'&&item.status!=='received','CAPABILITY_DISABLED','先明确采用或恢复，不自动启用。');if(op.state==='published'){const value=current(item);need(value.title.trim()&&value.purpose.trim()&&value.scope.trim()&&value.steps.trim(),'CAPABILITY_INCOMPLETE','发布前补齐名称、用途、范围和方法。');if(!item.publishedVersions.includes(item.version))item.publishedVersions.push(item.version);}item.status=op.state;}item.changes.push({version:item.version,state:op.state,reason:op.reason});break;}
+      case 'capability.package.export':packets.applyExport(host,op);break;
+      case 'capability.package.receive':packets.applyReceive(host,op,{versioned,add,assertVersion});break;
       case 'thinking.create':checkRefs(host,op.refs,true);checkRefs(host,op.excluded);need(!op.refs.some(r=>op.excluded.some(e=>stableWorkbenchJson(r)===stableWorkbenchJson(e))),'REFERENCE_CONFLICT','同一引用不能同时包含和排除。');add(host,'sessions',op.id,{id:op.id,title:op.title,refs:structuredClone(op.refs),excluded:structuredClone(op.excluded),messages:[],status:'manual'});break;
       case 'thinking.instructions': {const session=host.sessions[op.id];need(session,'CONTENT_NOT_FOUND','讨论不存在。',404);checkInstructions(host,op.instructions,true);session.instructions=structuredClone(op.instructions);break;}
       case 'thinking.message': {const s=host.sessions[op.id];need(s,'CONTENT_NOT_FOUND','讨论不存在。',404);need(op.text.trim(),'EMPTY_MESSAGE','请先写下内容。');need(!s.messages.some(m=>m.id===op.messageId),'DUPLICATE_CONTENT','消息身份已存在。',409);checkInstructions(host,s.instructions||[],true);if(op.template)checkTemplate(host,op.template,true);s.messages.push({id:op.messageId,text:op.text,author:'user',instructions:structuredClone(s.instructions||[]),...(op.template?{template:structuredClone(op.template)}:{})});break;}

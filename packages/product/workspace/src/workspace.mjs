@@ -1,3 +1,4 @@
+import {assertCapabilityPacketOperation} from './capability-packet-codec.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -224,7 +225,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file); let closed = false;
-  const storage = { kind: 'sqlite', location: file };
+  const storage = { kind: 'sqlite', location: file, features:['capability-packet-v1'] };
   function transaction(fn) {
     db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); db.exec('COMMIT'); return result; }
@@ -342,8 +343,9 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       if (body.expectedRevision !== revision) throw new WebStoreError(409, 'REVISION_CONFLICT', '工作区已有更新；动作尚未执行，草稿应保留。', revision);
       // All domain guards and mutations run under the same SQLite write lock.
       // No caller-supplied host, receipt or final state is accepted.
+      for(const op of body.operations)if(op.type==='capability.package.export'||op.type==='capability.package.receive'){const {bytes}=canvasResources.readResourceContent(op.packetResourceId);assertCapabilityPacketOperation(op,bytes,sha);}
       const next = applyProductOperations(current.host, body.operations);
-      canvasResources.verifyResources(next,body.operations.flatMap(op=>op.type==='resource.register'?[op.resource.id]:op.type==='material.create'&&op.value.resourceId?[op.value.resourceId]:[]));
+      canvasResources.verifyResources(next,body.operations.flatMap(op=>op.type==='resource.register'?[op.resource.id]:op.type==='material.create'&&op.value.resourceId?[op.value.resourceId]:op.type==='capability.package.receive'?[op.packetResourceId,...op.manifest.resources.map(r=>r.id)]:op.type==='capability.package.export'?[op.packetResourceId]:[]));
       persist(normalizeHost(next), fingerprint, body.commandId, revision);
       return productResult(body.commandId, {request_sha256: fingerprint, committed_revision: revision + 1}, revision + 1);
     });

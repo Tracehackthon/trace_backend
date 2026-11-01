@@ -7,3 +7,4 @@ export * from './canvas-model.mjs';
 export { SCREENS as CHAIN_SCREENS, createChainState, reduceChain, selectChainView, createChainDemo, } from './chain-model.mjs';
 export { DIRECTION_OPTIONS, RELATION_OPTIONS, SCOPE_OPTIONS, createComparisonState, reduceComparison, selectComparisonView, createComparisonDemo, classifyMaterialImport, applyComparisonRequest, } from './comparison-model.mjs';
 export { SCREENS as WORK_SCREENS, createWorksiteState, reduceWorksite, selectWorksiteView, } from './worksite-model.mjs';
+export * from './capability-packet-codec.mjs';

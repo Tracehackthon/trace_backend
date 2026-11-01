@@ -12,6 +12,18 @@ export declare const validCanvasContentRef: (x: any) => boolean;
 export declare function freezeCanvasContentRef(host: any, ref: any): any;
 declare const resource: (x: any) => boolean;
 export declare const validResourceDescriptor: typeof resource;
+export declare const validateCapabilityPacket: (manifest: any) => any;
+export declare const prepareCapabilityPacket: (host: any, { ref: chosen, packetId, createdAt, sender, recipient, sourceRefs, originalIds, omittedFields }: {
+    createdAt: any;
+    omittedFields?: any[];
+    originalIds?: any[];
+    packetId: any;
+    recipient: any;
+    ref: any;
+    sender: any;
+    sourceRefs?: any[];
+}) => any;
+export declare const findReceivedCapabilityPacket: (host: any, packetResourceId: any) => any;
 export declare const isWorkbenchOperation: (x: any) => boolean;
 export declare function validateWorkbenchOperation(op: any): any;
 export declare function emptyWorkbench(): {

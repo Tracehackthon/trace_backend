@@ -90,3 +90,10 @@ Repository Guard 仍是只读 preflight → 用户采用 → 单独 apply。appl
 被采用的 `capability-candidate` 进入 `capability_orchestrations`，但没有现有内容 producer 时保持 `producer_required`，不会生成空 Skill。`CapabilityTrial` 固定 capability version/hash、scenario、task、expected/observed、evidence refs 和 `support|limit|challenge|inconclusive` outcome；行为验证通过至少需要一个有证据的 support trial。现有 CapabilityPublisher/Change Set 仍是唯一文件发布路径，Product 只记录 stage/validate/publish/rollback orchestration 与 receipt。PublicationPolicy 默认 manual，必须先显式 adopt，撤回立即阻止后续 publish；candidate、adopted、trial 和 published 永远不是同一状态。
 
 对应 HTTP 命令包括 `/api/product/host/repository/recovery/{preview,reconcile}`、`/api/product/host/publication-policy/{preview,adopt,revoke}` 和 `/api/product/host/capability/{trial/create,trial/complete,stage,validate,publish,rollback}`；所有状态写入都使用 command id、request hash 和 CAS。云同步、ADrive、远程鉴权不属于本地协议。
+
+
+## Frontend.6: explicit capability packets
+
+`prepareCapabilityPacket`, `encodeCapabilityPacket` and `decodeCapabilityPacket` implement the fixed v1 `.tracecap` file contract. Files are uncompressed binary originals, not media-base64 business state. Shared optional fields/sources are explicit; identity labels are unverified, hash integrity is not author authentication. The adapters validate the actual stored file against commands before atomic receive/export records.
+
+The existing schema-2 catalogs and database tables remain. Typed transfer events, source-packet provenance and the inactive `received` state require a matching frontend. New imports cannot be effective references until explicit adoption; updates require a higher version from the same declared source plus the exact local expectedVersion. Old versions, unpublished drafts and omitted-field choices are retained. A frontend.5 reader is not a rollback tool for a newer extended profile: restore the prior copy, never point it at the new profile. File creation does not prove delivery or use. E2E acceptance is recorded separately by the consuming project.

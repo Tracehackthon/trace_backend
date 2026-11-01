@@ -91,10 +91,42 @@ export declare const validCapabilityFeedbackInput: (x: any) => boolean;
 export declare const capabilityFeedbackNeedsProof: (op: any, host: any) => boolean;
 export declare const feedbackContextReferences: (host: any, source: any) => any;
 export declare const capabilityFeedbackInputContext: (source: any) => any;
+export declare const activationNeedsProof: (op: any) => boolean;
+export declare const activationInput: (host: any, id: any) => {
+    kind: string;
+    activationId: any;
+    activation: {
+        [k: string]: any;
+    };
+    task: {
+        id: string;
+        title: any;
+        goal: any;
+        refs: any[];
+        excluded: any;
+        instructions: any;
+        status: string;
+    };
+    fragments: any[];
+};
+export declare const activationReferenceText: (host: any, r: any) => any;
+export declare const validActivationCandidate: (x: any) => any;
+export declare const validActivationExplanation: (x: any) => any;
+export declare const verifyActivationLayout: (host: any, canvasId: any, command: any) => void;
+export declare const parseActivationOutput: (payload: any, result: any, provided: any) => {
+    summary: any;
+    candidates: any;
+    coverage: {
+        read: any[];
+        partial: any[];
+        unread: any[];
+    };
+};
 export declare const isWorkbenchOperation: (x: any) => boolean;
 export declare function validateWorkbenchOperation(op: any): any;
 export declare function emptyWorkbench(): {
     schemaVersion: number;
+    activations: {};
     feedbacks: {};
     resources: {};
     materials: {};
@@ -123,7 +155,9 @@ export declare function resolveContentRef(host: any, ref: any, { forUse }?: {
 export declare function migrateWorkbench(previous: any): any;
 export declare function projectLegacyWorkbench(host: any): any;
 export declare function validateWorkbench(host: any): any;
-export declare function applyWorkbenchOperations(previous: any, ops: any, { feedbackEvidence }?: {
+export declare function applyWorkbenchOperations(previous: any, ops: any, { feedbackEvidence, activationEvidence, activationPlacements }?: {
+    activationEvidence?: {};
+    activationPlacements?: {};
     feedbackEvidence?: {};
 }): any;
 export {};

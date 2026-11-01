@@ -1,5 +1,6 @@
 import {createCapabilityFeedbackRules} from './capability-feedback-rules.mjs';
 import {createCapabilityPacketRules} from './capability-packet-rules.mjs';
+import {createActivationRules} from './activation-rules.mjs';
 // Trace content schema 2. Browser-safe rules, shared by IDB and SQLite.
 // Files and canvas placement have separate owners; neither is a second body.
 export class WorkbenchError extends Error {
@@ -102,8 +103,17 @@ export const validCapabilityFeedbackInput=feedbacks.input;
 export const capabilityFeedbackNeedsProof=feedbacks.requiresProof;
 export const feedbackContextReferences=feedbacks.sourceRefs;
 export const capabilityFeedbackInputContext=feedbacks.inputContext;
+const activations=createActivationRules({need,strictObject,identity,integer,one,list,optional,validContentRef,stableWorkbenchJson,resolveContentRef,validateReferenceSelection,contentReferencesOverlap,instructionRefs});
+export const activationNeedsProof=activations.needsProof;
+export const activationInput=activations.input;
+export const activationReferenceText=activations.referenceText;
+export const validActivationCandidate=activations.candidate;
+export const validActivationExplanation=activations.explanation;
+export const verifyActivationLayout=activations.verifyLayout;
+export const parseActivationOutput=activations.parseOutput;
 const catalogs = ['resources','materials','expressions','relations','capabilities','sessions','tasks'];
 const operations = {
+  ...activations.operations,
   'workspace.upgrade': {},
   'workbench.preferences': {displayName:x=>text(x)&&x.length<=200,reduceMotion:x=>typeof x==='boolean'},
   'resource.register': {resource},
@@ -140,7 +150,7 @@ function tree(value) {
   const stack=[[value,0]];let count=0;
   while(stack.length){const [x,depth]=stack.pop();need(++count<=250000&&depth<=48,'CONTENT_TOO_COMPLEX','内容结构过大。');if(typeof x==='number')need(finite(x),'INVALID_CONTENT','数字必须有限。');if(x&&typeof x==='object')for(const [key,v]of Object.entries(x)){need(!['__proto__','constructor','prototype'].includes(key),'INVALID_CONTENT','内容包含不支持的对象键。');stack.push([v,depth+1]);}}
 }
-export function emptyWorkbench() { return {schemaVersion:2,feedbacks:{},resources:{},materials:{},expressions:{},relations:{},capabilities:{},sessions:{},tasks:{},legacy:null,migration:{version:1,matterRefs:{},sourceRefs:{}}}; }
+export function emptyWorkbench() { return {schemaVersion:2,activations:{},feedbacks:{},resources:{},materials:{},expressions:{},relations:{},capabilities:{},sessions:{},tasks:{},legacy:null,migration:{version:1,matterRefs:{},sourceRefs:{}}}; }
 const current = entity => entity.versions[String(entity.version)];
 function versioned(id,kind,title,value,extra={}) {return {id,kind,title,version:1,versions:{'1':structuredClone(value)},...extra};}
 function assertVersion(item,version) {need(item,'CONTENT_NOT_FOUND','没有找到这个对象。',404);need(item.version===version,'CONTENT_CONFLICT','对象已更新；保留草稿后重新比较。',409);}
@@ -206,7 +216,7 @@ export function projectLegacyWorkbench(host) {
 }
 export function validateWorkbench(host) {
   tree(host);need(plainObject(host)&&host.schemaVersion===2,'INVALID_CONTENT','需要内容schema 2。');
-  need(Object.keys(host).every(k=>['schemaVersion',...catalogs,'feedbacks','legacy','migration','preferences'].includes(k)),'INVALID_CONTENT','内容存在未支持的顶层字段。');
+  need(Object.keys(host).every(k=>['schemaVersion',...catalogs,'feedbacks','activations','legacy','migration','preferences'].includes(k)),'INVALID_CONTENT','内容存在未支持的顶层字段。');
   for(const catalog of catalogs)need(plainObject(host[catalog])&&Object.keys(host[catalog]).every(identity),'INVALID_CONTENT','内容目录无效。');
   if(host.feedbacks!==undefined)need(plainObject(host.feedbacks)&&Object.keys(host.feedbacks).every(identity),'INVALID_FEEDBACK','反馈目录格式无效。');
   for(const [id,r]of Object.entries(host.resources))need(resource(r)&&r.id===id,'INVALID_RESOURCE','原件元信息不正确。');
@@ -228,14 +238,16 @@ export function validateWorkbench(host) {
   need(strictObject(host.migration,{version:one(1),matterRefs:plainObject,sourceRefs:plainObject}),'INVALID_MIGRATION','迁移映射不完整。');
   if(host.legacy){need(host.legacy.schemaVersion===1&&Array.isArray(host.legacy.chain?.matters)&&Array.isArray(host.legacy.chain?.sources),'INVALID_MIGRATION','旧恢复结构无效。');for(const m of host.legacy.chain.matters){need(!Object.hasOwn(m,'understanding')&&!Object.hasOwn(m,'originalText'),'DUPLICATE_CONTENT_OWNER','旧对象不能另存当前正文。');const map=host.migration.matterRefs[m.id];need(map&&map.legacyId===m.id,'INVALID_MIGRATION','事项迁移映射缺失。');resolveContentRef(host,map.original);need(host.expressions[map.understanding?.id],'INVALID_MIGRATION','理解迁移映射缺失。');}for(const s of host.legacy.chain.sources){need(!Object.hasOwn(s,'excerpt'),'DUPLICATE_CONTENT_OWNER','旧来源不能另存摘录正文。');resolveContentRef(host,host.migration.sourceRefs[s.id]);}}
   feedbacks.validate(host);
-  need(catalogs.reduce((count,key)=>count+Object.keys(host[key]).length,0)+Object.keys(host.feedbacks||{}).length<=10000,'CONTENT_TOO_COMPLEX','内容对象数量超过当前边界。');
+  activations.validate(host);
+  need(catalogs.reduce((count,key)=>count+Object.keys(host[key]).length,0)+Object.keys(host.feedbacks||{}).length+Object.keys(host.activations||{}).length<=10000,'CONTENT_TOO_COMPLEX','内容对象数量超过当前边界。');
   return host;
 }
-export function applyWorkbenchOperations(previous,ops,{feedbackEvidence={}}={}) {
+export function applyWorkbenchOperations(previous,ops,{feedbackEvidence={},activationEvidence={},activationPlacements={}}={}) {
   need(Array.isArray(ops)&&ops.length>0&&ops.length<=256,'INVALID_WORKBENCH_COMMAND','需要明确的内容动作。',400);ops.forEach(validateWorkbenchOperation);
   let host=previous?.schemaVersion===2?validateWorkbench(structuredClone(previous)):migrateWorkbench(previous);
   host.feedbacks??={};
   for(const op of ops){
+    if(Object.hasOwn(activations.operations,op.type)){activations.apply(host,op,{add,assertVersion,proofs:activationEvidence,placements:activationPlacements});continue;}
     switch(op.type){
       case 'workspace.upgrade':break;
       case 'workbench.preferences':host.preferences={displayName:op.displayName,reduceMotion:op.reduceMotion};break;

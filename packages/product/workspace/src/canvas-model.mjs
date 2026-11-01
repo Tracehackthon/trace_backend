@@ -21,7 +21,8 @@ export function validateCanvasDocument(document) {
   return document;
 }
 export function validateCanvasCommand(command) {
-  need(strictObject(command,{protocolVersion:x=>x===1,commandId:id,expectedRevision:x=>Number.isSafeInteger(x)&&x>=0,action:x=>['replace','undo','redo','rename'].includes(x),scene:x=>x===undefined||plainObject(x),title:x=>x===undefined||typeof x==='string'&&x.length<=1000}),'INVALID_CANVAS_COMMAND','画布命令不完整。',400);
+  need(strictObject(command,{protocolVersion:x=>x===1,commandId:id,expectedRevision:x=>Number.isSafeInteger(x)&&x>=0,action:x=>['replace','undo','redo','rename'].includes(x),scene:x=>x===undefined||plainObject(x),title:x=>x===undefined||typeof x==='string'&&x.length<=1000,activation:x=>x===undefined||strictObject(x,{id,candidateId:id})}),'INVALID_CANVAS_COMMAND','画布命令不完整。',400);
+  if(command.activation)need(command.action==='replace','INVALID_CANVAS_COMMAND','同框意图只允许明确的布局放置，不改写撤销或命名。',400);
   if(command.action==='replace')validateCanvasScene(command.scene);
   else need(command.scene===undefined,'INVALID_CANVAS_COMMAND','该动作不接受布局快照。',400);
   if(command.action==='rename')need(typeof command.title==='string'&&command.title.trim(),'INVALID_CANVAS_COMMAND','需要画布名称。');else need(command.title===undefined,'INVALID_CANVAS_COMMAND','该动作不接受名称。',400);

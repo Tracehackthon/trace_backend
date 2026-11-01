@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { applyProductOperations, validateProductCommand, ProductCommandError } from './commands.mjs';
-import {validateWorkbench,WorkbenchError,capabilityFeedbackNeedsProof} from './workbench-model.mjs';
+import {validateWorkbench,WorkbenchError,capabilityFeedbackNeedsProof,activationNeedsProof} from './workbench-model.mjs';
 import {CANVAS_TABLES,ensureCanvasSchema,createCanvasResourceStore} from './canvas-store.mjs';
 import {
   CodexBridgeError,
@@ -31,7 +31,7 @@ const SCHEMA_VERSION = 2;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_ENTITIES = 10000;
 const LEGACY_KINDS = ['host-meta', 'chain-meta', 'matter', 'source', 'chain-session', 'comparison', 'worksite-meta', 'work', 'worksite-session', 'work-guard'];
-const CONTENT_CATALOGS = ['resources','materials','expressions','relations','capabilities','sessions','tasks','feedbacks'];
+const CONTENT_CATALOGS = ['resources','materials','expressions','relations','capabilities','sessions','tasks','feedbacks','activations'];
 const KINDS = [...LEGACY_KINDS,...CONTENT_CATALOGS.map(key=>'content-'+key)];
 const CORE_TABLES = ['web_workspace', 'web_snapshots', 'web_entities', 'web_commands'];
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -136,7 +136,7 @@ function normalizeHost(input) {
 function splitHost(host) {
   const rows = []; const add = (kind, id, payload, ordinal = 0) => rows.push({ kind, id, ordinal, payload: stableJson(payload) });
   if(host.schemaVersion===2){
-    const {resources,materials,expressions,relations,capabilities,sessions,tasks,feedbacks,...meta}=host;
+    const {resources,materials,expressions,relations,capabilities,sessions,tasks,feedbacks,activations,...meta}=host;
     add('host-meta','$',meta);
     for(const key of CONTENT_CATALOGS)Object.entries(host[key]||{}).forEach(([id,payload],ordinal)=>add('content-'+key,id,payload,ordinal));
     return rows;
@@ -212,7 +212,7 @@ function readBody(req) {
  * retained; product command fingerprints are namespaced in the existing ledger. */
 /** Authoritative local Product Workspace: product entities, command CAS,
  * receipts and Codex delivery/return records share one transactional owner. */
-export function createProductWorkspace({ file, allowSnapshotWrites = false, desktopSnapshotToken, hostWorkflowFaultInjector = null, resolveFeedbackEvidence = null } = {}) {
+export function createProductWorkspace({ file, allowSnapshotWrites = false, desktopSnapshotToken, hostWorkflowFaultInjector = null, resolveFeedbackEvidence = null, resolveActivationEvidence = null } = {}) {
   demand(typeof file === 'string' && path.isAbsolute(file), 'INVALID_PATH', 'Web SQLite 路径必须明确为绝对路径。');
   demand(desktopSnapshotToken === undefined || typeof desktopSnapshotToken === 'string' && desktopSnapshotToken.length >= 32 && desktopSnapshotToken.length <= 256,
     'INVALID_DESKTOP_TOKEN', '桌面工作区令牌配置无效。');
@@ -225,7 +225,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file); let closed = false;
-  const storage = { kind: 'sqlite', location: file, features:['capability-packet-v1','capability-feedback-v1','message-reference-scope-v1',...(resolveFeedbackEvidence?['capability-feedback-result-v1']:[])] };
+  const storage = { kind: 'sqlite', location: file, features:['capability-packet-v1','capability-feedback-v1','message-reference-scope-v1','activation-v1',...(resolveFeedbackEvidence?['capability-feedback-result-v1']:[]),...(resolveActivationEvidence?['activation-result-v1']:[])] };
   function transaction(fn) {
     db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); db.exec('COMMIT'); return result; }
@@ -349,7 +349,21 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
         demand(typeof resolveFeedbackEvidence==='function','FEEDBACK_RESULT_UNVERIFIED','当前宿主未连接受控运行库；不能声称已核验本机返回。',409);
         try{feedbackEvidence[op.id]=resolveFeedbackEvidence(op.value.context);}catch(cause){throw new WorkbenchError('FEEDBACK_SOURCE_UNAVAILABLE',String(cause.message||'原运行暂不可读，未提交反馈。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
       }
-      const next = applyProductOperations(current.host, body.operations,{feedbackEvidence});
+      const activationEvidence=Object.create(null),activationPlacements=Object.create(null);
+      for(const op of body.operations){
+        if(op.type==='activation.result'&&op.source.kind==='manual'&&typeof resolveActivationEvidence==='function'){
+          try{resolveActivationEvidence(op.id,op.source);}catch(cause){throw new WorkbenchError('ACTIVATION_RUNNING',String(cause.message||'原激活运行状态尚未允许保存人工结果。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
+        }
+        if(activationNeedsProof(op)){
+          demand(typeof resolveActivationEvidence==='function','ACTIVATION_RESULT_UNVERIFIED','当前宿主未连接受控运行库；不能导入已核验AI候选。',409);
+          try{activationEvidence[op.id]=resolveActivationEvidence(op.id,op.source);}catch(cause){throw new WorkbenchError('ACTIVATION_SOURCE_UNAVAILABLE',String(cause.message||'原激活运行不可读，未导入。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
+        }
+        if(op.type==='activation.place.confirm'){
+          const plan=current.host?.activations?.[op.id]?.placements?.[op.candidateId];
+          if(plan)activationPlacements[op.id+':'+op.candidateId]=canvasResources.getCanvas(plan.canvasId);
+        }
+      }
+      const next = applyProductOperations(current.host, body.operations,{feedbackEvidence,activationEvidence,activationPlacements});
       canvasResources.verifyResources(next,body.operations.flatMap(op=>op.type==='resource.register'?[op.resource.id]:op.type==='material.create'&&op.value.resourceId?[op.value.resourceId]:op.type==='capability.package.receive'?[op.packetResourceId,...op.manifest.resources.map(r=>r.id)]:op.type==='capability.package.export'?[op.packetResourceId]:[]));
       persist(normalizeHost(next), fingerprint, body.commandId, revision);
       return productResult(body.commandId, {request_sha256: fingerprint, committed_revision: revision + 1}, revision + 1);
@@ -629,6 +643,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
   return { file, handle,canvasResources,
     // Node composition seam only. No HTTP/IPC request can configure a resolver.
     configureFeedbackEvidenceResolver(resolver){demand(typeof resolver==='function','INVALID_FEEDBACK_RESOLVER','需要受控的本机运行来源读取器。');resolveFeedbackEvidence=resolver;if(!storage.features.includes('capability-feedback-result-v1'))storage.features.push('capability-feedback-result-v1');},
+    configureActivationEvidenceResolver(resolver){demand(typeof resolver==='function','INVALID_ACTIVATION_RESOLVER','需要受控的激活运行来源读取器。');resolveActivationEvidence=resolver;if(!storage.features.includes('activation-result-v1'))storage.features.push('activation-result-v1');},
     // User-level Codex host stream. These methods share the Product Workspace
     // SQLite handle but use independent append-only tables/revisions.
     hostSessions,

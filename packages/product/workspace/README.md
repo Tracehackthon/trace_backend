@@ -12,7 +12,7 @@ Trace Web 产品状态的权威 Module。它集中维护事项、原表达、理
 
 ### 内容schema 2与独立资源/布局（完整前端重做 W1，实施中）
 
-当前在途候选包为 `0.3.0-frontend.16`，固定包的采用与实际验收范围以唯一前端任务记录为准。已消费的版本不覆盖字节；本批修复15的派发恢复、模板后到资格及历史返回缺口，尚未端到端验收。早期1→2解决的画布文档/历史读取与原件等长损坏边界继续保留。
+当前在途候选包为 `0.3.0-frontend.17`，固定包的采用与实际验收范围以唯一前端任务记录为准。已消费的版本不覆盖字节；15的三项静态P2、16的流式接回/标题漂移两项静态P2均保留，17继续修复，尚未端到端验收。早期1→2解决的画布文档/历史读取与原件等长损坏边界继续保留。
 
 - `workbench-model.mjs`维护材料、独立用户表达、关系、能力正文版本、人工思考与任务准备的纯规则。布局中的`version:null`只跟随当前内容呈现；交给协作时必须冻结数字版本。
 - `canvas-model.mjs`维护独立布局revision、CAS和撤销；严格验证当前文档及历史。移动卡片不增加内容revision。`canvas-store.mjs`使用同一SQLite owner下的独立表、二进制资源目录与同源接口；不把原件塞入业务JSON。
@@ -146,7 +146,7 @@ The optional schema2 `activations` catalog freezes bounded seed/candidate/exclus
 
 frontend.14 keeps manual save/reject interpretations optional (including all-empty input) without auto-filling the original. Acceptance still requires an explicit complete interpretation. This fixes the independent real-UI SDK13 first failure; SDK13 stays immutable and is not a valid replacement for the corrected non-adoption contract.
 
-## Task input and native dispatch permission (frontend.16, implementation pending E2E)
+## Task input and native dispatch permission (frontend.17, implementation pending E2E)
 
 `taskInput(host, taskId)` is the shared bounded text-input projection. It retains exact references, exclusions, explicit instructions and an eligible, non-excluded template, but does not project dispatch records, input-version metadata or adopted results into a later call. The template is rechecked at each future use; an excluded template ref is not sent, while user-authored goal/plan prose is not silently removed. Existing immutable input/output archives are not rewritten. Numeric source versions remain fixed; unavailable/non-text-localized sources fail explicitly rather than expanding into originals.
 
@@ -155,3 +155,7 @@ frontend.14 keeps manual save/reject interpretations optional (including all-emp
 Native reservation precedes insertion into the Agent attempt ledger. The request binds an immutable run ID, exact input hash, canonical prepared-input hash, project, permission mode and `previousRunId` (null for a first reservation). A repeated request recovers that same reservation. A crash with no Agent row is unconfirmed permission, not execution: explicit resume uses the original reservation/project/mode and verifies its exact terminal parent, rather than returning an older attempt or using today's default project. Product15 records with no parent field remain readable but cannot be blindly requeued. Cancellation is allowed only after the actual Agent ledger proves the run was never created. Retry retains the prior reservation in history and requires the latest real attempt to be terminal. Old `task.execution` cannot coexist with a new dispatch. Missing native proof fails closed; Browser manual preparation remains available.
 
 The Agent owns queued/running/terminal status. A reservation is not a provider receipt. Source eligibility is checked before qualification, submission, tool use and any new adoption. A historical return instead checks its locked dispatch/input identity; later disablement does not erase an already delivered original. The native owner saves bounded raw text once before parsing, including invalid/cancelled returns, and exposes hash-bound read-only retrieval without implying success or adoption. This package does not implement protocol2 MCP receive/return yet, does not prove a real Codex host project, and does not qualify UI/browser E2E gates by compilation. Test/installation status is maintained only in the frontend replacement task.
+
+`readTaskInput` recovers the locked input from the original Product command's existing snapshot, verifies both hashes and the dispatch record, and rechecks current eligibility with `assertTaskInputUsable`. Only fragment display titles may differ during this comparison; task fields, roles, exact reference versions, local anchors and all fragment text must still match. A newer source title cannot alter the original input or invalidate an otherwise usable selected older version. Missing/corrupt snapshots fail explicitly, never rebuild an unconfirmed input from today's metadata.
+
+The native Runtime adapter must advertise `TASK_EXECUTION_GATES_VERSION=1`: `isCurrent` protects run ownership/stream reception, `canUseContext` separately guards new turns, tools and positive interaction responses. Its raw callback reports received full or partial text before cleanup even when execution throws. New Task execution fails before model submission with an older adapter; the package does not silently weaken tools to preserve output. Packaging that Runtime contract and actual transport/UI verification remain required gates.

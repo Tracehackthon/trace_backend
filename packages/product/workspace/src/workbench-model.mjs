@@ -208,6 +208,14 @@ export function taskInput(host,id,{forUse=true}={}) {
   if(!template)delete body.template;
   const input={task:body,fragments};need(new TextEncoder().encode(JSON.stringify(input)).length<=256*1024,'TASK_INPUT_TOO_LARGE','本次任务超过256 KiB，请缩小明确引用的范围。',413);return input;
 }
+// Entity titles are current presentation metadata, not a new version of an
+// already selected text fragment. Everything else still has to match exactly.
+export function assertTaskInputUsable(host,id,lockedInput) {
+  const current=taskInput(host,id),content=input=>({task:input.task,fragments:input.fragments.map(({title,...fragment})=>fragment)});
+  need(plainObject(lockedInput)&&Array.isArray(lockedInput.fragments),'TASK_INPUT_CHANGED','原任务输入不可核对，未扩大范围。',409);
+  need(stableWorkbenchJson(content(current))===stableWorkbenchJson(content(lockedInput)),'TASK_INPUT_CHANGED','任务或准确片段已变化，原输入保留但不继续使用。',409);
+  return true;
+}
 export function migrateWorkbench(previous) {
   if(previous?.schemaVersion===2)return validateWorkbench(structuredClone(previous));
   const host=emptyWorkbench();if(!previous)return host;

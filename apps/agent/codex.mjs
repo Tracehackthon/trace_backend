@@ -11,6 +11,9 @@ import { CODEX_APP_SERVER_PROTOCOL_PROFILE, validateCodexAppServerInstallation, 
 const INTERACTION_DECISIONS = Object.freeze(['accept', 'accept_for_session', 'decline', 'cancel']);
 const INTERACTION_TTL_MS = 120000;
 
+// Library contract: stream ownership and future context use are separate gates.
+export const TASK_EXECUTION_GATES_VERSION = 1;
+
 function safeInteractionText(value, max = 200) {
   if (typeof value !== 'string') return null;
   const compact = value.replace(/[\r\n\t]+/g, ' ').trim();
@@ -367,10 +370,10 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
             : { boundedPolicy: 'trace-bounded-v1' }) };
       } finally { await host.dispose(); }
     },
-    async execute({ request, context, signal, onEvent, isCurrent, retrieval, runId = null, profile = null }) {
+    async execute({ request, context, signal, onEvent, isCurrent, canUseContext = isCurrent, onRawOutput, retrieval, runId = null, profile = null }) {
       demand(nativeMode || request.threadId === undefined, 'CODEX_THREAD_NOT_ALLOWED', 'bounded-analysis 不恢复持久 Codex thread。', 400);
       const host = await open(signal), rpc = host.connection;
-      let threadId, turnId, completed = false, outputBytes = 0;
+      let threadId, turnId, completed = false, completedSuccessfully = false, outputBytes = 0;
       const texts = new Map(); let finish, fail;
       const interactions = new Map();
       const cleanupInteractions = (error = new AgentError('CODEX_DISCONNECTED', 'Codex 连接已断开。', 502)) => {
@@ -416,6 +419,8 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
       };
       const resolveInteraction = (interactionId, body) => {
         const entry = findInteraction(interactionId);
+        current();
+        if (body?.decision !== 'decline' && body?.decision !== 'cancel') eligible();
         const payload = responseForInteraction(entry.interaction, entry.params, body);
         interactions.delete(interactionId); clearTimeout(entry.timer);
         entry.interaction.state = 'resolved'; entry.interaction.recoverable = false;
@@ -434,7 +439,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
       const emit = (type, data = {}) => onEvent(type, nativeMode
         ? { ...data, threadId: data.threadId ?? threadId ?? null, turnId: data.turnId ?? turnId ?? null }
         : data);
-      const tools = createRunToolBridge({ context, retrieval, signal, isCurrent, onEvent: emit });
+      const tools = createRunToolBridge({ context, retrieval, signal, isCurrent: () => isCurrent() && canUseContext(), onEvent: emit });
       const sensemaking = request.purpose === 'sensemaking';
       const approvalMethods = new Set(['item/commandExecution/requestApproval', 'item/fileChange/requestApproval',
         'item/permissions/requestApproval', 'mcpServer/elicitation/request', 'applyPatchApproval', 'execCommandApproval']);
@@ -446,8 +451,9 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         if (!completed && threadId && turnId && !rpc.closed) rpc.send({ id: ++rpc.sequence, method: 'turn/interrupt', params: { threadId, turnId } });
       };
       const current = () => demand(!signal.aborted && isCurrent(), 'STALE_CONTEXT', '目标版本或上下文已变化。', 409);
+      const eligible = () => { current(); demand(canUseContext(), 'CONTEXT_USE_REVOKED', '来源不再允许新读取或调用；已收到的原始输出仍保留。', 409); };
       rpc.onRequest = async (method, params, rpcRequestId) => {
-        current();
+        eligible();
         if (sensemaking) throw new AgentError('TOOL_NOT_ALLOWED', 'sensemaking profile 不开放工具。', 403);
         if (nativeMode && (approvalMethods.has(method) || inputMethods.has(method))) {
           const registered = registerInteraction(method, params, rpcRequestId);
@@ -457,7 +463,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         demand(threadId && params.threadId === threadId && (!turnId || params.turnId === turnId) && !completed,
           'TOOL_SCOPE_MISMATCH', '工具调用的会话不匹配。', 403);
         const outcome = await tools.call(params.tool, params.arguments);
-        current();
+        eligible();
         return { contentItems: [{ type: 'inputText', text: JSON.stringify(outcome.result) }], success: outcome.success };
       };
       rpc.onNotification = (method, params) => {
@@ -488,7 +494,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
           throw new AgentError('RUNTIME_POLICY_VIOLATION', '运行时尝试使用本模式未开放的能力，执行已停止。', 502);
         }
         if (method === 'turn/completed') {
-          completed = true;
+          completed = true; completedSuccessfully = params.turn.status === 'completed';
           if (params.turn.status === 'completed') finish({ raw: [...texts.values()].at(-1) ?? '', threadId, turnId: params.turn.id,
             // Profile bindings identify the Codex app-server, not merely the
             // CLI semver.  Keep the legacy runtime identity for ordinary
@@ -511,7 +517,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
             'skills.config': skills.data.flatMap(e => e.skills).map(s => ({ path: s.path, enabled: false })),
           };
         }
-        current();
+        eligible();
         const instructions = sensemaking ? TRACE_SENSEMAKING_INSTRUCTIONS
           : nativeMode ? TRACE_NATIVE_CODEX_INSTRUCTIONS
           : retrieval?.tools.length ? TRACE_AGENT_RETRIEVAL_INSTRUCTIONS : TRACE_BOUNDED_ANALYSIS_INSTRUCTIONS;
@@ -540,7 +546,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
           threadId = started.thread.id;
           emit('runtime.connected', { threadId, runtimeVersion: host.version, model: started.model, mode, resumed: false });
         }
-        current();
+        eligible();
         const manifest = contextManifest(context);
         const turn = await rpc.rpc('turn/start', { threadId, effort: 'medium',
           input: [{ type: 'text', text: JSON.stringify({ purpose: request.purpose, input: request.input, context: manifest }), text_elements: [] }],
@@ -549,6 +555,11 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         turnId ??= turn.turn.id;
         return await done;
       } finally {
+        // Report received bytes even when a cancelled/failed turn has no normal
+        // outcome. This callback is not a success or adoption receipt.
+        let captureError;
+        try { if (texts.size || completedSuccessfully) onRawOutput?.({ raw: [...texts.values()].at(-1) ?? '', complete: completedSuccessfully }); }
+        catch (error) { captureError = error; }
         if (!completed && threadId && turnId && !rpc.closed) {
           // Attempt the narrow interrupt first; disposal also terminates our own process.
           rpc.send({ id: ++rpc.sequence, method: 'turn/interrupt', params: { threadId, turnId } });
@@ -556,6 +567,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         cleanupInteractions(new AgentError('CODEX_DISCONNECTED', 'Codex 连接已关闭；未完成的交互不会自动恢复。', 502));
         if (activeControls.get(runId) === control) activeControls.delete(runId);
         await host.dispose();
+        if (captureError) throw captureError;
       }
     },
     inspectInteraction(runId, interactionId) {

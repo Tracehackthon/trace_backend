@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { applyProductOperations, validateProductCommand, ProductCommandError } from './commands.mjs';
-import {validateWorkbench,WorkbenchError,capabilityFeedbackNeedsProof,activationNeedsProof,taskInput} from './workbench-model.mjs';
+import {validateWorkbench,WorkbenchError,capabilityFeedbackNeedsProof,activationNeedsProof,taskInput,assertTaskInputUsable} from './workbench-model.mjs';
 import {CANVAS_TABLES,ensureCanvasSchema,createCanvasResourceStore} from './canvas-store.mjs';
 import {
   CodexBridgeError,
@@ -371,7 +371,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
         demand(nativeDispatch&&typeof resolveTaskDispatchEvidence==='function','TASK_DISPATCH_UNVERIFIED','页面不能创建执行许可；需要受控本机运行库。',409);
         let proof;try{proof=resolveTaskDispatchEvidence({phase:op.type==='task.dispatch.cancel'?'cancel':'reserve',taskId:op.taskId,runId:op.runId||current.host.tasks[op.taskId]?.dispatch?.runId,previousRunId:op.previousRunId??null});}catch(cause){throw new WorkbenchError('TASK_DISPATCH_UNCONFIRMED',String(cause.message||'原任务执行占用尚未核验。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
         if(op.type==='task.dispatch.reserve'){
-          const payload=taskInput(current.host,op.taskId);
+          const payload=preparedTaskInput(current.host,op.taskId);
           demand(sha(JSON.stringify(payload))===op.inputHash&&sha(stableJson(payload))===op.preparedInputHash,'TASK_INPUT_CHANGED','实际任务输入已变化，未创建运行。',409);
         }
         taskDispatchEvidence[op.taskId]={...proof,source:'native-owner',inputHash:op.inputHash,preparedInputHash:op.preparedInputHash};
@@ -388,11 +388,22 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     demand(known?.request_sha256.startsWith('product-v1:'),'STORAGE_CORRUPT','原派发回执缺失，未重复提交。',503);
     return {dispatch:structuredClone(dispatch),receipt:productResult(dispatch.commandId,known,currentRevision()).receipt};
   }
+  function preparedTaskInput(host,taskId){
+    const claim=host?.tasks?.[taskId]?.dispatch;
+    if(!claim)return taskInput(host,taskId);
+    const known=db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(claim.commandId);
+    demand(known?.request_sha256.startsWith('product-v1:'),'STORAGE_CORRUPT','原派发输入快照缺失，未使用今天的标题重建。',503);
+    const original=readSnapshot(known.committed_revision).host,lockedClaim=original?.tasks?.[taskId]?.dispatch;
+    demand(stableJson(lockedClaim)===stableJson(claim),'TASK_DISPATCH_CONFLICT','原派发快照身份不一致，未使用其它输入。',409);
+    const locked=taskInput(original,taskId,{forUse:false});
+    demand(sha(JSON.stringify(locked))===claim.inputHash&&sha(stableJson(locked))===claim.preparedInputHash,'STORAGE_CORRUPT','原派发输入完整性不一致。',503);
+    assertTaskInputUsable(host,taskId,locked);return locked;
+  }
   function reserveNativeDispatch({taskId,requestId,runId,payload,projectDir,mode,previousRunId=null}){
     demand(identity(taskId)&&identity(requestId)&&identity(runId)&&['read-only','workspace-write'].includes(mode),'INVALID_TASK_DISPATCH','任务派发身份或权限无效。',400);
     const project=resolveCodexProjectDir(projectDir);
     return transaction(()=>{
-      const revision=currentRevision(),host=readSnapshot(revision).host,task=host?.tasks?.[taskId],input=taskInput(host,taskId);
+      const revision=currentRevision(),host=readSnapshot(revision).host,task=host?.tasks?.[taskId],input=preparedTaskInput(host,taskId);
       demand(stableJson(input)===stableJson(payload),'TASK_INPUT_CHANGED','任务或引用已变化，请重新核对实际输入。',409);
       const inputHash=sha(JSON.stringify(input)),preparedInputHash=sha(stableJson(input));
       if(task.dispatch?.requestId===requestId){
@@ -694,6 +705,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     configureTaskDispatchResolver(resolver){demand(typeof resolver==='function','INVALID_TASK_DISPATCH_RESOLVER','需要受控的本机运行库读取器。');resolveTaskDispatchEvidence=resolver;if(!storage.features.includes('task-dispatch-v1'))storage.features.push('task-dispatch-v1');},
     reserveNativeDispatch(input){demand(!closed,'STORE_CLOSED','工作区存储已关闭。',503);return reserveNativeDispatch(input);},
     cancelNativeDispatch(input){demand(!closed,'STORE_CLOSED','工作区存储已关闭。',503);return cancelNativeDispatch(input);},
+    readTaskInput(taskId){demand(!closed,'STORE_CLOSED','工作区存储已关闭。',503);return preparedTaskInput(readSnapshot(currentRevision()).host,taskId);},
     // User-level Codex host stream. These methods share the Product Workspace
     // SQLite handle but use independent append-only tables/revisions.
     hostSessions,

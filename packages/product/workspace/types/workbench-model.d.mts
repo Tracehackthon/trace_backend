@@ -160,6 +160,7 @@ export declare function taskInput(host: any, id: any, { forUse }?: {
     };
     fragments: any[];
 };
+export declare function assertTaskInputUsable(host: any, id: any, lockedInput: any): boolean;
 export declare function migrateWorkbench(previous: any): any;
 export declare function projectLegacyWorkbench(host: any): any;
 export declare function validateWorkbench(host: any): any;

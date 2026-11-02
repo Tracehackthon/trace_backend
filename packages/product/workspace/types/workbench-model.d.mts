@@ -152,12 +152,21 @@ export declare function resolveContentRef(host: any, ref: any, { forUse }?: {
     item: any;
     value: any;
 };
+export declare function taskInput(host: any, id: any, { forUse }?: {
+    forUse?: boolean;
+}): {
+    task: {
+        [k: string]: any;
+    };
+    fragments: any[];
+};
 export declare function migrateWorkbench(previous: any): any;
 export declare function projectLegacyWorkbench(host: any): any;
 export declare function validateWorkbench(host: any): any;
-export declare function applyWorkbenchOperations(previous: any, ops: any, { feedbackEvidence, activationEvidence, activationPlacements }?: {
+export declare function applyWorkbenchOperations(previous: any, ops: any, { feedbackEvidence, activationEvidence, activationPlacements, taskDispatchEvidence }?: {
     activationEvidence?: {};
     activationPlacements?: {};
     feedbackEvidence?: {};
+    taskDispatchEvidence?: {};
 }): any;
 export {};

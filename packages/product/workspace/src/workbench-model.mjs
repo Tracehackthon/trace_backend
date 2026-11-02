@@ -1,3 +1,4 @@
+import {createTaskDispatchRules} from './task-dispatch-rules.mjs';
 import {createCapabilityFeedbackRules} from './capability-feedback-rules.mjs';
 import {createCapabilityPacketRules} from './capability-packet-rules.mjs';
 import {createActivationRules} from './activation-rules.mjs';
@@ -111,8 +112,10 @@ export const validActivationCandidate=activations.candidate;
 export const validActivationExplanation=activations.explanation;
 export const verifyActivationLayout=activations.verifyLayout;
 export const parseActivationOutput=activations.parseOutput;
+const taskDispatch=createTaskDispatchRules({need,strictObject,identity,integer,one,optional,list});
 const catalogs = ['resources','materials','expressions','relations','capabilities','sessions','tasks'];
 const operations = {
+  ...taskDispatch.operations,
   ...activations.operations,
   'workspace.upgrade': {},
   'workbench.preferences': {displayName:x=>text(x)&&x.length<=200,reduceMotion:x=>typeof x==='boolean'},
@@ -184,6 +187,24 @@ export function resolveContentRef(host,ref,{forUse=false}={}) {
 function checkRefs(host,items,forUse=false){for(const ref of items)resolveContentRef(host,ref,{forUse});}
 function checkInstructions(host,items,forUse=false){for(const ref of items){const {value}=resolveContentRef(host,ref,{forUse});need(ref.kind==='capability'&&value.usage==='instruction'&&value.prompt?.trim(),'INVALID_INSTRUCTION','指令需引用有正文的准确能力库指令版本。');}}
 function checkTemplate(host,ref,forUse=false){const {value}=resolveContentRef(host,ref,{forUse});need(ref.kind==='capability'&&value.usage!=='instruction','INVALID_TEMPLATE','模板必须来自能力库的方法或模板版本。');}
+// Only prepared input belongs in a task context. Dispatch receipts and adopted
+// results must not change its hash or enter the next model call implicitly.
+export function taskInput(host,id,{forUse=true}={}) {
+  const task=host?.tasks?.[id];need(task&&task.status==='prepared'&&task.goal.trim()&&!task.execution,'TASK_UNAVAILABLE','任务已取消或绑定其它执行；未扩大范围或重复提交。',409);
+  validateMessageScope(host,{refs:task.refs,excluded:task.excluded,historyIds:[]},{messages:[]},0,{forUse});
+  checkInstructions(host,effectiveContentReferences(task.instructions||[],task.excluded),forUse);
+  const fragments=[];
+  for(const [role,items]of [['reference',task.refs],['instruction',task.instructions||[]]])for(const ref of effectiveContentReferences(items,task.excluded)){
+    const {item,value}=resolveContentRef(host,ref,{forUse});let text=role==='instruction'?value.prompt:ref.kind==='capability'?JSON.stringify(value):value.text;
+    need(!ref.anchor||ref.anchor.type==='text','TASK_MEDIA_NOT_READABLE','当前文本执行器不能读取该媒体局部；未扩大成整份材料，请先明确摘取文字。',409);
+    if(ref.anchor?.type==='text')text=text.slice(ref.anchor.start,ref.anchor.end);
+    need(typeof text==='string'&&text.trim(),'TASK_FRAGMENT_UNAVAILABLE','所选材料没有文字摘录；未自动上传原件。',409);
+    fragments.push({id:`${role}:${fragments.length+1}`,role,revision:ref.version,text,title:item.title,ref:structuredClone(ref)});
+  }
+  const inputFields=new Set(['id','title','goal','refs','excluded','destination','instructions','plan','template','status','results']);
+  const body=Object.fromEntries(Object.entries(structuredClone(task)).filter(([key])=>inputFields.has(key)));body.results=[];
+  const input={task:body,fragments};need(new TextEncoder().encode(JSON.stringify(input)).length<=256*1024,'TASK_INPUT_TOO_LARGE','本次任务超过256 KiB，请缩小明确引用的范围。',413);return input;
+}
 export function migrateWorkbench(previous) {
   if(previous?.schemaVersion===2)return validateWorkbench(structuredClone(previous));
   const host=emptyWorkbench();if(!previous)return host;
@@ -234,7 +255,7 @@ export function validateWorkbench(host) {
     for(const value of [...(relation.history||[]),relation]){need(value.version>previous&&value.version<=relation.version,'INVALID_RELATION','关系历史版本次序不正确。');previous=value.version;checkRefs(host,[value.from,value.to,...(value.sources||[])]);}
   }
   for(const [id,s]of Object.entries(host.sessions)){need(strictObject(s,{id:identity,title:text,refs,excluded:refs,instructions:optional(instructionRefs),messages:list(m=>strictObject(m,{id:identity,text,author:one('user'),instructions:optional(instructionRefs),template:optional(validContentRef),scope:optional(validMessageScope)})),status:one('manual')})&&s.id===id&&new Set(s.messages.map(m=>m.id)).size===s.messages.length,'INVALID_SESSION','讨论结构不正确。');checkRefs(host,s.refs);checkRefs(host,s.excluded);checkInstructions(host,s.instructions||[]);for(const [index,m]of s.messages.entries()){if(m.scope)validateMessageScope(host,m.scope,s,index);checkInstructions(host,m.instructions||[]);if(m.template)checkTemplate(host,m.template);}}
-  for(const [id,t]of Object.entries(host.tasks)){need(strictObject(t,{id:identity,title:text,goal:text,refs,excluded:refs,destination:text,instructions:optional(instructionRefs),plan:optional(stepItems),template:optional(validContentRef),execution:optional(executionRef),status:one('prepared','cancelled'),results:x=>list(adoptedResult,256)(x)&&new Set(x.map(r=>r.runId)).size===x.length})&&t.id===id,'INVALID_TASK','任务结构不正确；未验证执行结果不能写成已返回。');checkRefs(host,t.refs);checkRefs(host,t.excluded);checkRefs(host,t.results.map(r=>r.ref));checkInstructions(host,t.instructions||[]);if(t.template)checkTemplate(host,t.template);}
+  for(const [id,t]of Object.entries(host.tasks)){need(strictObject(t,{id:identity,title:text,goal:text,refs,excluded:refs,destination:text,instructions:optional(instructionRefs),plan:optional(stepItems),template:optional(validContentRef),execution:optional(executionRef),status:one('prepared','cancelled'),preparedInputVersion:optional(one(1)),dispatch:optional(taskDispatch.record),dispatchHistory:optional(taskDispatch.history),results:x=>list(adoptedResult,256)(x)&&new Set(x.map(r=>r.runId)).size===x.length})&&t.id===id&&taskDispatch.state(t),'INVALID_TASK','任务结构不正确；未验证执行结果不能写成已返回。');checkRefs(host,t.refs);checkRefs(host,t.excluded);checkRefs(host,t.results.map(r=>r.ref));checkInstructions(host,t.instructions||[]);if(t.template)checkTemplate(host,t.template);}
   need(strictObject(host.migration,{version:one(1),matterRefs:plainObject,sourceRefs:plainObject}),'INVALID_MIGRATION','迁移映射不完整。');
   if(host.legacy){need(host.legacy.schemaVersion===1&&Array.isArray(host.legacy.chain?.matters)&&Array.isArray(host.legacy.chain?.sources),'INVALID_MIGRATION','旧恢复结构无效。');for(const m of host.legacy.chain.matters){need(!Object.hasOwn(m,'understanding')&&!Object.hasOwn(m,'originalText'),'DUPLICATE_CONTENT_OWNER','旧对象不能另存当前正文。');const map=host.migration.matterRefs[m.id];need(map&&map.legacyId===m.id,'INVALID_MIGRATION','事项迁移映射缺失。');resolveContentRef(host,map.original);need(host.expressions[map.understanding?.id],'INVALID_MIGRATION','理解迁移映射缺失。');}for(const s of host.legacy.chain.sources){need(!Object.hasOwn(s,'excerpt'),'DUPLICATE_CONTENT_OWNER','旧来源不能另存摘录正文。');resolveContentRef(host,host.migration.sourceRefs[s.id]);}}
   feedbacks.validate(host);
@@ -242,11 +263,12 @@ export function validateWorkbench(host) {
   need(catalogs.reduce((count,key)=>count+Object.keys(host[key]).length,0)+Object.keys(host.feedbacks||{}).length+Object.keys(host.activations||{}).length<=10000,'CONTENT_TOO_COMPLEX','内容对象数量超过当前边界。');
   return host;
 }
-export function applyWorkbenchOperations(previous,ops,{feedbackEvidence={},activationEvidence={},activationPlacements={}}={}) {
+export function applyWorkbenchOperations(previous,ops,{feedbackEvidence={},activationEvidence={},activationPlacements={},taskDispatchEvidence={}}={}) {
   need(Array.isArray(ops)&&ops.length>0&&ops.length<=256,'INVALID_WORKBENCH_COMMAND','需要明确的内容动作。',400);ops.forEach(validateWorkbenchOperation);
   let host=previous?.schemaVersion===2?validateWorkbench(structuredClone(previous)):migrateWorkbench(previous);
   host.feedbacks??={};
   for(const op of ops){
+    if(Object.hasOwn(taskDispatch.operations,op.type)){taskDispatch.apply(host,op,taskDispatchEvidence);continue;}
     if(Object.hasOwn(activations.operations,op.type)){activations.apply(host,op,{add,assertVersion,proofs:activationEvidence,placements:activationPlacements});continue;}
     switch(op.type){
       case 'workspace.upgrade':break;
@@ -268,10 +290,10 @@ export function applyWorkbenchOperations(previous,ops,{feedbackEvidence={},activ
       case 'thinking.create':checkRefs(host,op.refs,true);checkRefs(host,op.excluded);need(!op.refs.some(r=>op.excluded.some(e=>stableWorkbenchJson(r)===stableWorkbenchJson(e))),'REFERENCE_CONFLICT','同一引用不能同时包含和排除。');add(host,'sessions',op.id,{id:op.id,title:op.title,refs:structuredClone(op.refs),excluded:structuredClone(op.excluded),messages:[],status:'manual'});break;
       case 'thinking.instructions': {const session=host.sessions[op.id];need(session,'CONTENT_NOT_FOUND','讨论不存在。',404);checkInstructions(host,op.instructions,true);session.instructions=structuredClone(op.instructions);break;}
       case 'thinking.message': {const s=host.sessions[op.id];need(s,'CONTENT_NOT_FOUND','讨论不存在。',404);need(op.text.trim(),'EMPTY_MESSAGE','请先写下内容。');need(!s.messages.some(m=>m.id===op.messageId),'DUPLICATE_CONTENT','消息身份已存在。',409);const scope=structuredClone(op.scope||{refs:s.refs,excluded:s.excluded,historyIds:[]});validateMessageScope(host,scope,s,s.messages.length,{forUse:true});checkInstructions(host,effectiveContentReferences(s.instructions||[],scope.excluded),true);if(op.template)checkTemplate(host,op.template,!scope.excluded.some(e=>contentReferencesOverlap(e,op.template)));s.messages.push({id:op.messageId,text:op.text,author:'user',instructions:structuredClone(s.instructions||[]),scope,...(op.template?{template:structuredClone(op.template)}:{})});break;}
-      case 'task.prepare':validateMessageScope(host,{refs:op.refs,excluded:op.excluded,historyIds:[]},{messages:[]},0,{forUse:true});checkInstructions(host,effectiveContentReferences(op.instructions||[],op.excluded),true);if(op.template)checkTemplate(host,op.template,!op.excluded.some(e=>contentReferencesOverlap(e,op.template)));add(host,'tasks',op.id,{id:op.id,title:op.title,goal:op.goal,refs:structuredClone(op.refs),excluded:structuredClone(op.excluded),destination:op.destination,status:'prepared',results:[],...(op.instructions?{instructions:structuredClone(op.instructions)}:{}),...(op.plan?{plan:structuredClone(op.plan)}:{}),...(op.template?{template:structuredClone(op.template)}:{})});break;
-      case 'task.execution': {const task=host.tasks[op.id];need(task,'CONTENT_NOT_FOUND','任务不存在。',404);if(op.execution===null)delete task.execution;else task.execution=structuredClone(op.execution);break;}
+      case 'task.prepare':validateMessageScope(host,{refs:op.refs,excluded:op.excluded,historyIds:[]},{messages:[]},0,{forUse:true});checkInstructions(host,effectiveContentReferences(op.instructions||[],op.excluded),true);if(op.template)checkTemplate(host,op.template,!op.excluded.some(e=>contentReferencesOverlap(e,op.template)));add(host,'tasks',op.id,{id:op.id,title:op.title,goal:op.goal,refs:structuredClone(op.refs),excluded:structuredClone(op.excluded),destination:op.destination,status:'prepared',preparedInputVersion:1,results:[],...(op.instructions?{instructions:structuredClone(op.instructions)}:{}),...(op.plan?{plan:structuredClone(op.plan)}:{}),...(op.template?{template:structuredClone(op.template)}:{})});break;
+      case 'task.execution': {const task=host.tasks[op.id];need(task,'CONTENT_NOT_FOUND','任务不存在。',404);if(op.execution===null)delete task.execution;else{need(!task.dispatch,'TASK_DISPATCH_CONFLICT','任务已有派发归属，未绑定第二个执行。',409);task.execution=structuredClone(op.execution)};break;}
       case 'task.result.adopt': {const task=host.tasks[op.id];need(task&&task.status==='prepared'&&!task.execution,'INVALID_TRANSITION','只有当前原生任务的结果可以明确采用。');need(!task.results.some(r=>r.runId===op.result.runId),'DUPLICATE_RESULT','这次运行已经采用，不重复写回。',409);checkRefs(host,[op.result.ref]);task.results.push(structuredClone(op.result));break;}
-      case 'task.cancel': {const task=host.tasks[op.id];need(task&&task.status==='prepared','INVALID_TRANSITION','只能取消尚未交接的准备。');task.status='cancelled';break;}
+      case 'task.cancel': {const task=host.tasks[op.id];need(task&&task.status==='prepared'&&!task.execution&&!task.dispatch,'INVALID_TRANSITION','只能取消尚未派发的准备；已有派发须核对原运行或明确取消未开始的原派发。');task.status='cancelled';break;}
     }
   }
   return validateWorkbench(host);

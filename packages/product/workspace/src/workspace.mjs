@@ -391,10 +391,11 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
   function preparedTaskInput(host,taskId){
     const claim=host?.tasks?.[taskId]?.dispatch;
     if(!claim)return taskInput(host,taskId);
-    const known=db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(claim.commandId);
+    const inputCommandId=claim.inputCommandId||claim.commandId;
+    const known=db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(inputCommandId);
     demand(known?.request_sha256.startsWith('product-v1:'),'STORAGE_CORRUPT','原派发输入快照缺失，未使用今天的标题重建。',503);
     const original=readSnapshot(known.committed_revision).host,lockedClaim=original?.tasks?.[taskId]?.dispatch;
-    demand(stableJson(lockedClaim)===stableJson(claim),'TASK_DISPATCH_CONFLICT','原派发快照身份不一致，未使用其它输入。',409);
+    demand(lockedClaim?.commandId===inputCommandId&&(lockedClaim.inputCommandId||lockedClaim.commandId)===inputCommandId&&lockedClaim.inputVersion===claim.inputVersion&&lockedClaim.inputHash===claim.inputHash&&lockedClaim.preparedInputHash===claim.preparedInputHash,'TASK_DISPATCH_CONFLICT','原输入命令、任务或指纹身份不一致，未使用其它输入。',409);
     const locked=taskInput(original,taskId,{forUse:false});
     demand(sha(JSON.stringify(locked))===claim.inputHash&&sha(stableJson(locked))===claim.preparedInputHash,'STORAGE_CORRUPT','原派发输入完整性不一致。',503);
     assertTaskInputUsable(host,taskId,locked);return locked;
@@ -412,7 +413,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       }
       demand(!task.dispatchHistory?.some(d=>d.requestId===requestId),'TASK_DISPATCH_SUPERSEDED','旧派发已有后续运行，只可核对原回执，不重新排队。',409);
       const id='dispatch-'+sha(taskId+'\0'+requestId).slice(0,56),at=new Date().toISOString();
-      const op={type:'task.dispatch.reserve',taskId,id,commandId:id,source:'native',requestId,runId,inputVersion:1,inputHash,preparedInputHash,projectDir:project.projectDir,projectIdentity:project.projectIdentity,mode,previousRunId,at};
+      const op={type:'task.dispatch.reserve',taskId,id,commandId:id,inputCommandId:task.dispatch?.inputCommandId||task.dispatch?.commandId||id,source:'native',requestId,runId,inputVersion:1,inputHash,preparedInputHash,projectDir:project.projectDir,projectIdentity:project.projectIdentity,mode,previousRunId,at};
       executeProduct({protocolVersion:1,commandId:id,expectedRevision:revision,operations:[op]},{nativeDispatch:true,withinTransaction:true});
       return nativeDispatchReceipt(task,readSnapshot(currentRevision()).host.tasks[taskId].dispatch);
     });

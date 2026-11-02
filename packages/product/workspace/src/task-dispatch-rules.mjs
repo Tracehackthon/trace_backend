@@ -8,10 +8,10 @@ export function createTaskDispatchRules({need,strictObject,identity,integer,one,
   const parent=x=>x===null||identity(x);
   // Product15 omitted this field. It remains readable, but a missing parent is
   // not enough evidence to resume a reservation without its Agent row.
-  const record=x=>strictObject(x,{...fields,previousRunId:optional(parent),cancelledAt:optional(time)});
+  const record=x=>strictObject(x,{...fields,inputCommandId:optional(identity),previousRunId:optional(parent),cancelledAt:optional(time)});
   const history=x=>list(record,256)(x)&&new Set(x.map(r=>r.id)).size===x.length;
   const operations={
-    'task.dispatch.reserve':{taskId:identity,...fields,previousRunId:parent},
+    'task.dispatch.reserve':{taskId:identity,...fields,inputCommandId:identity,previousRunId:parent},
     'task.dispatch.cancel':{taskId:identity,dispatchId:identity,at:time},
   };
   const state=task=>{const all=[...(task.dispatchHistory||[]),...(task.dispatch?[task.dispatch]:[])];return new Set(all.map(d=>d.id)).size===all.length&&new Set(all.map(d=>d.requestId)).size===all.length&&new Set(all.map(d=>d.runId)).size===all.length&&(!task.dispatchHistory?.length||Boolean(task.dispatch))&&(!task.dispatch||task.preparedInputVersion===1&&Boolean(task.dispatch.cancelledAt)===(task.status==='cancelled'));};
@@ -24,6 +24,7 @@ export function createTaskDispatchRules({need,strictObject,identity,integer,one,
       task.dispatch.cancelledAt=op.at;task.status='cancelled';return;
     }
     need(proof.inputHash===op.inputHash&&proof.preparedInputHash===op.preparedInputHash,'TASK_INPUT_CHANGED','实际输入与原派发不一致，未创建运行。',409);
+    need(op.inputCommandId===(task.dispatch?.inputCommandId||task.dispatch?.commandId||op.commandId),'TASK_INPUT_CHANGED','重试必须沿用原输入快照，不能改用本次派发的当前内容。',409);
     need(!task.dispatch||!task.dispatch.cancelledAt&&task.dispatch.source==='native'&&task.dispatch.runId===op.previousRunId&&proof.previousTerminal===true,'TASK_DISPATCH_CONFLICT','任务已有派发归属，先核对原运行，不会抢占或重复提交。',409);
     need(!task.dispatchHistory?.some(d=>d.id===op.id||d.requestId===op.requestId||d.runId===op.runId)&&task.dispatch?.id!==op.id,'TASK_DISPATCH_CONFLICT','原派发身份应恢复原回执，不能创建第二次派发。',409);
     if(task.dispatch)task.dispatchHistory=[...(task.dispatchHistory||[]),structuredClone(task.dispatch)];

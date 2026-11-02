@@ -25,6 +25,7 @@ export declare function createTaskDispatchRules({ need, strictObject, identity, 
             mode: any;
             at: (x: any) => boolean;
             taskId: any;
+            inputCommandId: any;
             previousRunId: (x: any) => any;
         };
         'task.dispatch.cancel': {

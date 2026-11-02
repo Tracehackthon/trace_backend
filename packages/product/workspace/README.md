@@ -12,12 +12,12 @@ Trace Web 产品状态的权威 Module。它集中维护事项、原表达、理
 
 ### 内容schema 2与独立资源/布局（完整前端重做 W1，实施中）
 
-当前候选包为 `0.3.0-frontend.2`。`frontend.1`已消费并冻结；本次因实际核查发现画布文档/历史读取验证与原件等长损坏验证缺口，提升新版本，不覆盖旧包字节。
+当前在途候选包为 `0.3.0-frontend.16`，固定包的采用与实际验收范围以唯一前端任务记录为准。已消费的版本不覆盖字节；本批修复15的派发恢复、模板后到资格及历史返回缺口，尚未端到端验收。早期1→2解决的画布文档/历史读取与原件等长损坏边界继续保留。
 
 - `workbench-model.mjs`维护材料、独立用户表达、关系、能力正文版本、人工思考与任务准备的纯规则。布局中的`version:null`只跟随当前内容呈现；交给协作时必须冻结数字版本。
 - `canvas-model.mjs`维护独立布局revision、CAS和撤销；严格验证当前文档及历史。移动卡片不增加内容revision。`canvas-store.mjs`使用同一SQLite owner下的独立表、二进制资源目录与同源接口；不把原件塞入业务JSON。
 - 旧schema 1的正文/ID/草稿可在测试副本中显式迁入2；旧动作不得通过whole-host覆盖2。旧Codex/Agent/深链mutation适配尚未完成，因此个人已有数据的UI转换仍关闭；不是宣称正式迁移完成。
-- 能力发布仅代表个人库的固定正文版本；当前未接完整定向包/反馈/试用证据。人工讨论/准备记录不代表真实Agent执行；外部Skill文件仍由既有Publisher拥有。
+- 能力发布仅代表个人库的固定正文版本；明确版本包及反馈已分范围接入，完整分享/试用/反馈业务仍以任务的欠项和证据限定。人工讨论/准备记录不代表真实Agent执行；外部Skill文件仍由既有Publisher拥有。
 
 ### 旧schema 1固定包的兼容来源
 
@@ -146,12 +146,12 @@ The optional schema2 `activations` catalog freezes bounded seed/candidate/exclus
 
 frontend.14 keeps manual save/reject interpretations optional (including all-empty input) without auto-filling the original. Acceptance still requires an explicit complete interpretation. This fixes the independent real-UI SDK13 first failure; SDK13 stays immutable and is not a valid replacement for the corrected non-adoption contract.
 
-## Task input and native dispatch permission (frontend.15, implementation pending E2E)
+## Task input and native dispatch permission (frontend.16, implementation pending E2E)
 
-`taskInput(host, taskId)` is the shared bounded text-input projection. It retains exact references, exclusions and explicit instructions, but does not project dispatch records, input-version metadata or adopted results into a later call. Existing immutable input/output archives are not rewritten. Numeric source versions remain fixed; unavailable/non-text-localized sources fail explicitly rather than expanding into originals.
+`taskInput(host, taskId)` is the shared bounded text-input projection. It retains exact references, exclusions, explicit instructions and an eligible, non-excluded template, but does not project dispatch records, input-version metadata or adopted results into a later call. The template is rechecked at each future use; an excluded template ref is not sent, while user-authored goal/plan prose is not silently removed. Existing immutable input/output archives are not rewritten. Numeric source versions remain fixed; unavailable/non-text-localized sources fail explicitly rather than expanding into originals.
 
 `Task.preparedInputVersion` is optional for old schema2 records. Native dispatch metadata belongs to the same Task, not a new task store or provider-status database. Only the trusted Node composition seam `reserveNativeDispatch` can prove a native reservation under the Product transaction. Ordinary renderer Product commands cannot supply this proof. The selected existing project is canonicalized by Node; no renderer-provided checked flag or file read authority is accepted.
 
-Native reservation precedes insertion into the Agent attempt ledger. The request binds an immutable run ID, exact input hash, canonical prepared-input hash, project and permission mode. A repeated request recovers that same reservation. A crash with no Agent row is unconfirmed permission, not execution: the UI may explicitly resume the original request or cancel only after the actual Agent ledger proves the run was never created. Retry retains the prior reservation in history and requires the latest real attempt to be terminal. Old `task.execution` cannot coexist with a new dispatch. Missing native proof fails closed; Browser manual preparation remains available.
+Native reservation precedes insertion into the Agent attempt ledger. The request binds an immutable run ID, exact input hash, canonical prepared-input hash, project, permission mode and `previousRunId` (null for a first reservation). A repeated request recovers that same reservation. A crash with no Agent row is unconfirmed permission, not execution: explicit resume uses the original reservation/project/mode and verifies its exact terminal parent, rather than returning an older attempt or using today's default project. Product15 records with no parent field remain readable but cannot be blindly requeued. Cancellation is allowed only after the actual Agent ledger proves the run was never created. Retry retains the prior reservation in history and requires the latest real attempt to be terminal. Old `task.execution` cannot coexist with a new dispatch. Missing native proof fails closed; Browser manual preparation remains available.
 
-The Agent owns queued/running/terminal status. A reservation is not a provider receipt. Source eligibility and Task dispatch identity are checked before qualification, submission, tool use and final acceptance. This package does not implement protocol2 MCP receive/return yet, does not prove a real Codex host project, and does not qualify UI/browser E2E gates by compilation. Test/installation status is maintained only in the frontend replacement task.
+The Agent owns queued/running/terminal status. A reservation is not a provider receipt. Source eligibility is checked before qualification, submission, tool use and any new adoption. A historical return instead checks its locked dispatch/input identity; later disablement does not erase an already delivered original. The native owner saves bounded raw text once before parsing, including invalid/cancelled returns, and exposes hash-bound read-only retrieval without implying success or adoption. This package does not implement protocol2 MCP receive/return yet, does not prove a real Codex host project, and does not qualify UI/browser E2E gates by compilation. Test/installation status is maintained only in the frontend replacement task.

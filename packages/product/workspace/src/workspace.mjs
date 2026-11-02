@@ -396,7 +396,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       demand(stableJson(input)===stableJson(payload),'TASK_INPUT_CHANGED','任务或引用已变化，请重新核对实际输入。',409);
       const inputHash=sha(JSON.stringify(input)),preparedInputHash=sha(stableJson(input));
       if(task.dispatch?.requestId===requestId){
-        const old=task.dispatch;demand(!old.cancelledAt&&old.source==='native'&&old.inputHash===inputHash&&old.preparedInputHash===preparedInputHash&&old.projectIdentity===project.projectIdentity&&old.mode===mode,'TASK_DISPATCH_CONFLICT','同一派发请求的输入、项目或权限已变化，原回执保留。',409);
+        const old=task.dispatch;demand(!old.cancelledAt&&old.source==='native'&&old.inputHash===inputHash&&old.preparedInputHash===preparedInputHash&&old.projectIdentity===project.projectIdentity&&old.mode===mode&&(old.previousRunId===undefined||old.previousRunId===previousRunId),'TASK_DISPATCH_CONFLICT','同一派发请求的输入、项目、权限或上次运行已变化，原回执保留。',409);
         return nativeDispatchReceipt(task,old);
       }
       demand(!task.dispatchHistory?.some(d=>d.requestId===requestId),'TASK_DISPATCH_SUPERSEDED','旧派发已有后续运行，只可核对原回执，不重新排队。',409);

@@ -193,6 +193,8 @@ export function taskInput(host,id,{forUse=true}={}) {
   const task=host?.tasks?.[id];need(task&&task.status==='prepared'&&task.goal.trim()&&!task.execution,'TASK_UNAVAILABLE','任务已取消或绑定其它执行；未扩大范围或重复提交。',409);
   validateMessageScope(host,{refs:task.refs,excluded:task.excluded,historyIds:[]},{messages:[]},0,{forUse});
   checkInstructions(host,effectiveContentReferences(task.instructions||[],task.excluded),forUse);
+  const template=task.template&&!task.excluded.some(ref=>contentReferencesOverlap(ref,task.template))?task.template:null;
+  if(template)checkTemplate(host,template,forUse);
   const fragments=[];
   for(const [role,items]of [['reference',task.refs],['instruction',task.instructions||[]]])for(const ref of effectiveContentReferences(items,task.excluded)){
     const {item,value}=resolveContentRef(host,ref,{forUse});let text=role==='instruction'?value.prompt:ref.kind==='capability'?JSON.stringify(value):value.text;
@@ -203,6 +205,7 @@ export function taskInput(host,id,{forUse=true}={}) {
   }
   const inputFields=new Set(['id','title','goal','refs','excluded','destination','instructions','plan','template','status','results']);
   const body=Object.fromEntries(Object.entries(structuredClone(task)).filter(([key])=>inputFields.has(key)));body.results=[];
+  if(!template)delete body.template;
   const input={task:body,fragments};need(new TextEncoder().encode(JSON.stringify(input)).length<=256*1024,'TASK_INPUT_TOO_LARGE','本次任务超过256 KiB，请缩小明确引用的范围。',413);return input;
 }
 export function migrateWorkbench(previous) {

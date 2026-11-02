@@ -12,7 +12,9 @@ export function createActivationRules({need,strictObject:shape,identity,integer,
   const source=x=>shape(x,{kind:one('manual')})||shape(x,{kind:one('native-result'),runId:identity,inputHash:digest,resultHash:digest});
   const evidence=x=>shape(x,{ref,start:integer,end:integer,quote:nonempty})&&x.end>x.start;
   const explanationFields={commonality:nonempty,difference:nonempty,uncertainty:nonempty,relationKind:one('supplement','support','limit','challenge','alternative','branch','unknown'),question:short};
-  const explanation=x=>shape(x,explanationFields);
+  // Declining or keeping a candidate is not a writing assignment. Original
+  // candidates remain complete; only accepted interpretations need that bar.
+  const explanation=x=>shape(x,{...explanationFields,commonality:short,difference:short,uncertainty:short});
   const candidate=x=>shape(x,{id:identity,from:ref,to:ref,kind:one('direct','potential'),...explanationFields,evidence:list(evidence,8)});
   const output=x=>shape(x,{kind:one('relation','question','branch'),id:identity,relationId:optional(identity)});
   const placementPlan={canvasId:canvas,groupId:identity,fromNodeId:identity,toNodeId:identity};
@@ -117,6 +119,7 @@ export function createActivationRules({need,strictObject:shape,identity,integer,
     if(op.decision==='accepted'){
       need(op.output,'ACTIVATION_OUTPUT_REQUIRED','明确选择采纳为关系、问题或旁支。');resolve(host,c.from,{forUse:true});resolve(host,c.to,{forUse:true});
       const p=op.interpretation,o=op.output,refs=[c.from,c.to];
+      need(shape(p,explanationFields),'ACTIVATION_INTERPRETATION_REQUIRED','接受前明确共通点、差异与尚未验证之处；暂存或拒绝不需要填写。');
       if(o.kind!=='relation'){need(p.question.trim(),'ACTIVATION_QUESTION_REQUIRED','请写下要留下的问题。');add(host,'expressions',o.id,{id:o.id,kind:'question',title:p.question.slice(0,96),version:1,versions:{'1':{text:p.question,refs:structuredClone(refs)}},author:'user',status:'current'});}
       if(o.kind!=='question'){
         need(o.kind==='branch'?Boolean(o.relationId):o.relationId===undefined,'ACTIVATION_OUTPUT_INVALID','旁支需要独立关系身份，普通关系不接受另一身份。');
@@ -132,7 +135,7 @@ export function createActivationRules({need,strictObject:shape,identity,integer,
       need(shape(r,{id:identity,...requestFields,createdAt:stamp,version:x=>integer(x)&&x>=1,status:one('prepared','returned','closed','cancelled'),result:x=>x===null||result(x),decisions:x=>x&&typeof x==='object'&&!Array.isArray(x),placements:x=>x&&typeof x==='object'&&!Array.isArray(x),ended:x=>x===null||shape(x,{reason:short,at:stamp})})&&r.id===id,'INVALID_ACTIVATION','激活身份、冻结范围或状态无效。');
       checkScope(host,r);need((r.status==='prepared'?r.result===null:r.status==='returned'?r.result!==null:true)&&(r.status==='cancelled'?r.result===null:true)&&(['closed','cancelled'].includes(r.status)?r.ended!==null:r.ended===null),'INVALID_ACTIVATION','激活阶段与实际结果不一致。');
       if(r.result)checkResult(host,r,r.result);
-      for(const [cid,history]of Object.entries(r.decisions)){getCandidate(r,cid);need(list(decision,100)(history)&&history.length&&history.every((d,i)=>d.candidateId===cid&&d.version===i+1&&(d.decision==='accepted')===Boolean(d.output)),'INVALID_ACTIVATION','候选处理历史无效。');need(history.every((d,i)=>d.decision!=='accepted'||i===history.length-1),'INVALID_ACTIVATION','已经采纳的输出须在原对象修订，不能以新处理覆盖。');for(const d of history)if(d.output){const o=d.output,c=getCandidate(r,cid);if(o.kind!=='relation'){const item=host.expressions[o.id];need(item?.kind==='question'&&item.author==='user'&&item.versions[1]?.text===d.interpretation.question&&same(item.versions[1].refs,[c.from,c.to]),'INVALID_ACTIVATION','问题输出缺少准确原稿或引用。');}if(o.kind!=='question'){const relation=host.relations[o.kind==='relation'?o.id:o.relationId],target=o.kind==='relation'?c.to:{kind:'expression',id:o.id,version:1};need(relation&&same(relation.from,c.from)&&same(relation.to,target),'INVALID_ACTIVATION','关系输出缺少准确两端。');}need(o.kind==='branch'?Boolean(o.relationId):o.relationId===undefined,'INVALID_ACTIVATION','采纳输出包含不匹配的关系身份。');}}
+      for(const [cid,history]of Object.entries(r.decisions)){getCandidate(r,cid);need(list(decision,100)(history)&&history.length&&history.every((d,i)=>d.candidateId===cid&&d.version===i+1&&(d.decision==='accepted')===Boolean(d.output)),'INVALID_ACTIVATION','候选处理历史无效。');need(history.every((d,i)=>d.decision!=='accepted'||i===history.length-1),'INVALID_ACTIVATION','已经采纳的输出须在原对象修订，不能以新处理覆盖。');for(const d of history)if(d.output){need(shape(d.interpretation,explanationFields),'INVALID_ACTIVATION','已采纳的解释不完整。');const o=d.output,c=getCandidate(r,cid);if(o.kind!=='relation'){const item=host.expressions[o.id];need(item?.kind==='question'&&item.author==='user'&&item.versions[1]?.text===d.interpretation.question&&same(item.versions[1].refs,[c.from,c.to]),'INVALID_ACTIVATION','问题输出缺少准确原稿或引用。');}if(o.kind!=='question'){const relation=host.relations[o.kind==='relation'?o.id:o.relationId],target=o.kind==='relation'?c.to:{kind:'expression',id:o.id,version:1};need(relation&&same(relation.from,c.from)&&same(relation.to,target),'INVALID_ACTIVATION','关系输出缺少准确两端。');}need(o.kind==='branch'?Boolean(o.relationId):o.relationId===undefined,'INVALID_ACTIVATION','采纳输出包含不匹配的关系身份。');}}
       for(const [cid,p]of Object.entries(r.placements)){getCandidate(r,cid);need(placement(p)&&(p.status==='confirmed'?integer(p.revision)&&p.revision>=1:p.revision===null),'INVALID_ACTIVATION','同框意图或确认修订无效。');}
     }
   }

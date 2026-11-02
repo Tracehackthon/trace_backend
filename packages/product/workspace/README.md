@@ -140,6 +140,8 @@ New/changed feedback citations use the shared rule in Browser and SQLite. Histor
 - 分享新原话摘录时，仅携所选摘录；本地讨论ID/消息ID/原话范围不会迁出，包内以`{"kind":"withheld","reason":"thinking-message"}`明确说明未带原讨论。此包manifest版本2；普通包继续版本1。接收只形成shared材料，保留`origin.packet.withheld`的说明，不按发送方ID读取本地消息。
 - 新reader严格接受v1/v2对应格式；旧v1读端明确拒绝v2，而非被宣称兼容。内容schema2/无新DDL不等于旧writer可写12的新字段；回退使用升级前副本，不自动升级个人库。构建/类型生成不代表功能或分享隐私端到端通过。
 
-## Activation contract in frontend.13
+## Activation contract in frontend.14
 
 The optional schema2 `activations` catalog freezes bounded seed/candidate/exclusion/instruction references and records immutable manual or verified native candidates, exact evidence, human decisions and independent placement intents. Only explicit adoption creates ordinary relations/questions/branches; rejection and coframing do not. Native import requires the controlled attempt resolver and actual-read citation proof. Layout confirmation is verified against the original canvas scene; it is not a renderer boolean. Existing schema2 data is readable, but older packages must not rewrite the new catalog. Provider execution/semantic validity is not established by packaging or the browser manual flow.
+
+frontend.14 keeps manual save/reject interpretations optional (including all-empty input) without auto-filling the original. Acceptance still requires an explicit complete interpretation. This fixes the independent real-UI SDK13 first failure; SDK13 stays immutable and is not a valid replacement for the corrected non-adoption contract.

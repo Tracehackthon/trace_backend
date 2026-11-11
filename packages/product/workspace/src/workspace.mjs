@@ -1,4 +1,5 @@
 import {assertCapabilityPacketOperation} from './capability-packet-codec.mjs';
+import {createTaskHandoff,taskHandoffPath} from './task-handoff.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -225,7 +226,7 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     try { assertDatabase(probe, true); } finally { probe.close(); }
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new DatabaseSync(file); let closed = false;
+  const db = new DatabaseSync(file); let closed = false,taskHandoffBridge=null;
   const storage = { kind: 'sqlite', location: file, features:['capability-packet-v1','capability-feedback-v1','message-reference-scope-v1','activation-v1','task-input-v1',...(resolveTaskDispatchEvidence?['task-dispatch-v1']:[]),...(resolveFeedbackEvidence?['capability-feedback-result-v1']:[]),...(resolveActivationEvidence?['activation-result-v1']:[])] };
   function transaction(fn) {
     db.exec('BEGIN IMMEDIATE');
@@ -388,17 +389,17 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
     demand(known?.request_sha256.startsWith('product-v1:'),'STORAGE_CORRUPT','原派发回执缺失，未重复提交。',503);
     return {dispatch:structuredClone(dispatch),receipt:productResult(dispatch.commandId,known,currentRevision()).receipt};
   }
-  function preparedTaskInput(host,taskId){
+  function preparedTaskInput(host,taskId,{forUse=true}={}){
     const claim=host?.tasks?.[taskId]?.dispatch;
-    if(!claim)return taskInput(host,taskId);
+    if(!claim)return taskInput(host,taskId,{forUse});
     const inputCommandId=claim.inputCommandId||claim.commandId;
     const known=db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(inputCommandId);
-    demand(known?.request_sha256.startsWith('product-v1:'),'STORAGE_CORRUPT','原派发输入快照缺失，未使用今天的标题重建。',503);
+    demand(known&&(claim.source==='native'?known.request_sha256.startsWith('product-v1:'):claim.source==='codex'&&known.request_sha256.startsWith('task-handoff-v2:approve:')),'STORAGE_CORRUPT','原派发输入快照缺失，未使用今天的标题重建。',503);
     const original=readSnapshot(known.committed_revision).host,lockedClaim=original?.tasks?.[taskId]?.dispatch;
     demand(lockedClaim?.commandId===inputCommandId&&(lockedClaim.inputCommandId||lockedClaim.commandId)===inputCommandId&&lockedClaim.inputVersion===claim.inputVersion&&lockedClaim.inputHash===claim.inputHash&&lockedClaim.preparedInputHash===claim.preparedInputHash,'TASK_DISPATCH_CONFLICT','原输入命令、任务或指纹身份不一致，未使用其它输入。',409);
     const locked=taskInput(original,taskId,{forUse:false});
     demand(sha(JSON.stringify(locked))===claim.inputHash&&sha(stableJson(locked))===claim.preparedInputHash,'STORAGE_CORRUPT','原派发输入完整性不一致。',503);
-    assertTaskInputUsable(host,taskId,locked);return locked;
+    if(forUse)assertTaskInputUsable(host,taskId,locked);return locked;
   }
   function reserveNativeDispatch({taskId,requestId,runId,payload,projectDir,mode,previousRunId=null}){
     demand(identity(taskId)&&identity(requestId)&&identity(runId)&&['read-only','workspace-write'].includes(mode),'INVALID_TASK_DISPATCH','任务派发身份或权限无效。',400);
@@ -600,6 +601,23 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
       if (closed) throw new WebStoreError(503, 'STORE_CLOSED', '工作区存储已关闭。');
       checkOrigin(req, ['PUT', 'POST'].includes(req.method));
       if(product&&await canvasResources.handle(req,res,rawPath,readBody))return true;
+      const taskHandoffKind=product?taskHandoffPath(rawPath):null;
+      if(taskHandoffKind!==null){
+        demand(taskHandoffBridge,'TASK_BRIDGE_UNAVAILABLE','当前内容owner未连接受控外部桥接；没有改用旧内容库。',409);
+        if(taskHandoffKind.startsWith('receipts/')){
+          demand(req.method==='GET','METHOD_NOT_ALLOWED','原回执只接受GET。',405);
+          let id;try{id=decodeURIComponent(taskHandoffKind.slice('receipts/'.length));}catch{throw new WebStoreError(400,'INVALID_COMMAND','命令身份编码不正确。');}
+          reply(res,200,taskHandoffBridge.readReceipt(id));return true;
+        }
+        if(taskHandoffKind==='configuration'){
+          demand(req.method==='GET','METHOD_NOT_ALLOWED','连接说明只接受GET。',405);
+          reply(res,200,{...taskHandoffBridge.configuration(),...(Number.isInteger(req.socket.localPort)?{baseUrl:'http://127.0.0.1:'+req.socket.localPort}:{})});return true;
+        }
+        demand(req.method==='POST','METHOD_NOT_ALLOWED','任务交接动作只接受POST。',405);
+        demand(/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(req.headers['content-type']||'')&&!req.headers['content-encoding'],'JSON_REQUIRED','任务交接只接受未压缩的JSON。',415);
+        const body=await readBody(req);
+        reply(res,200,taskHandoffBridge.execute(taskHandoffKind,body,req.headers));return true;
+      }
       if (product) {
         const commandMatch = /^\/api\/product\/commands\/([^/]+)$/.exec(rawPath);
         const codexKind = rawPath === '/api/product/codex/receive' ? 'receive' : rawPath === '/api/product/codex/return' ? 'return' : null;
@@ -701,6 +719,12 @@ export function createProductWorkspace({ file, allowSnapshotWrites = false, desk
   }
   return { file, handle,canvasResources,
     // Node composition seam only. No HTTP/IPC request can configure a resolver.
+    configureTaskHandoff({keyFile}){
+      demand(!closed&&!taskHandoffBridge,'TASK_BRIDGE_CONFIGURED','该owner的外部桥接已固定或已关闭。',409);
+      taskHandoffBridge=createTaskHandoff({file,keyFile,db,need:demand,transaction,currentRevision,readSnapshot,persist,preparedTaskInput,
+        assertNoNativeAttempt(taskId){demand(typeof resolveTaskDispatchEvidence==='function','TASK_DISPATCH_UNVERIFIED','尚未连接原生占用核验，未授权外部接续。',409);const proof=resolveTaskDispatchEvidence({phase:'external-reserve',taskId});demand(proof?.allowed===true,'TASK_DISPATCH_UNCONFIRMED','原生执行占用尚未核验。',409);}});
+      storage.features.push('task-handoff-v2');
+    },
     configureFeedbackEvidenceResolver(resolver){demand(typeof resolver==='function','INVALID_FEEDBACK_RESOLVER','需要受控的本机运行来源读取器。');resolveFeedbackEvidence=resolver;if(!storage.features.includes('capability-feedback-result-v1'))storage.features.push('capability-feedback-result-v1');},
     configureActivationEvidenceResolver(resolver){demand(typeof resolver==='function','INVALID_ACTIVATION_RESOLVER','需要受控的激活运行来源读取器。');resolveActivationEvidence=resolver;if(!storage.features.includes('activation-result-v1'))storage.features.push('activation-result-v1');},
     configureTaskDispatchResolver(resolver){demand(typeof resolver==='function','INVALID_TASK_DISPATCH_RESOLVER','需要受控的本机运行库读取器。');resolveTaskDispatchEvidence=resolver;if(!storage.features.includes('task-dispatch-v1'))storage.features.push('task-dispatch-v1');},

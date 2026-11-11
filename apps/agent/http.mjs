@@ -60,11 +60,11 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, maxS
           const body = await readBody(req); demand(keys(body, ['limit']) && (body.limit === undefined || integer(body.limit) && body.limit >= 1 && body.limit <= 1000), 'INVALID_REQUEST', 'drain 只接受 1..1000 的 limit。', 400);
           const result = await sensemakingWorker.drain({limit: body.limit ?? 16}); reply(res, 200, result); return true;
         }
-        const runMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)(?:\/(events|cancel|adoption))?$/.exec(pathname);
+        const runMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)(?:\/(events|receipt|cancel|adoption|worksite|worksite-result))?$/.exec(pathname);
         const interactionMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)\/(approval|input)$/.exec(pathname);
         const requestMatch = /^\/api\/agent\/requests\/([^/]+)$/.exec(pathname);
         const allowed = pathname === '/api/agent/runs' || pathname === '/api/agent/check' || pathname === '/api/agent/sensemaking/drain'
-          || ['cancel', 'adoption'].includes(runMatch?.[2]) || interactionMatch ? 'POST'
+          || ['cancel', 'adoption', 'worksite', 'worksite-result'].includes(runMatch?.[2]) || interactionMatch ? 'POST'
           : pathname === '/api/agent/sensemaking/health' || runMatch || requestMatch ? 'GET' : null;
         demand(allowed, 'NOT_FOUND', '没有这个 Agent 接口。', 404);
         if (req.method !== allowed) { reply(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: '不支持这个方法。' } }, { allow: allowed }); return true; }
@@ -103,6 +103,9 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, maxS
               'INVALID_REQUEST', '采纳或撤销需要有效的 commandId 与 expectedRevision。', 400);
             reply(res, 200, body.action === 'accept' ? service.adopt(runMatch[1], body) : service.undoAdoption(runMatch[1], body));
           }
+        } else if (['worksite', 'worksite-result'].includes(runMatch[2])) {
+          const body = await readBody(req);
+          reply(res, 200, service.returnWorksite(runMatch[1], body));
         } else if (runMatch[2] === 'receipt') {
           const run=service.get(runMatch[1]),url=new URL(req.url,'http://127.0.0.1'),cursor=url.searchParams.get('after')??'0';
           demand(/^(0|[1-9]\d*)$/.test(cursor)&&Number.isSafeInteger(Number(cursor))&&Number(cursor)<=run.lastEventId,'INVALID_CURSOR','事件游标无效或超过已保存回执。',400);

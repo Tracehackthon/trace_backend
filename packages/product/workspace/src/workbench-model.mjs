@@ -1,4 +1,5 @@
 import {createTaskDispatchRules} from './task-dispatch-rules.mjs';
+import {createTaskHandoffModel} from './task-handoff-model.mjs';
 import {createCapabilityFeedbackRules} from './capability-feedback-rules.mjs';
 import {createCapabilityPacketRules} from './capability-packet-rules.mjs';
 import {createActivationRules} from './activation-rules.mjs';
@@ -112,7 +113,8 @@ export const validActivationCandidate=activations.candidate;
 export const validActivationExplanation=activations.explanation;
 export const verifyActivationLayout=activations.verifyLayout;
 export const parseActivationOutput=activations.parseOutput;
-const taskDispatch=createTaskDispatchRules({need,strictObject,identity,integer,one,optional,list});
+const taskHandoff=createTaskHandoffModel({strictObject,identity,optional,one,list,refs,validContentRef});
+const taskDispatch=createTaskDispatchRules({need,strictObject,identity,integer,one,optional,list,externalDispatch:taskHandoff.dispatch});
 const catalogs = ['resources','materials','expressions','relations','capabilities','sessions','tasks'];
 const operations = {
   ...taskDispatch.operations,
@@ -169,7 +171,7 @@ function checkReferenceAnchor(item,value,ref) {
   need(a.page===base.page&&a.rotation===base.rotation&&(!base.rect||a.rect)&&(!a.rect||inside(a.rect,base.rect)),'ANCHOR_OUTSIDE_SOURCE','PDF引用必须保留原页与旋转，区域不能超出已保存局部。',409);
 }
 export function validateReferenceSelection(host,ref) {const result=resolveContentRef(host,ref);checkReferenceAnchor(result.item,result.value,ref);return result;}
-export function resolveContentRef(host,ref,{forUse=false}={}) {
+export function resolveContentRef(host,ref,{forUse=false,visited=new Set()}={}) {
   need(validContentRef(ref),'INVALID_REFERENCE','内容引用不完整。');
   const collection={material:'materials',expression:'expressions',capability:'capabilities'}[ref.kind], item=host[collection]?.[ref.id];
   need(item&&Object.hasOwn(item.versions,String(ref.version)),'REFERENCE_UNAVAILABLE','引用的对象或准确版本不可用。',409);
@@ -182,6 +184,16 @@ export function resolveContentRef(host,ref,{forUse=false}={}) {
     need(!splits(a.start)&&!splits(a.end),'INVALID_ANCHOR','选段不能切断完整字符。');
   }
   if(forUse)checkReferenceAnchor(item,value,ref);
+  if(forUse&&ref.kind==='expression'){
+    const sourceTask=Object.values(host.tasks).find(task=>task.handoff?.returns.some(result=>result.source.id===ref.id&&result.source.version===ref.version));
+    if(sourceTask){
+      const result=sourceTask.handoff.returns.find(result=>result.source.id===ref.id&&result.source.version===ref.version),claim=sourceTask.dispatch,key=ref.id+':'+ref.version;
+      need(claim?.source==='codex'&&!claim.revokedAt&&!claim.cancelledAt&&claim.receivedAt&&result.deliveryId===claim.deliveryId&&result.contextHash===claim.inputHash&&result.review?.decision!=='rejected','EXTERNAL_RESULT_INACTIVE','原外部返回的许可或复核资格已变化；原稿仍可读，未作为新调用或采用来源。',409);
+      need(!visited.has(key)&&visited.size<32,'REFERENCE_CYCLE','外部结果来源循环或过深，未继续读取。',409);
+      const nextVisited=new Set(visited);nextVisited.add(key);
+      for(const upstream of value.refs)resolveContentRef(host,upstream,{forUse:true,visited:nextVisited});
+    }
+  }
   return {item,value};
 }
 function checkRefs(host,items,forUse=false){for(const ref of items)resolveContentRef(host,ref,{forUse});}
@@ -266,7 +278,7 @@ export function validateWorkbench(host) {
     for(const value of [...(relation.history||[]),relation]){need(value.version>previous&&value.version<=relation.version,'INVALID_RELATION','关系历史版本次序不正确。');previous=value.version;checkRefs(host,[value.from,value.to,...(value.sources||[])]);}
   }
   for(const [id,s]of Object.entries(host.sessions)){need(strictObject(s,{id:identity,title:text,refs,excluded:refs,instructions:optional(instructionRefs),messages:list(m=>strictObject(m,{id:identity,text,author:one('user'),instructions:optional(instructionRefs),template:optional(validContentRef),scope:optional(validMessageScope)})),status:one('manual')})&&s.id===id&&new Set(s.messages.map(m=>m.id)).size===s.messages.length,'INVALID_SESSION','讨论结构不正确。');checkRefs(host,s.refs);checkRefs(host,s.excluded);checkInstructions(host,s.instructions||[]);for(const [index,m]of s.messages.entries()){if(m.scope)validateMessageScope(host,m.scope,s,index);checkInstructions(host,m.instructions||[]);if(m.template)checkTemplate(host,m.template);}}
-  for(const [id,t]of Object.entries(host.tasks)){need(strictObject(t,{id:identity,title:text,goal:text,refs,excluded:refs,destination:text,instructions:optional(instructionRefs),plan:optional(stepItems),template:optional(validContentRef),execution:optional(executionRef),status:one('prepared','cancelled'),preparedInputVersion:optional(one(1)),dispatch:optional(taskDispatch.record),dispatchHistory:optional(taskDispatch.history),results:x=>list(adoptedResult,256)(x)&&new Set(x.map(r=>r.runId)).size===x.length})&&t.id===id&&taskDispatch.state(t),'INVALID_TASK','任务结构不正确；未验证执行结果不能写成已返回。');checkRefs(host,t.refs);checkRefs(host,t.excluded);checkRefs(host,t.results.map(r=>r.ref));checkInstructions(host,t.instructions||[]);if(t.template)checkTemplate(host,t.template);}
+  for(const [id,t]of Object.entries(host.tasks)){need(strictObject(t,{id:identity,title:text,goal:text,refs,excluded:refs,destination:text,instructions:optional(instructionRefs),plan:optional(stepItems),template:optional(validContentRef),execution:optional(executionRef),status:one('prepared','cancelled'),preparedInputVersion:optional(one(1)),dispatch:optional(taskDispatch.record),dispatchHistory:optional(taskDispatch.history),handoff:optional(taskHandoff.record),results:x=>list(adoptedResult,256)(x)&&new Set(x.map(r=>r.runId)).size===x.length})&&t.id===id&&taskDispatch.state(t)&&taskHandoff.state(t),'INVALID_TASK','任务结构不正确；未验证执行结果不能写成已返回。');checkRefs(host,t.refs);checkRefs(host,t.excluded);checkRefs(host,t.results.map(r=>r.ref));if(t.handoff)checkRefs(host,t.handoff.returns.map(r=>r.source));checkInstructions(host,t.instructions||[]);if(t.template)checkTemplate(host,t.template);}
   need(strictObject(host.migration,{version:one(1),matterRefs:plainObject,sourceRefs:plainObject}),'INVALID_MIGRATION','迁移映射不完整。');
   if(host.legacy){need(host.legacy.schemaVersion===1&&Array.isArray(host.legacy.chain?.matters)&&Array.isArray(host.legacy.chain?.sources),'INVALID_MIGRATION','旧恢复结构无效。');for(const m of host.legacy.chain.matters){need(!Object.hasOwn(m,'understanding')&&!Object.hasOwn(m,'originalText'),'DUPLICATE_CONTENT_OWNER','旧对象不能另存当前正文。');const map=host.migration.matterRefs[m.id];need(map&&map.legacyId===m.id,'INVALID_MIGRATION','事项迁移映射缺失。');resolveContentRef(host,map.original);need(host.expressions[map.understanding?.id],'INVALID_MIGRATION','理解迁移映射缺失。');}for(const s of host.legacy.chain.sources){need(!Object.hasOwn(s,'excerpt'),'DUPLICATE_CONTENT_OWNER','旧来源不能另存摘录正文。');resolveContentRef(host,host.migration.sourceRefs[s.id]);}}
   feedbacks.validate(host);
@@ -274,11 +286,14 @@ export function validateWorkbench(host) {
   need(catalogs.reduce((count,key)=>count+Object.keys(host[key]).length,0)+Object.keys(host.feedbacks||{}).length+Object.keys(host.activations||{}).length<=10000,'CONTENT_TOO_COMPLEX','内容对象数量超过当前边界。');
   return host;
 }
-export function applyWorkbenchOperations(previous,ops,{feedbackEvidence={},activationEvidence={},activationPlacements={},taskDispatchEvidence={}}={}) {
+export function applyWorkbenchOperations(previous,ops,{feedbackEvidence={},activationEvidence={},activationPlacements={},taskDispatchEvidence={},historicalArchive=false}={}) {
   need(Array.isArray(ops)&&ops.length>0&&ops.length<=256,'INVALID_WORKBENCH_COMMAND','需要明确的内容动作。',400);ops.forEach(validateWorkbenchOperation);
   let host=previous?.schemaVersion===2?validateWorkbench(structuredClone(previous)):migrateWorkbench(previous);
   host.feedbacks??={};
   for(const op of ops){
+    if(!historicalArchive)for(const ref of [...(op.value?.refs||[]),...(op.sources||[])]){
+      if(ref.kind==='expression'&&Object.values(host.tasks).some(task=>task.handoff?.returns.some(result=>result.source.id===ref.id&&result.source.version===ref.version)))resolveContentRef(host,ref,{forUse:true});
+    }
     if(Object.hasOwn(taskDispatch.operations,op.type)){taskDispatch.apply(host,op,taskDispatchEvidence);continue;}
     if(Object.hasOwn(activations.operations,op.type)){activations.apply(host,op,{add,assertVersion,proofs:activationEvidence,placements:activationPlacements});continue;}
     switch(op.type){

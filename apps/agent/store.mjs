@@ -153,6 +153,18 @@ export function createAgentStore({ file, workspaceKey, maxRuns = 1000 } = {}) {
         return {run, event:event(run, 'run.adoption.changed', {before, status, receipt})};
       });
     },
+    setWorksiteReturn(id, receipt = null) {
+      return transaction(() => {
+        const run = get(id); demand(run && run.status === 'succeeded' && run.result, 'RUN_NOT_RETURNABLE', '只有已完成的 Agent 结果可以回接。', 409);
+        if (run.worksiteReturn) {
+          demand(run.worksiteReturn.commandId === receipt?.commandId && run.worksiteReturn.returnId === receipt?.returnId,
+            'WORKSITE_RETURN_CONFLICT', '这次 Agent 结果已经绑定了另一条工作现场回接回执。', 409);
+          return {run, event: null};
+        }
+        run.worksiteReturn = receipt;
+        return {run, event: event(run, 'run.worksite.returned', {status: 'returned_for_review', receipt})};
+      });
+    },
     events(id, after = 0, limit = 512) {
       return db.prepare('SELECT payload,payload_hash FROM agent_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(decode);
     },

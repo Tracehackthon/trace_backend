@@ -1,8 +1,61 @@
-import { demand, hash, keys, text } from './protocol.mjs';
+import { demand, hash, identity, keys, text } from './protocol.mjs';
 
 const boundary = (s, n) => n <= 0 || n >= s.length || !(s.charCodeAt(n - 1) >= 0xd800 && s.charCodeAt(n - 1) <= 0xdbff && s.charCodeAt(n) >= 0xdc00 && s.charCodeAt(n) <= 0xdfff);
 const safeSource = (s, m) => s && (s.ownerMatterId === m.id || m.sourceIds?.includes(s.id))
   && !['revoked', 'excluded', 'deleted', 'inactive'].includes(s.status) && s.excluded !== true;
+
+const projectValue = value => {
+  if (typeof value === 'string') { const normalized = value.normalize('NFKC').trim().replaceAll('\\', '/'); return process.platform === 'win32' ? normalized.toLocaleLowerCase('en-US') : normalized; }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  return projectValue(value.identity ?? value.name ?? value.projectDir ?? value.projectRealpath ?? '');
+};
+const sameText = (provided, expected) => provided === undefined || provided === expected;
+
+/**
+ * Resolve and pin the worksite envelope from the Product Workspace.  The
+ * request still carries the complete browser projection so the executor can
+ * see what the user selected, but no caller-supplied work/matter/project
+ * identity is trusted without matching the stored session.
+ */
+export function validateWorksiteContext(snapshot, request) {
+  if (request.workId === undefined) return request;
+  const work = snapshot.host?.worksite?.works?.[request.workId];
+  const session = snapshot.host?.worksite?.sessions?.[request.workId];
+  demand(work && session, 'WORKSITE_NOT_FOUND', '没有找到这项工作现场。', 404);
+  demand(request.matterId && Array.isArray(session.intake), 'WORKSITE_CONTEXT_INVALID', '工作现场缺少有效带入。', 409);
+  const included = session.intake.filter(item => item.role !== 'exclude');
+  demand(included.length > 0, 'WORKSITE_CONTEXT_EMPTY', '这项工作没有可带入 Agent 的内容。', 422);
+  const matterIds = new Set(included.map(item => item.matterId));
+  demand(matterIds.has(request.matterId), 'MATTER_MISMATCH', 'Agent 运行事项不属于当前工作现场。', 409);
+  const roles = new Set(included.map(item => item.role));
+  const expectedRole = roles.size === 1 ? [...roles][0] : 'mixed';
+  demand(request.role === expectedRole, 'WORKSITE_CONTEXT_MISMATCH', 'Agent 运行参与方式与工作现场不一致。', 409);
+  const expectedProject = projectValue(work.project), expectedProjectIdentity = projectValue(work.projectIdentity ?? work.projectRealpath ?? work.projectDir ?? work.project);
+  demand(expectedProject && expectedProjectIdentity && projectValue(request.project) === expectedProject && projectValue(request.projectIdentity) === expectedProjectIdentity,
+    'PROJECT_MISMATCH', 'Agent 运行项目与工作现场绑定不一致。', 409);
+  const requestedIntake = new Map(request.intake.map(item => [item.id, item]));
+  demand(requestedIntake.size === included.length && included.every(item => {
+    const value = requestedIntake.get(item.id);
+    return value && value.matterId === item.matterId && value.role === item.role
+      && sameText(value.title, item.title) && sameText(value.sourceText ?? value.text, item.sourceText)
+      && sameText(value.sourceVersion, item.sourceVersion) && sameText(value.note, item.note);
+  }), 'WORKSITE_CONTEXT_MISMATCH', 'Agent 带入内容与当前工作现场不一致。', 409);
+  const findings = (session.findings ?? []).filter(item => item.useInCurrentWork === true);
+  const requestedFindings = new Map(request.findings.map(item => [item.id, item]));
+  demand(requestedFindings.size === findings.length && findings.every(item => {
+    const value = requestedFindings.get(item.id);
+    return value && value.text === item.text && sameText(value.matterId, item.matterId) && sameText(value.note, item.note);
+  }), 'WORKSITE_CONTEXT_MISMATCH', 'Agent 发现与当前工作现场不一致。', 409);
+  return {...request,
+    role: expectedRole,
+    project: work.project,
+    projectIdentity: work.projectIdentity ?? work.projectRealpath ?? work.projectDir ?? work.project,
+    intake: included.map(item => ({id: item.id, matterId: item.matterId, title: item.title, sourceText: item.sourceText,
+      sourceVersion: item.sourceVersion, role: item.role, note: item.note})),
+    findings: findings.map(item => ({id: item.id, matterId: item.matterId, text: item.text, note: item.note,
+      relation: item.relation, useInCurrentWork: true})),
+  };
+}
 
 /** Only stored, selected, bounded text is externalized. No URL/file fetching or
  * implicit personal-history retrieval. Every run starts a new Codex thread. */
@@ -39,6 +92,10 @@ export function assembleContext(snapshot, request, history = [], maxBytes = 64 *
     add('matter:stop', 'current_stop', m.stop, m.stopVersion);
     add('matter:understanding', 'current_understanding', m.understanding, m.understandingVersion);
     add('matter:original', 'original_expression', m.originalText, snapshot.revision);
+  }
+  if (request.workId !== undefined) {
+    for (const item of request.intake ?? []) add(`worksite:intake:${item.id}`, `worksite_${item.role}`, item.sourceText, item.sourceVersion, true);
+    for (const item of request.findings ?? []) add(`worksite:finding:${item.id}`, 'worksite_finding', item.text, item.id, true);
   }
   for (const entry of history) {
     add(`history:${entry.runId}:user`, 'previous_user_input', entry.input, entry.runId);

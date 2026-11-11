@@ -17,6 +17,7 @@ import {
   loadLockedProjectSourceProfile,
   loadProjectActivationConfiguration,
   migrateProjectActivationConfiguration,
+  previewProjectInitialization,
   updateProjectActivationConfiguration,
   validateProjectInstanceDescriptor,
   type ProjectActivationConfigurationInput,
@@ -114,7 +115,9 @@ function runtimeRoot(): string {
   for (const initial of candidates) {
     let cursor = path.resolve(initial);
     for (let steps = 0; steps < 10; steps += 1) {
-      if (fs.existsSync(path.join(cursor, 'package.json')) && fs.existsSync(path.join(cursor, 'templates'))) return cursor;
+      const hasRuntimeIdentity = fs.existsSync(path.join(cursor, 'runtime.json')) || fs.existsSync(path.join(cursor, 'package.json'));
+      const templatesPath = path.join(cursor, 'templates');
+      if (hasRuntimeIdentity && fs.existsSync(templatesPath) && fs.statSync(templatesPath).isDirectory()) return cursor;
       const parent = path.dirname(cursor);
       if (parent === cursor) break;
       cursor = parent;
@@ -400,22 +403,54 @@ function initState(input: ProjectInitializeInput) {
   const sourceMode = input.source_mode ?? 'local';
   if (!['local', 'external', 'team', 'empty'].includes(sourceMode)) throw new ProtocolError('INVALID_INPUT', 'source_mode is invalid');
   if ((sourceMode === 'external' || sourceMode === 'team') && input.source_profile === undefined) throw new ProtocolError('SOURCE_SELECTION_REQUIRED', `${sourceMode} source mode requires an explicit source profile`);
-  const traceDir = path.join(projectDir, '.trace');
-  const traceExists = fs.existsSync(traceDir) && fs.readdirSync(traceDir).length > 0;
-  return {project_dir: projectDir, template_id: templateId, source_mode: sourceMode as ProjectSourceMode, source_profile: input.source_profile, user_id: input.user_id ?? defaultUserId(), runtime_version: runtimeVersion(), trace_exists: traceExists};
+  const userId = input.user_id ?? defaultUserId();
+  const runtime_version = runtimeVersion();
+  const manifest = templateManifest(templateId);
+  const initialization = previewProjectInitialization({
+    project_dir: projectDir,
+    manifest,
+    runtime_version,
+    instance_id: defaultInstanceId(projectDir),
+    user_id: userId,
+    source_mode: sourceMode as ProjectSourceMode,
+    ...(input.source_profile === undefined ? {} : {source_profile: input.source_profile}),
+  });
+  return {project_dir: projectDir, template_id: templateId, source_mode: sourceMode as ProjectSourceMode, source_profile: input.source_profile, user_id: userId, runtime_version, manifest, initialization};
 }
 
 export function proposeProjectInitialize(input: ProjectInitializeInput = {}): ProductProposal<'project_initialize'> {
   const state = initState(input);
-  if (state.trace_exists) throw new ProtocolError('INSTANCE_EXISTS', 'This project already has Trace state; initialization never overwrites it.');
-  templateManifest(state.template_id);
+  const {collaboration_model: collaborationModel, source_activation: sourceActivation, inspection} = state.initialization;
   const fingerprint = sha256(safeJson(state));
   return {
     proposal_id: proposalId('project_initialize', state), operation: 'project_initialize', state_fingerprint: fingerprint, requires_user_adoption: true,
     summary: {
       project_directory: state.project_dir, template_id: state.template_id, source_mode: state.source_mode,
-      will_create: ['.trace/project.json', '.trace/profiles/', '.trace/instance/', '.trace/state/trace.sqlite'],
-      will_not_do: ['read external source bodies', 'install global hooks', 'replace existing Trace state'],
+      namespace: inspection.trace_dir_exists ? 'extend-existing-trace-namespace' : 'create-trace-namespace',
+      preserve_existing_entries: inspection.preserved_entries,
+      will_create: [...inspection.will_create_directories, ...inspection.will_create_files],
+      will_not_do: ['read external source bodies', 'install global hooks', 'overwrite or delete any pre-existing .trace path', 'open or modify existing SQLite databases'],
+      collaboration_model: {
+        model_id: collaborationModel.model_id,
+        version: collaborationModel.version,
+        display_name: collaborationModel.display_name,
+        scope: collaborationModel.scope,
+        principles: collaborationModel.principles,
+        open_discussion: collaborationModel.open_discussion,
+        explicit_execution: collaborationModel.explicit_execution,
+        epistemic_practice: collaborationModel.epistemic_practice,
+        boundaries: collaborationModel.boundaries,
+        current_focus: collaborationModel.current_focus ?? [],
+      },
+      source_activation: {
+        manifest_id: sourceActivation.manifest_id,
+        version: sourceActivation.version,
+        source_id: sourceActivation.source_id,
+        display_name: sourceActivation.display_name,
+        summary: sourceActivation.summary,
+        activation_profiles: sourceActivation.activation_profiles,
+        entry_points: sourceActivation.entry_points.map(({id, label, kind, purpose, triggers, locator}) => ({id, label, kind, purpose, triggers, ...(locator === undefined ? {} : {locator})})),
+      },
     },
   };
 }
@@ -430,8 +465,8 @@ export function applyProjectInitialize(input: ProjectInitializeInput & {proposal
   assertAdopted(proposal, input.approval);
   const state = initState(input);
   const result = initializeProject({
-    project_dir: state.project_dir, manifest: templateManifest(state.template_id), runtime_version: state.runtime_version,
-    instance_id: defaultInstanceId(state.project_dir), user_id: state.user_id, source_mode: state.source_mode,
+    project_dir: state.project_dir, manifest: state.manifest, runtime_version: state.runtime_version,
+    instance_id: state.initialization.instance_id, user_id: state.user_id, source_mode: state.source_mode,
     ...(state.source_profile === undefined ? {} : {source_profile: state.source_profile}),
   });
   // Match the product CLI guarantee: a fresh project is doctor/backup-ready
@@ -442,7 +477,7 @@ export function applyProjectInitialize(input: ProjectInitializeInput & {proposal
     status: 'initialized', proposal_id: proposal.proposal_id,
     project: {directory: result.project_dir, template_id: result.descriptor.template_id, source_mode: result.descriptor.source_mode},
     configuration: {state: 'locked', collaboration_model: result.collaboration_model.display_name, source_activation: result.source_activation.display_name},
-    receipt: {created_paths: result.created_paths.map(item => redactedPath(result.project_dir, item)), source_bodies_persisted: false},
+    receipt: {created_paths: result.created_paths.map(item => redactedPath(result.project_dir, item)), preserved_paths: result.preserved_paths, source_bodies_persisted: false},
   };
 }
 

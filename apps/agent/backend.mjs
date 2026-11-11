@@ -33,6 +33,7 @@ export function createAgentBackend({ productWorkspace, env = process.env, retrie
     }
     return createAgentHttp({ sensemakingWorker, service: createAgentService({ store, readWorkspace: productWorkspace.read,
       executeProduct: productWorkspace.execute, adoptCandidate: productWorkspace.adoptAgentCandidate,
+      returnAgentWorksiteResult: productWorkspace.returnAgentWorksiteResult,
       executorRegistry, timeoutMs, retrievalProvider }) });
   } catch (e) { store.close(); throw e; }
 }

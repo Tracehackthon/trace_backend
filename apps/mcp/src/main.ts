@@ -36,6 +36,7 @@ import {
 import type {BeginDialogueInput, CandidateReviewApplyInput, StepDialogueInput} from '../../../packages/product/application/src/dialogue.js';
 import {currentCodexSessionId, TraceProductClient, type TraceProductArtifact} from './product-client.js';
 import {TraceZhihuClient} from './zhihu-client.js';
+import {TraceTaskClient,taskHostRoot} from './task-client.js';
 
 function textResult(value: unknown, isError = false) {
   return {content: [{type: 'text' as const, text: JSON.stringify(value, null, 2)}], ...(isError ? {isError: true} : {})};
@@ -71,7 +72,7 @@ const activationConfiguration = z.object({
 export function createTraceMcpServer(): McpServer {
   const server = new McpServer({name: 'trace', version: '0.3.0'}, {
     capabilities: {logging: {}},
-    instructions: 'Trace can deliver two distinct forms of context into Codex. For the user’s project collaboration/context Skill package, call trace_context_skill_receive with the absolute current project directory; apply it only in the bound task/project and treat source entries as navigation, not read evidence. For a user-confirmed product work handoff, call trace_product_context_receive and later trace_product_result_return after real work completes. Neither flow installs a global Skill or changes the user’s understanding automatically.',
+    instructions: 'Trace can deliver two distinct forms of context into Codex. For the user’s project collaboration/context Skill package, call trace_context_skill_receive with the absolute current project directory; apply it only in the bound task/project and treat source entries as navigation, not read evidence. For a current three-workspace Task, use trace_task_prepare when starting from the external worksite, then trace_task_context_receive; an unconfirmed request never delivers content. After actual work, use trace_task_result_return with the original delivery. The older trace_product_context_receive/result_return tools are protocol1 legacy work handoffs only. Neither flow installs a global Skill or changes the user’s understanding automatically.',
   });
 
   server.registerTool('trace_project_status', {
@@ -235,6 +236,29 @@ export function createTraceMcpServer(): McpServer {
     description: 'Compile this Trace project’s locked collaboration model and cognitive-source map into a bounded, virtual Codex SKILL.md for the current task. The session identity comes from the MCP process environment and cannot be supplied by the model. The call writes a privacy-safe activation receipt, but does not read source bodies, install a global Skill, or update the profile.',
     inputSchema: productProjectDirectory,
   }, async ({project_dir}) => invoke(() => receiveContextSkillPackage({project_dir, host_session_id: currentCodexSessionId()})));
+
+  const taskRef=z.object({kind:z.enum(['material','expression','capability']),id:z.string().min(1).max(512),version:z.number().int().positive(),anchor:z.record(z.unknown()).optional()}).strict();
+  server.registerTool('trace_task_prepare', {
+    title:'Prepare a current Trace Task from this worksite',
+    description:'Save a new bounded Task in the explicitly connected three-workspace owner, without opening a canvas. Saving is not dispatch or sharing. Retain request_id after an unknown response; use another only for a deliberate new Task. References must be explicitly known IDs/versions, never inferred whole-canvas scope. Host session comes from the process and allowed-root evidence from this MCP connection; every delivery still requires user pairing in Trace.',
+    inputSchema:{...productProjectDirectory,request_id:z.string().min(1).max(128),title:z.string().min(1).max(200),goal:z.string().min(1).max(65536),refs:z.array(taskRef).max(128).optional(),excluded:z.array(taskRef).max(128).optional(),instructions:z.array(taskRef).max(128).optional()},
+  },async(input,extra)=>invoke(async()=>{
+    const host=await taskHostRoot(server.server,extra);
+    return new TraceTaskClient().prepare({requestId:input.request_id,projectDir:input.project_dir,title:input.title,goal:input.goal,refs:input.refs||[],excluded:input.excluded||[],instructions:input.instructions||[]},host);
+  }));
+  server.registerTool('trace_task_context_receive', {
+    title:'Request or receive one current Trace Task',
+    description:'Use one exact Task ID. The first call registers a no-content request. The user must pair its specific session, host-reported allowed root, project and input in that same Task. A single reported root is not an automatic proof of the host current-project UI. Repeating recovers the original delivery; it does not start a model, widen scope or replace a native dispatch. Missing roots/configuration never falls back to old work IDs.',
+    inputSchema:{...productProjectDirectory,task_id:z.string().min(1).max(200)},
+  },async({project_dir,task_id},extra)=>invoke(async()=>{
+    const host=await taskHostRoot(server.server,extra);
+    return new TraceTaskClient().receive(task_id,project_dir,host);
+  }));
+  server.registerTool('trace_task_result_return', {
+    title:'Return historical output to the original Trace Task',
+    description:'Return only actual observations/output with the original protocol2 delivery, hash, Task and project. Keep fact reports, interpretation, uncertainty and candidates separate. Retry the same return_id/payload after an unknown response; never overwrite it with different text. This does not read files, require current roots, verify execution, adopt understanding or publish a capability. Original configured owner and host session are authenticated.',
+    inputSchema:{...productProjectDirectory,task_id:z.string().min(1).max(200),delivery_id:z.string().min(1).max(200),context_hash:z.string().regex(/^[a-f0-9]{64}$/),return_id:z.string().min(1).max(128),fact:z.string().min(1).max(65536),summary:z.string().max(65536).optional(),interpretation:z.string().max(65536).optional(),unconfirmed:z.string().max(65536).optional(),proposed_understanding:z.string().max(65536).optional(),artifacts:z.array(z.object({title:z.string().min(1).max(1000),kind:z.enum(['file','test','link','note']),path:z.string().max(4096).optional(),url:z.string().max(4096).optional(),digest:z.string().max(512).optional()}).strict()).max(20).optional()},
+  },async(input)=>invoke(()=>new TraceTaskClient().returnResult({taskId:input.task_id,projectDir:input.project_dir,deliveryId:input.delivery_id,contextHash:input.context_hash,returnId:input.return_id,payload:{fact:input.fact,...(input.summary===undefined?{}:{summary:input.summary}),...(input.interpretation===undefined?{}:{interpretation:input.interpretation}),...(input.unconfirmed===undefined?{}:{unconfirmed:input.unconfirmed}),...(input.proposed_understanding===undefined?{}:{proposedUnderstanding:input.proposed_understanding}),...(input.artifacts===undefined?{}:{artifacts:input.artifacts})}})));
 
   server.registerTool('trace_product_context_receive', {
     title: 'Receive Trace context in Codex',

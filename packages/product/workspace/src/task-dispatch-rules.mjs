@@ -1,6 +1,6 @@
 // Product owns dispatch permission, not provider progress. Node proofs never
 // come from a renderer field; the Agent ledger remains the execution owner.
-export function createTaskDispatchRules({need,strictObject,identity,integer,one,optional,list}) {
+export function createTaskDispatchRules({need,strictObject,identity,integer,one,optional,list,externalDispatch}) {
   const digest=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   const time=x=>typeof x==='string'&&Number.isFinite(Date.parse(x));
   const directory=x=>typeof x==='string'&&x.length>0&&x.length<=4096&&!/[\x00-\x1f\x7f]/.test(x);
@@ -8,13 +8,13 @@ export function createTaskDispatchRules({need,strictObject,identity,integer,one,
   const parent=x=>x===null||identity(x);
   // Product15 omitted this field. It remains readable, but a missing parent is
   // not enough evidence to resume a reservation without its Agent row.
-  const record=x=>strictObject(x,{...fields,inputCommandId:optional(identity),previousRunId:optional(parent),cancelledAt:optional(time)});
+  const record=x=>x?.source==='codex'?externalDispatch(x):strictObject(x,{...fields,inputCommandId:optional(identity),previousRunId:optional(parent),cancelledAt:optional(time)});
   const history=x=>list(record,256)(x)&&new Set(x.map(r=>r.id)).size===x.length;
   const operations={
     'task.dispatch.reserve':{taskId:identity,...fields,inputCommandId:identity,previousRunId:parent},
     'task.dispatch.cancel':{taskId:identity,dispatchId:identity,at:time},
   };
-  const state=task=>{const all=[...(task.dispatchHistory||[]),...(task.dispatch?[task.dispatch]:[])];return new Set(all.map(d=>d.id)).size===all.length&&new Set(all.map(d=>d.requestId)).size===all.length&&new Set(all.map(d=>d.runId)).size===all.length&&(!task.dispatchHistory?.length||Boolean(task.dispatch))&&(!task.dispatch||task.preparedInputVersion===1&&Boolean(task.dispatch.cancelledAt)===(task.status==='cancelled'));};
+  const state=task=>{const all=[...(task.dispatchHistory||[]),...(task.dispatch?[task.dispatch]:[])];return new Set(all.map(d=>d.id)).size===all.length&&new Set(all.map(d=>d.requestId)).size===all.length&&new Set(all.map(d=>d.source==='native'?d.runId:d.deliveryId)).size===all.length&&(!task.dispatchHistory?.length||Boolean(task.dispatch))&&(!task.dispatch||task.preparedInputVersion===1&&Boolean(task.dispatch.cancelledAt)===(task.status==='cancelled'));};
   function apply(host,op,proofs){
     const task=host.tasks[op.taskId],proof=proofs[op.taskId];
     need(task&&task.status==='prepared'&&!task.execution,'TASK_DISPATCH_UNAVAILABLE','任务已取消或绑定其它执行，不会重复派发。',409);

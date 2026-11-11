@@ -36,7 +36,7 @@ npm start -- --agent
 - 远程 endpoint 必须为 HTTPS。只有 `localhost / 127.0.0.1 / ::1` 测试服务可使用 HTTP；URL 不能含账号、密码、query 或 fragment；不跟随 redirect。
 - `authScheme` 为 `bearer`（默认）或 `x-api-key`。没有凭据的内部服务可省略 `credentialEnv`，其网络身份仍由部署层负责。
 - Codex 子进程会额外移除所有 model/agent profile 声明的 credential env，避免不同执行器共享密钥。
-- Codex profile 的 `mode` 省略即 `bounded-analysis`；可选 `native`。native 必须提供服务端配置的绝对 `projectCwd`，该目录在每次启动时 `realpath` 核验，HTTP 请求不能覆盖它。
+- Codex profile 的 `mode` 省略即 `bounded-analysis`；可选 `native`。native 必须提供服务端配置的绝对 `projectCwd`，该目录在每次启动时 `realpath` 核验，HTTP 请求不能覆盖它。带 Worksite 身份的 run 在服务端把该 cwd 与存储的 canonical `projectIdentity`（realpath，Windows 大小写归一化）逐次比较；缺失、跨项目、同名目录、失效 alias 或变更后的 identity 都 fail-closed，resume 与 return 也会重新核验。
 - `threadId` 只在 native 模式的 run request 中可选，用于 `thread/resume`。服务端不会复制或解析 `auth.json`；Codex 自己负责登录，Trace 只调用 `account/read`。
 
 ### Codex 配置示例

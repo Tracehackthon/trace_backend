@@ -27,9 +27,11 @@ export function createModelAdapter({ profile, env = process.env, fetchImpl = fet
       const sensemaking = request.purpose === 'sensemaking';
       const instructions = sensemaking ? TRACE_SENSEMAKING_INSTRUCTIONS : retrieval?.tools.length ? TRACE_AGENT_RETRIEVAL_INSTRUCTIONS : TRACE_AGENT_INSTRUCTIONS;
       const definitions = sensemaking ? [] : tools.definitions;
+      const worksite = request.workId === undefined ? undefined : {workId: request.workId, matterId: request.matterId, role: request.role,
+        project: request.project, projectIdentity: request.projectIdentity, intake: request.intake, findings: request.findings, selection: request.selection};
       const messages = [
         { role: 'system', content: instructions },
-        { role: 'user', content: JSON.stringify({ purpose: request.purpose, input: request.input, context: contextManifest(context) }) },
+        { role: 'user', content: JSON.stringify({ purpose: request.purpose, input: request.input, context: contextManifest(context), ...(worksite ? {worksite} : {}) }) },
       ];
       onEvent('runtime.connected', { sessionId, runtimeVersion: MODEL_PROTOCOL, model: profile.model });
       const maxSteps = Number.isSafeInteger(request.maxSteps) ? Math.min(12, Math.max(0, request.maxSteps)) : 12;

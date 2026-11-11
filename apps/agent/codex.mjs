@@ -205,6 +205,65 @@ export function boundedCodexEnv(env, redactEnvKeys = []) {
   return childEnv;
 }
 
+/**
+ * Resolve the identity of a project directory on the server.  The native
+ * profile's cwd is configuration-owned, while a Worksite request carries the
+ * canonical identity persisted by Product Workspace.  Both sides must pass
+ * through the same realpath/case-folding step; comparing basenames or the
+ * caller's spelling would allow same-name directories and aliases to cross
+ * the execution boundary.
+ */
+function existingProjectPath(value, unavailableCode = 'CODEX_PROJECT_CWD_UNAVAILABLE') {
+  let resolved;
+  try {
+    const absolute = path.resolve(value);
+    const resolveRealpath = fs.realpathSync.native ?? fs.realpathSync;
+    resolved = path.normalize(resolveRealpath(absolute));
+    if (!fs.statSync(resolved).isDirectory()) throw new Error('not a directory');
+  } catch {
+    throw new AgentError(unavailableCode, 'native Codex 选定的项目目录不可用。', 503);
+  }
+  return resolved;
+}
+
+export function canonicalProjectIdentity(value) {
+  demand(typeof value === 'string' && path.isAbsolute(value), 'CODEX_PROJECT_SCOPE_MISMATCH', '工作现场缺少可比较的 canonical projectIdentity。', 403);
+  const resolved = existingProjectPath(value, 'CODEX_PROJECT_SCOPE_MISMATCH');
+  return process.platform === 'win32' ? resolved.toLocaleLowerCase('en-US') : resolved;
+}
+
+function requestProjectIdentity(value) {
+  if (typeof value === 'string') return value;
+  if (plain(value)) return value.identity ?? value.projectRealpath ?? value.projectDir;
+  return null;
+}
+
+/**
+ * Validate the fixed native profile cwd against a Worksite's canonical
+ * identity.  This is intentionally exposed on the adapter so the service can
+ * validate before creating a run, and is repeated by execute/return paths to
+ * catch a changed junction, deleted directory, or profile cwd mutation.
+ */
+function assertNativeProjectBinding(configuredProjectCwd, request) {
+  if (request?.workId === undefined && request?.projectIdentity === undefined) return null;
+  // Keep the resolved cwd that was compared and hand that exact spelling to
+  // the child process.  Resolving once avoids a stat/realpath → spawn gap in
+  // which a junction could be swapped between the comparison and spawn.
+  const configuredPath = existingProjectPath(configuredProjectCwd);
+  const configured = process.platform === 'win32' ? configuredPath.toLocaleLowerCase('en-US') : configuredPath;
+  const requestedRaw = requestProjectIdentity(request?.projectIdentity);
+  if (typeof requestedRaw !== 'string' || !path.isAbsolute(requestedRaw))
+    throw new AgentError('CODEX_PROJECT_SCOPE_MISMATCH', '工作现场缺少可比较的 canonical projectIdentity。', 403);
+  let requested;
+  try { requested = canonicalProjectIdentity(requestedRaw); }
+  catch (error) {
+    if (error instanceof AgentError && error.code === 'CODEX_PROJECT_SCOPE_MISMATCH') throw error;
+    throw new AgentError('CODEX_PROJECT_SCOPE_MISMATCH', '工作现场项目身份不可用。', 403);
+  }
+  demand(configured === requested, 'CODEX_PROJECT_SCOPE_MISMATCH', 'native Codex project cwd 与工作现场项目身份不一致。', 403);
+  return { projectRealpath: configuredPath, projectIdentity: configured };
+}
+
 /** Newline JSON-RPC, bounded frames, concurrent notifications/server requests,
  * no raw prompts, provider errors, stderr or credentials in public diagnostics. */
 export class CodexConnection {
@@ -290,14 +349,15 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
   // create a scratch root. Bounded mode owns its disposable run directories.
   if (!nativeMode) fs.mkdirSync(runtimeRoot, { recursive: true });
   const activeControls = new Map();
-  async function open(signal) {
+  async function open(signal, request = null) {
     demand(!signal?.aborted, 'CANCELLED', '请求已取消。', 409);
     let cwd, generatedCwd = false;
     if (nativeMode) {
-      try { cwd = fs.realpathSync(configuredProjectCwd); }
-      catch { throw new AgentError('CODEX_PROJECT_CWD_UNAVAILABLE', 'native Codex 选定的项目目录不可用。', 503); }
-      try { demand(fs.statSync(cwd).isDirectory(), 'CODEX_PROJECT_CWD_UNAVAILABLE', 'native Codex 选定的项目目录不是目录。', 503); }
-      catch (error) { if (error instanceof AgentError) throw error; throw new AgentError('CODEX_PROJECT_CWD_UNAVAILABLE', 'native Codex 选定的项目目录不可用。', 503); }
+      // Validate the Worksite identity before spawning the child process.  The
+      // same check is repeated by execute/return callers so a changed native
+      // profile cwd cannot reuse a previously valid thread or result.
+      const binding = assertNativeProjectBinding(configuredProjectCwd, request);
+      cwd = binding?.projectRealpath ?? existingProjectPath(configuredProjectCwd);
     } else {
       cwd = fs.mkdtempSync(path.join(runtimeRoot, 'run-')); generatedCwd = true;
       fs.mkdirSync(path.join(cwd, '.git')); // Stop project-local config/rule discovery at this empty root.
@@ -360,6 +420,13 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
     } catch (error) { await dispose(); throw error; }
   }
   return {
+    capabilities: { tools: true, streaming: true, cancellation: true, output: 'trace-result-v1',
+      executionMode: mode, persistentThreads: nativeMode, nativeWorkspace: nativeMode,
+      approvalPolicy: nativeMode ? 'on-request-fail-closed' : 'never' },
+    validateProjectBinding(request) {
+      if (!nativeMode) return null;
+      return assertNativeProjectBinding(configuredProjectCwd, request);
+    },
     async check({ signal } = {}) {
       const host = await open(signal);
       try {
@@ -372,7 +439,8 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
     },
     async execute({ request, context, signal, onEvent, isCurrent, canUseContext = isCurrent, onRawOutput, retrieval, runId = null, profile = null }) {
       demand(nativeMode || request.threadId === undefined, 'CODEX_THREAD_NOT_ALLOWED', 'bounded-analysis 不恢复持久 Codex thread。', 400);
-      const host = await open(signal), rpc = host.connection;
+      if (nativeMode) assertNativeProjectBinding(configuredProjectCwd, request);
+      const host = await open(signal, request), rpc = host.connection;
       let threadId, turnId, completed = false, completedSuccessfully = false, outputBytes = 0;
       const texts = new Map(); let finish, fail;
       const interactions = new Map();
@@ -548,8 +616,10 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         }
         eligible();
         const manifest = contextManifest(context);
+        const worksite = request.workId === undefined ? undefined : {workId: request.workId, matterId: request.matterId, role: request.role,
+          project: request.project, projectIdentity: request.projectIdentity, intake: request.intake, findings: request.findings, selection: request.selection};
         const turn = await rpc.rpc('turn/start', { threadId, effort: 'medium',
-          input: [{ type: 'text', text: JSON.stringify({ purpose: request.purpose, input: request.input, context: manifest }), text_elements: [] }],
+          input: [{ type: 'text', text: JSON.stringify({ purpose: request.purpose, input: request.input, context: manifest, ...(worksite ? {worksite} : {}) }), text_elements: [] }],
           ...(nativeMode ? {} : { sandboxPolicy: { type: 'readOnly', networkAccess: false } }),
           outputSchema: sensemaking ? SENSEMAKING_OUTPUT_SCHEMA : OUTPUT_SCHEMA });
         turnId ??= turn.turn.id;

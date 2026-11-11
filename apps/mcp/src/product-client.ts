@@ -1,4 +1,5 @@
 import {createHash, randomUUID} from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 
 export interface TraceProductArtifact {
@@ -109,6 +110,31 @@ function hostCommandId(operation: string, sessionId: string, input: Record<strin
   return `codex-host-${operation}:${sessionId}:${digest.slice(0, 32)}`;
 }
 
+interface CanonicalProjectDirectory {
+  projectDir: string;
+  projectRealpath: string;
+  projectIdentity: string;
+}
+
+/** Reject a stale/non-directory MCP argument before it reaches the product service. */
+export function resolveProductProjectDirectory(value: string): CanonicalProjectDirectory {
+  if (typeof value !== 'string' || !path.isAbsolute(value)) {
+    throw new TraceProductClientError('INVALID_PROJECT_DIR', 'project_dir must be an absolute existing directory');
+  }
+  const projectDir = path.normalize(path.resolve(value));
+  let stat: fs.Stats;
+  try { stat = fs.statSync(projectDir); }
+  catch { throw new TraceProductClientError('INVALID_PROJECT_DIR', 'project_dir must be an existing directory'); }
+  if (!stat.isDirectory()) throw new TraceProductClientError('INVALID_PROJECT_DIR', 'project_dir must be an existing directory');
+  let projectRealpath: string;
+  try {
+    const resolveRealpath = fs.realpathSync.native ?? fs.realpathSync;
+    projectRealpath = path.normalize(resolveRealpath(projectDir));
+  } catch { throw new TraceProductClientError('INVALID_PROJECT_DIR', 'project_dir must be an existing resolvable directory'); }
+  const projectIdentity = process.platform === 'win32' ? projectRealpath.toLocaleLowerCase('en-US') : projectRealpath;
+  return {projectDir, projectRealpath, projectIdentity};
+}
+
 export class TraceProductClient {
   readonly baseUrl: string;
   readonly sessionId: string;
@@ -151,19 +177,19 @@ export class TraceProductClient {
   }
 
   receive(input: {projectDir: string; workId?: string}): Promise<Record<string, unknown>> {
-    if (!path.isAbsolute(input.projectDir)) throw new TraceProductClientError('INVALID_PROJECT_DIR', 'project_dir must be absolute');
+    const project = resolveProductProjectDirectory(input.projectDir);
     const commandId = `codex-receive:${this.sessionId}:${randomUUID()}`;
     return this.request('/api/product/codex/receive', {
       protocolVersion: 1,
       commandId,
       sessionId: this.sessionId,
-      projectDir: path.resolve(input.projectDir),
+      projectDir: project.projectDir,
       ...(input.workId === undefined ? {} : {workId: input.workId}),
     });
   }
 
   returnResult(input: TraceProductReturnInput): Promise<Record<string, unknown>> {
-    if (!path.isAbsolute(input.projectDir)) throw new TraceProductClientError('INVALID_PROJECT_DIR', 'project_dir must be absolute');
+    const project = resolveProductProjectDirectory(input.projectDir);
     const result = {
       matterId: input.matterId,
       fact: input.fact,
@@ -175,10 +201,12 @@ export class TraceProductClient {
     };
     return this.request('/api/product/codex/return', {
       protocolVersion: 1,
-      commandId: returnCommandId(this.sessionId, input),
+      // Use the resolved target for idempotency so a junction/symlink or a
+      // Windows case variant cannot manufacture a second return command.
+      commandId: returnCommandId(this.sessionId, {...input, projectDir: project.projectRealpath}),
       workId: input.workId,
       sessionId: this.sessionId,
-      projectDir: path.resolve(input.projectDir),
+      projectDir: project.projectDir,
       deliveryId: input.deliveryId,
       contextHash: input.contextHash,
       result,

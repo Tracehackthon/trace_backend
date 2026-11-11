@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { AgentError, demand, hash, identity, integer, keys, TERMINAL, validateRequest, validateOutput } from './protocol.mjs';
-import { assembleContext } from './context.mjs';
+import { assembleContext, validateWorksiteContext } from './context.mjs';
 import { createRetrievalSession } from './retrieval.mjs';
 
 const fixedRegistry = adapter => ({
@@ -19,7 +19,7 @@ const fixedRegistry = adapter => ({
   check: async (profileId, signal) => ({ profile: fixedRegistry(adapter).bind(profileId).binding, ...(await adapter.check({ signal })) }),
 });
 
-export function createAgentService({ store, readWorkspace, executeProduct = null, adoptCandidate = null, executorRegistry, adapter, retrievalProvider = null, timeoutMs = 180000, maxConcurrent = 1, pollMs = 250 }) {
+export function createAgentService({ store, readWorkspace, executeProduct = null, adoptCandidate = null, returnAgentWorksiteResult = null, executorRegistry, adapter, retrievalProvider = null, timeoutMs = 180000, maxConcurrent = 1, pollMs = 250 }) {
   demand(executorRegistry || adapter, 'INVALID_EXECUTOR', '缺少 Agent executor registry。', 500);
   executorRegistry ??= fixedRegistry(adapter);
   const bus = new EventEmitter(), jobs = new Map(); let closed = false, storageFailed = false;
@@ -29,6 +29,14 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
     demand(identity(body.interactionId) && body.interactionId.length <= 120 && integer(body.expectedRevision)
       && identity(body.idempotencyKey) && body.idempotencyKey.length <= 160, 'INVALID_INTERACTION_RESPONSE', '交互响应缺少稳定身份、版本或幂等键。', 400);
     return body;
+  };
+  const projectIdentityText = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 4096 && !/[\x00-\x1f\x7f]/.test(value)
+    && !['__proto__', 'constructor', 'prototype'].includes(value);
+  const validateProjectBinding = (selected, request) => {
+    if (request?.workId === undefined || selected?.binding?.capabilities?.nativeWorkspace !== true) return;
+    demand(typeof selected.executor?.validateProjectBinding === 'function', 'CODEX_PROJECT_SCOPE_MISMATCH',
+      'native Codex profile 没有可核验的工作现场项目绑定。', 403);
+    selected.executor.validateProjectBinding(request);
   };
   const get = id => { const run = store.get(id); demand(run, 'RUN_NOT_FOUND', '没有这个运行记录。', 404); return run; };
   const isWorkspaceCurrent = run => {
@@ -49,14 +57,17 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
     let current = false;
     try { current = isWorkspaceCurrent(run) && executorRegistry.isCurrent(run.profile); } catch { /* unavailable store never grants usability */ }
     return { protocolVersion: 1, runId: run.id, requestId: run.request.requestId, matterId: run.request.matterId,
+      ...(run.request.workId === undefined ? {} : { workId: run.request.workId, role: run.request.role, intake: run.request.intake, findings: run.request.findings,
+        project: run.request.project, projectIdentity: run.request.projectIdentity }),
       purpose: run.request.purpose, contextMode: run.request.contextMode, contextEpoch: run.request.contextEpoch,
       baseRevision: run.context.baseRevision, contextHash: run.context.contextHash, status: run.status,
       createdAt: run.createdAt, startedAt: run.startedAt, finishedAt: run.finishedAt, lastEventId: run.lastEventId,
       contextManifest: run.context.fragments.map(({ id, role, revision }) => ({ id, role, revision })), omitted: run.context.omitted,
       profile: run.profile, result: run.result, resultHash: run.resultHash ?? null, adoptionReceipt: run.adoptionReceipt ?? null,
+      worksiteReturn: run.worksiteReturn ?? null,
       error: run.error, runtime: run.runtime ? Object.fromEntries(Object.entries(run.runtime).filter(([key]) => key !== 'interactionResponses')) : null,
       usableAsCurrent: run.status === 'succeeded' && current,
-      adoptionAvailable: !!adoptCandidate && run.status === 'succeeded' && run.result?.kind === 'revision_candidate'
+      adoptionAvailable: !!adoptCandidate && run.request.workId === undefined && run.status === 'succeeded' && run.result?.kind === 'revision_candidate'
         && run.result?.adoption === 'not_applied',
       canonicalStateChanged: run.result?.adoption === 'applied' };
   }
@@ -85,6 +96,7 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
       if (controller.signal.aborted) return;
       demand(isWorkspaceCurrent(run), 'STALE_CONTEXT', '请求开始前工作区已变化。', 409);
       const selected = executorRegistry.resolve(run.profile);
+      validateProjectBinding(selected, run.request);
       const job = jobs.get(id); if (job) job.executor = selected.executor;
       run = update(id, { status: 'running', startedAt: new Date().toISOString() }, 'run.running', { status: 'running' });
       const safeStop = (...args) => { try { stop(...args); } catch { storageFailed = true; controller.abort(); } };
@@ -155,12 +167,21 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
       request = { ...request, profileId: selected.binding.profileId };
       demand(!request.retrieval || retrievalProvider?.status().search_configured, 'RETRIEVAL_UNAVAILABLE', '本机知乎检索未配置；没有启动模型请求。', 503);
       demand(jobs.size < maxConcurrent, 'AGENT_BUSY', '已有 Agent 请求运行；请等待或明确取消。', 429);
-      const snapshot = readWorkspace(), history = []; let ancestorId = request.previousRunId;
+      const snapshot = readWorkspace();
+      request = validateWorksiteContext(snapshot, request);
+      validateProjectBinding(selected, request);
+      const history = []; let ancestorId = request.previousRunId;
       for (let depth = 0; ancestorId && depth < 6; depth++) {
         const ancestor = get(ancestorId);
         demand(ancestor.status === 'succeeded' && ancestor.request.matterId === request.matterId
           && ancestor.request.contextMode === request.contextMode && ancestor.request.contextEpoch === request.contextEpoch
-          && ancestor.context.baseRevision === snapshot.revision, 'HISTORY_SCOPE_MISMATCH', '旧请求不属于本次事项、版本或上下文 epoch。', 409);
+          && ancestor.context.baseRevision === snapshot.revision
+          && ancestor.request.workId === request.workId
+          && (request.workId === undefined || ancestor.request.role === request.role
+            && hash({project: ancestor.request.project, projectIdentity: ancestor.request.projectIdentity}) === hash({project: request.project, projectIdentity: request.projectIdentity})),
+        'HISTORY_SCOPE_MISMATCH', '旧请求不属于本次事项、工作、项目或上下文 epoch。', 409);
+        if (request.threadId !== undefined) demand(ancestor.runtime?.threadId === request.threadId,
+          'THREAD_SCOPE_MISMATCH', '恢复线程不属于本次工作现场的上一条 Agent 运行。', 409);
         history.unshift({ runId: ancestor.id, input: ancestor.request.input, answer: ancestor.result.answer });
         ancestorId = ancestor.request.previousRunId;
       }
@@ -201,9 +222,41 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
       job.executor.respondInteraction(id, body.interactionId, body);
       return { protocolVersion: 1, replay: false, run: publicRun(get(id)), interaction: { ...pending, state: 'resolved', recoverable: false } };
     },
-    adopt(id, body) {
-      demand(adoptCandidate && executeProduct, 'ADOPTION_UNAVAILABLE', '当前产品宿主没有启用候选采纳。', 503);
+    returnWorksite(id, body) {
+      demand(returnAgentWorksiteResult, 'WORKSITE_RETURN_UNAVAILABLE', '当前 Agent 没有工作现场回接通道。', 503);
       const run = get(id);
+      demand(run.status === 'succeeded' && run.request.workId !== undefined && run.result, 'RUN_NOT_RETURNABLE', '只有带工作现场身份的已完成结果可以回接。', 409);
+      // Re-resolve the server-owned native profile before returning a result.
+      // A changed cwd/junction must not let a result from one project be
+      // attached to another worksite after the run has completed.
+      const selected = executorRegistry.resolve(run.profile);
+      validateProjectBinding(selected, run.request);
+      const nativeProjectBinding = selected.binding?.capabilities?.nativeWorkspace === true;
+      demand(keys(body, ['action', 'commandId', 'expectedRevision', 'workId', 'matterId', 'project', 'projectIdentity'])
+        && (body.action === undefined || body.action === 'returned_for_review') && identity(body.commandId)
+        && integer(body.expectedRevision) && identity(body.workId) && identity(body.matterId)
+        && (nativeProjectBinding ? projectIdentityText(body.project) : body.project === undefined || projectIdentityText(body.project))
+        && (nativeProjectBinding ? projectIdentityText(body.projectIdentity) : body.projectIdentity === undefined || projectIdentityText(body.projectIdentity)),
+      'INVALID_WORKSITE_RETURN', '工作现场回接缺少有效命令、版本或身份。', 400);
+      demand(body.workId === run.request.workId && body.matterId === run.request.matterId
+        && (body.project === undefined || body.project === run.request.project)
+        && (body.projectIdentity === undefined || body.projectIdentity === run.request.projectIdentity),
+      'WORKSITE_IDENTITY_MISMATCH', '工作现场回接身份与原 Agent 运行不一致。', 409);
+      const productResult = productCall(() => returnAgentWorksiteResult({
+        commandId: body.commandId, expectedRevision: body.expectedRevision, runId: run.id,
+        workId: run.request.workId, matterId: run.request.matterId,
+        project: run.request.project, projectIdentity: run.request.projectIdentity,
+        role: run.request.role, intake: run.request.intake, findings: run.request.findings,
+        result: run.result, resultHash: run.resultHash,
+      }));
+      const adoption = store.setWorksiteReturn(id, productResult.receipt);
+      if (adoption.event) bus.emit(id, adoption.event);
+      return {protocolVersion: 1, action: 'returned_for_review', product: productResult, receipt: productResult.receipt, run: publicRun(adoption.run)};
+    },
+    adopt(id, body) {
+      const run = get(id);
+      demand(run.request.workId === undefined, 'WORKSITE_ADOPTION_FORBIDDEN', '工作现场 Agent 结果只能回接当前工作现场复核区，不能走事项候选采纳。', 409);
+      demand(adoptCandidate && executeProduct, 'ADOPTION_UNAVAILABLE', '当前产品宿主没有启用候选采纳。', 503);
       demand(run.status === 'succeeded' && run.result?.kind === 'revision_candidate'
         && (run.result.adoption === 'not_applied' || run.result.adoption === 'applied' && run.adoptionReceipt?.commandId === body.commandId),
         'RUN_NOT_ADOPTABLE', '这不是一个尚未处理的修订候选，或重放身份不匹配。', 409);
@@ -223,8 +276,9 @@ export function createAgentService({ store, readWorkspace, executeProduct = null
       return {protocolVersion:1, action:'dismiss', run:publicRun(adoption.run)};
     },
     undoAdoption(id, body) {
+      const run = get(id); demand(run.request.workId === undefined, 'WORKSITE_ADOPTION_FORBIDDEN', '工作现场 Agent 结果不能撤销为事项候选。', 409);
       demand(executeProduct, 'ADOPTION_UNAVAILABLE', '当前产品宿主没有启用候选撤销。', 503);
-      const run = get(id); demand(run.result?.adoption === 'applied', 'ADOPTION_CONFLICT', '这个候选当前没有可撤销的应用。', 409);
+      demand(run.result?.adoption === 'applied', 'ADOPTION_CONFLICT', '这个候选当前没有可撤销的应用。', 409);
       const snapshot = readWorkspace(), session = snapshot.host?.chain.sessions[run.request.matterId], origin = session?.suggestion?.origin;
       demand(origin?.type === 'agent-run' && origin.runId === run.id && origin.resultHash === run.resultHash,
         'ADOPTION_STALE', '草稿中的这处建议已经变化；旧撤销没有覆盖后来编辑。', 409);

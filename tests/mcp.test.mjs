@@ -30,6 +30,15 @@ async function call(client, name, args) {
 
 test('Trace MCP uses proposal/adoption, protects source state, and migrates legacy projects without automatic rewrites', async () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mcp-'));
+  const traceDir = path.join(project, '.trace');
+  fs.mkdirSync(path.join(traceDir, 'project-adoptions'), {recursive: true});
+  fs.mkdirSync(path.join(traceDir, 'state'), {recursive: true});
+  fs.writeFileSync(path.join(traceDir, 'project-adoptions', 'kept.json'), '{"kept":true}\n');
+  fs.writeFileSync(path.join(traceDir, 'state', 'agent.sqlite'), Buffer.from([1, 2, 3, 255]));
+  fs.writeFileSync(path.join(traceDir, 'state', 'web.sqlite'), Buffer.from([4, 5, 6, 255]));
+  const adoptionBefore = fs.readFileSync(path.join(traceDir, 'project-adoptions', 'kept.json'));
+  const agentStateBefore = fs.readFileSync(path.join(traceDir, 'state', 'agent.sqlite'));
+  const webStateBefore = fs.readFileSync(path.join(traceDir, 'state', 'web.sqlite'));
   const environment = Object.fromEntries(Object.entries(process.env).filter((entry) => typeof entry[1] === 'string'));
   environment.CODEX_THREAD_ID = 'codex-context-skill-task';
   delete environment.CODEX_SESSION_ID;
@@ -44,12 +53,20 @@ test('Trace MCP uses proposal/adoption, protects source state, and migrates lega
 
     const initialization = await call(client, 'trace_project_initialize_propose', {project_dir: project, source_mode: 'local'});
     assert.equal(initialization.operation, 'project_initialize');
-    assert.deepEqual(initialization.summary.will_not_do, ['read external source bodies', 'install global hooks', 'replace existing Trace state']);
+    assert.equal(initialization.summary.namespace, 'extend-existing-trace-namespace');
+    assert.ok(initialization.summary.preserve_existing_entries.includes('project-adoptions/'));
+    assert.ok(initialization.summary.preserve_existing_entries.includes('state/'));
+    assert.ok(initialization.summary.will_create.includes('.trace/state/trace.sqlite'));
+    assert.deepEqual(initialization.summary.will_not_do, ['read external source bodies', 'install global hooks', 'overwrite or delete any pre-existing .trace path', 'open or modify existing SQLite databases']);
+    assert.equal(fs.existsSync(path.join(traceDir, 'project.json')), false, 'proposal is write-free');
     const created = await call(client, 'trace_project_initialize_apply', {
       project_dir: project, source_mode: 'local', proposal_id: initialization.proposal_id, approval: `adopt:${initialization.proposal_id}`,
     });
     assert.equal(created.status, 'initialized');
     assert.equal(fs.existsSync(path.join(project, '.trace', 'state', 'trace.sqlite')), true);
+    assert.deepEqual(fs.readFileSync(path.join(traceDir, 'project-adoptions', 'kept.json')), adoptionBefore);
+    assert.deepEqual(fs.readFileSync(path.join(traceDir, 'state', 'agent.sqlite')), agentStateBefore);
+    assert.deepEqual(fs.readFileSync(path.join(traceDir, 'state', 'web.sqlite')), webStateBefore);
 
     const source = await call(client, 'trace_source_view', {project_dir: project});
     assert.equal(source.source.root_visibility, 'private-not-returned');
@@ -105,6 +122,48 @@ test('Trace MCP uses proposal/adoption, protects source state, and migrates lega
   } finally {
     await client.close();
     fs.rmSync(project, {recursive: true, force: true});
+  }
+});
+
+test('Trace MCP rejects missing and non-directory Codex project paths before making a product request', async () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mcp-project-path-'));
+  const missingParent = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mcp-missing-parent-'));
+  const missing = path.join(missingParent, path.basename(project));
+  const file = path.join(project, 'not-a-directory');
+  fs.writeFileSync(file, 'fixture', 'utf8');
+  const environment = Object.fromEntries(Object.entries(process.env).filter((entry) => typeof entry[1] === 'string'));
+  environment.CODEX_THREAD_ID = 'codex-project-path-task';
+  delete environment.CODEX_SESSION_ID;
+  const client = await connect(project, environment);
+  try {
+    for (const projectDir of [missing, file]) {
+      const response = await client.callTool({name: 'trace_product_context_receive', arguments: {project_dir: projectDir, work_id: 'missing-work'}});
+      const body = response.content?.find(item => item.type === 'text');
+      assert.ok(body, 'invalid project path must return a structured MCP error');
+      const value = JSON.parse(body.text);
+      assert.equal(response.isError, true);
+      assert.equal(value.ok, false);
+      assert.equal(value.error.code, 'INVALID_PROJECT_DIR');
+
+      const returned = await client.callTool({name: 'trace_product_result_return', arguments: {
+        project_dir: projectDir,
+        work_id: 'missing-work',
+        delivery_id: 'missing-delivery',
+        context_hash: '0'.repeat(64),
+        matter_id: 'missing-matter',
+        fact: 'preflight must reject before HTTP',
+      }});
+      const returnedBody = returned.content?.find(item => item.type === 'text');
+      assert.ok(returnedBody, 'invalid project path must return a structured MCP error for return');
+      const returnedValue = JSON.parse(returnedBody.text);
+      assert.equal(returned.isError, true);
+      assert.equal(returnedValue.ok, false);
+      assert.equal(returnedValue.error.code, 'INVALID_PROJECT_DIR');
+    }
+  } finally {
+    await client.close();
+    fs.rmSync(project, {recursive: true, force: true});
+    fs.rmSync(missingParent, {recursive: true, force: true});
   }
 });
 

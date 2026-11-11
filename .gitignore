@@ -11,3 +11,24 @@ python/sdk/.venv/
 .workbuddy-ai/
 trace-upcast-contract-test-*.jsonl
 .DS_Store
+
+# 私有状态与本机验证产物；忽略不代表已获删除授权。
+.trace/
+.tmp/
+.cache/
+.test-results/
+test-results/
+playwright-report/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+.env
+.env.*
+!.env.example
+
+# 现有本机证据、嵌套构建副本；不是 Runtime 正式源码入口。
+/artifacts/
+/traceweb/
+/trace-runtime-desktop-package-20260916-2/

@@ -1,4 +1,4 @@
-import {AppendOnlyStore, SqliteVersionedStore, StorageError, type VersionedStore} from '../../storage/src/index.js';
+import {AppendOnlyStore, SqliteVersionedStore, StorageError, type DatabaseIdentity, type VersionedRecord, type VersionedStore} from '../../storage/src/index.js';
 import {ChangeSetService} from '../../change-set/src/index.js';
 import {DataLedger} from '../../data/src/index.js';
 import {ContinuityLedger, DecisionTrail, type CreateDecisionPoint, type CreateDiscussionTurn, type CreateReceipt, type CreateThread, type ResolveDecisionPoint, type ReviseDecisionPoint, type UpdateThread, type ContinuityEnvelope} from '../../continuity/src/index.js';
@@ -14,6 +14,14 @@ export interface TraceRuntimePaths {
   dataStateFile?: string;
   continuityStateFile?: string;
   sqliteStateFile?: string;
+  /** Optional explicit installation/workspace binding for a SQLite project DB. */
+  workspaceId?: string;
+  installationId?: string;
+  runtimeVersion?: string;
+  /** Legacy files are read-only unless this is explicitly enabled. */
+  allowLegacyIdentity?: boolean;
+  /** Migrate an old project DB only when both IDs are supplied explicitly. */
+  upgradeLegacyIdentity?: boolean;
 }
 
 /**
@@ -27,11 +35,28 @@ export class TraceRuntime {
   readonly decisions?: DecisionTrail;
   readonly events?: SqliteTraceEventStore;
   readonly promptCases: PromptCaseCaptureService;
+  private projectIdentity?: DatabaseIdentity;
+  private readonly identityStores: Array<{upgradeIdentity(input: {workspaceId: string; installationId: string; runtimeVersion?: string}): DatabaseIdentity}> = [];
+  private readonly allowLegacyIdentity: boolean;
 
   constructor(paths: TraceRuntimePaths) {
+    this.allowLegacyIdentity = paths.allowLegacyIdentity ?? false;
     if (!paths.sqliteStateFile && (!paths.changeStateFile || !paths.dataStateFile)) throw new StorageError('INVALID_PATH', 'TraceRuntime requires either sqliteStateFile or both changeStateFile and dataStateFile');
-    const changeStore: VersionedStore<ChangeSet> = paths.sqliteStateFile ? new SqliteVersionedStore<ChangeSet>(paths.sqliteStateFile, 'change_sets') : new AppendOnlyStore<ChangeSet>(paths.changeStateFile!);
-    const dataStore: VersionedStore<DataEnvelope> = paths.sqliteStateFile ? new SqliteVersionedStore<DataEnvelope>(paths.sqliteStateFile, 'data_records') : new AppendOnlyStore<DataEnvelope>(paths.dataStateFile!);
+    const sqliteOptions = {
+      ...(paths.workspaceId === undefined ? {} : {workspaceId: paths.workspaceId}),
+      ...(paths.installationId === undefined ? {} : {installationId: paths.installationId}),
+      ...(paths.runtimeVersion === undefined ? {} : {runtimeVersion: paths.runtimeVersion}),
+      allowLegacyIdentity: this.allowLegacyIdentity,
+      ...(paths.upgradeLegacyIdentity === undefined ? {} : {upgradeLegacyIdentity: paths.upgradeLegacyIdentity}),
+    };
+    const makeSqliteStore = <T extends VersionedRecord>(table: string): SqliteVersionedStore<T> => {
+      const store = new SqliteVersionedStore<T>(paths.sqliteStateFile!, table, sqliteOptions);
+      this.identityStores.push(store);
+      if (this.projectIdentity === undefined) this.projectIdentity = store.identity;
+      return store;
+    };
+    const changeStore: VersionedStore<ChangeSet> = paths.sqliteStateFile ? makeSqliteStore<ChangeSet>('change_sets') : new AppendOnlyStore<ChangeSet>(paths.changeStateFile!);
+    const dataStore: VersionedStore<DataEnvelope> = paths.sqliteStateFile ? makeSqliteStore<DataEnvelope>('data_records') : new AppendOnlyStore<DataEnvelope>(paths.dataStateFile!);
     let changes!: ChangeSetService;
     let data!: DataLedger;
     changes = new ChangeSetService(changeStore, {resolveDataRef: ref => {
@@ -44,11 +69,15 @@ export class TraceRuntime {
     this.data = data;
     this.promptCases = new PromptCaseCaptureService(this.data);
     if (paths.sqliteStateFile || paths.continuityStateFile) {
-      const continuityStore: VersionedStore<ContinuityEnvelope> = paths.sqliteStateFile ? new SqliteVersionedStore<ContinuityEnvelope>(paths.sqliteStateFile, 'continuity_records') : new AppendOnlyStore<ContinuityEnvelope>(paths.continuityStateFile!);
+      const continuityStore: VersionedStore<ContinuityEnvelope> = paths.sqliteStateFile ? makeSqliteStore<ContinuityEnvelope>('continuity_records') : new AppendOnlyStore<ContinuityEnvelope>(paths.continuityStateFile!);
       this.continuity = new ContinuityLedger(continuityStore);
       this.decisions = new DecisionTrail(this.continuity);
     }
-    if (paths.sqliteStateFile) this.events = new SqliteTraceEventStore(paths.sqliteStateFile);
+    if (paths.sqliteStateFile) this.events = new SqliteTraceEventStore(paths.sqliteStateFile, {
+      allowLegacyIdentity: this.allowLegacyIdentity,
+      ...(paths.workspaceId === undefined ? {} : {workspaceId: paths.workspaceId}),
+      ...(paths.installationId === undefined ? {} : {installationId: paths.installationId}),
+    });
   }
 
   createChange(input: CreateChangeSet) {
@@ -102,6 +131,22 @@ export class TraceRuntime {
     return this.data.list(kind);
   }
 
+  get identity(): DatabaseIdentity | undefined {
+    return this.projectIdentity === undefined ? undefined : structuredClone(this.projectIdentity);
+  }
+
+  getIdentity(): DatabaseIdentity | undefined { return this.identity; }
+
+  /** Explicitly bind a legacy project database to this installation/workspace. */
+  upgradeIdentity(input: {workspaceId: string; installationId: string; runtimeVersion?: string}): DatabaseIdentity {
+    if (this.identityStores.length === 0) throw new StorageError('IDENTITY_UNAVAILABLE', 'JSONL runtime has no SQLite identity metadata');
+    let upgraded!: DatabaseIdentity;
+    for (const store of this.identityStores) upgraded = store.upgradeIdentity(input);
+    this.projectIdentity = upgraded;
+    this.events?.syncIdentity(upgraded);
+    return this.identity!;
+  }
+
   verifyDataChain(recordId: string) {
     return this.data.verifyChain(recordId);
   }
@@ -128,6 +173,9 @@ export class TraceRuntime {
   decisionPath(threadId: string) { return this.requireDecisions().pathFor(threadId); }
   recordTraceEvent(input: CreateTraceEvent): TraceEvent {
     if (!this.events) throw new StorageError('TRACE_EVENTS_UNAVAILABLE', 'Trace event storage requires sqliteStateFile');
+    if (this.projectIdentity?.verification_state !== 'verified' && !this.allowLegacyIdentity) {
+      throw new StorageError('LEGACY_IDENTITY_UNVERIFIED', 'Legacy SQLite state is read-only until it is explicitly upgraded with workspace and installation identity');
+    }
     return this.events.record(input);
   }
   listTraceEvents(correlationId: string): TraceEvent[] {

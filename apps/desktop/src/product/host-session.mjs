@@ -1,3 +1,5 @@
+import {ensureRuntimeIdentity} from './runtime-identity.mjs';
+
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const short = (value, limit = 180) => { const text = String(value ?? ''); return Array.from(text).length > limit ? `${Array.from(text).slice(0, limit).join('')}…` : text; };
 
@@ -12,7 +14,8 @@ export function mountHostSession({root, onBack = () => {}} = {}) {
   let state = {sessions: [], turns: [], findings: [], jobs: [], proposals: [], activations: [], privacy: [], guard: [], policies: [], orchestrations: [], trials: [], worker: null};
   let error = null;
   const request = async (url, options = {}) => {
-    const response = await fetch(url, {cache: 'no-store', signal: abort.signal, ...options, headers: {'accept': 'application/json', ...(options.body ? {'content-type': 'application/json', origin: location.origin, 'sec-fetch-site': 'same-origin'} : {}), ...(options.headers ?? {})}});
+    await ensureRuntimeIdentity(url.split('?')[0]);
+    const response = await fetch(url, {cache: 'no-store', signal: abort.signal, ...options, headers: {'accept': 'application/json', 'x-trace-runtime-protocol': '1', ...(options.body ? {'content-type': 'application/json', origin: location.origin, 'sec-fetch-site': 'same-origin'} : {}), ...(options.headers ?? {})}});
     const value = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(value?.error?.message || `Product Workspace request failed (${response.status})`);
     return value;

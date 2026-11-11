@@ -1,4 +1,5 @@
 import {h} from './library.mjs';
+import {ensureRuntimeIdentity} from './runtime-identity.mjs';
 
 const terminal = ['succeeded', 'failed', 'cancelled', 'stale', 'timed_out', 'interrupted'];
 const purposeLabels = {discuss:'一起分清', explain:'解释这一处', compare:'比较不同条件', revise:'建议修改选中部分'};
@@ -287,7 +288,13 @@ export function mountAgentPanel(root, {workspace, matterId, selection = null, so
   const find = selector => root.querySelector(selector), status = find('[data-agent-status]'), result = find('[data-agent-result]'), interaction = find('[data-agent-interaction]'), recovery = find('[data-agent-recovery]');
   const form = find('[data-agent-form]'), submit = form.querySelector('[type=submit]'), cancel = find('[data-cancel-run]');
   const runRefsKey = `trace:agent-runs:${identity.matterId}:${identity.workId || 'matter'}`; let resumeSource = null, storedRuns = [];
-  const request = async (path, body) => { const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', headers: body === undefined ? {} : {'content-type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})}); let value; try { value = await response.json(); } catch { throw Error(`Agent Runtime 返回了无法读取的响应（${response.status}）。`); } if (!response.ok) throw Error(value.error?.message || `Agent Runtime 请求失败（${response.status}）。`); return value; };
+  const request = async (path, body) => {
+    await ensureRuntimeIdentity(path.split('?')[0]);
+    const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', headers: {'x-trace-runtime-protocol': '1', ...(body === undefined ? {} : {'content-type': 'application/json'})}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
+    let value; try { value = await response.json(); } catch { throw Error(`Agent Runtime 返回了无法读取的响应（${response.status}）。`); }
+    if (!response.ok) throw Error(value.error?.message || `Agent Runtime 请求失败（${response.status}）。`);
+    return value;
+  };
   const controller = createAgentPanelController({request, identity, EventSourceImpl: globalThis.EventSource});
   const line = (tag, value, className) => { const node = document.createElement(tag); if (className) node.className = className; node.textContent = text(value); return node; };
   function readStoredRuns() { try { const value = JSON.parse(sessionStorage.getItem(runRefsKey) || '[]'); return Array.isArray(value) ? value.slice(0, 8) : []; } catch { return []; } }

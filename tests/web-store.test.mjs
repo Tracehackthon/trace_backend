@@ -201,9 +201,11 @@ test('rejects wrong/ledger database before changing bytes or creating web tables
   assert.throws(() => createProductWorkspace({ file }), error => error.code === 'WRONG_DATABASE');
   assert.deepEqual(fs.readFileSync(file), before);
   const verify = new DatabaseSync(file, { readOnly: true }); try { assert.deepEqual(verify.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => row.name), ['adopted']); } finally { verify.close(); }
-  assert.throws(() => createProductWorkspace({ file: path.join(path.dirname(file), 'trace.sqlite') }), error => error.code === 'WRONG_DATABASE');
+  const renamedProduct = createProductWorkspace({ file: path.join(path.dirname(file), 'trace.sqlite') });
+  try { assert.equal(renamedProduct.identity.role, 'product-web'); assert.equal(renamedProduct.identity.verification_state, 'verified'); }
+  finally { renamedProduct.close(); }
   assert.throws(() => createProductWorkspace({ file: 'relative.sqlite' }), error => error.code === 'INVALID_PATH');
-  assert.equal(fs.existsSync(path.join(path.dirname(file), 'trace.sqlite')), false);
+  assert.equal(fs.existsSync(path.join(path.dirname(file), 'trace.sqlite')), true);
 });
 
 test('damaged revision head cannot silently turn saved entities into an empty workspace', async t => {

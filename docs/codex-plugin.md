@@ -33,6 +33,8 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 2. 将该 marketplace 注册给 Codex，并安装 `trace-codex`；
 3. 为 MCP 写入当前 Trace runtime 的位置，使 Plugin 不依赖开发者电脑路径。
 
+安装器会先校验 `TRACE_RUNTIME_ROOT` 对应的 Trace runtime/package manifest、必需服务入口和（发行包）release-manifest 哈希；只有通过校验的 root 才会进入 dry-run、`--replace` 或写入 MCP 配置。MCP launcher 启动前也会复核同一身份，因此一个只含 `main.js` 的旧 checkout、半拷贝目录或其他 lookalike 目录会 fail-closed，而不会被当成当前 runtime。
+
 它**不会**创建 `.trace/`、读取任何认知源、改动已有项目、迁移 profile，或启用 Codex hooks。插件安装与项目状态是两条独立生命周期。
 
 如果只想检查安装方案，请始终先用 `--dry-run`。若更新 Plugin，先在 Codex 里确认当前项目没有未完成的变更，再显式运行相同命令并加入 `--replace`；它会备份旧 managed marketplace，并只刷新 `trace-codex@trace-runtime-local`，不会替任何项目做迁移。
@@ -48,7 +50,7 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 | `$trace-context 把我的上下文 Skill 包带进来` | 从当前 locked profile 编译并领取 task/project-bound 虚拟 `SKILL.md` | model/source map 版本、hash、来源是否可导航、activation receipt；不会全局安装 |
 | `$trace-work 接收我在 Trace 里准备的工作` | 领取用户确认的具体工作快照；完成后回传结果 | delivery/session/project/hash 回执与 Trace 复核状态 |
 | `$trace 我升级后需要做什么？` | 只读检查版本与 lock | 哪些项目没有变、哪些变化需要显式采用 |
-| `$trace 在 Codex 中启用接续` | 先预览 hooks 配置 | 用户级影响、备份、保留的无关 hooks、按 cwd 路由的范围 |
+| `$trace 在 Codex 中启用接续` | 先预览 hooks 配置 | 用户级影响、备份、保留的无关 hooks、cwd 候选与身份核验范围 |
 | `$trace 跟着这个任务` | 使用当前宿主身份 attach Host Session | 当前 session 已附着；不要求提供 session id，不回显隐私正文 |
 | `$trace 暂停跟随` / `$trace 结束跟随` | pause 或 detach 当前 Host Session | 后续事件停止接收；SessionEnd 仍正确封口 |
 | `$trace 记下这个流程改进：…` | 将明确动作关联当前 HostTurn，创建 captured finding | `scope=unknown`、`target_kind=unresolved`；不自动生成 Skill |

@@ -267,7 +267,10 @@ function isReadOnlyQuery(statement: SingleSqlStatement): boolean {
     const operation = topLevelSqlWords(statement.sql).find(word => ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'REPLACE'].includes(word));
     return operation === 'SELECT';
   }
-  return /^PRAGMA\s+(?:main\.)?(?:integrity_check|quick_check)\s*$/i.test(statement.sql);
+  // These are read-only metadata probes used to establish the owner of a
+  // state file. Keep the allow-list explicit: arbitrary PRAGMA statements can
+  // mutate connection/database state and must still go through run/exec.
+  return /^PRAGMA\s+(?:main\.)?(?:integrity_check|quick_check|application_id|user_version|table_info\([A-Za-z_][A-Za-z0-9_]*\))\s*$/i.test(statement.sql);
 }
 
 function assertQueryStatement(sql: string, readOnly: boolean): SingleSqlStatement {
@@ -367,10 +370,47 @@ class SqlJsFileCore {
 
   private persist(): void {
     const temporary = `${this.file}.trace-sqljs-${process.pid}-${Date.now()}.tmp`;
+    const backup = `${this.file}.trace-sqljs-backup-${process.pid}-${process.hrtime.bigint()}.tmp`;
     try {
       fs.writeFileSync(temporary, Buffer.from(this.db.export()), {flag: 'wx'});
-      fs.renameSync(temporary, this.file);
+      // `renameSync` replaces an existing destination on POSIX, but Windows
+      // reports EPERM when the destination already exists. All Trace sql.js
+      // writers hold the sidecar lock here. Move the old destination to a
+      // same-directory backup before installing the new file so a sharing
+      // violation never silently deletes the last known-good state.
+      let replaced = false;
+      let lastError: unknown;
+      let cleanupBackup = false;
+      for (let attempt = 0; attempt < 20 && !replaced; attempt += 1) {
+        try {
+          fs.renameSync(temporary, this.file);
+          replaced = true;
+        } catch (error) {
+          lastError = error;
+          const code = (error as NodeJS.ErrnoException).code;
+          if (!['EACCES', 'EEXIST', 'EPERM'].includes(code ?? '')) throw error;
+          let moved = false;
+          try {
+            fs.renameSync(this.file, backup);
+            moved = true;
+            fs.renameSync(temporary, this.file);
+            replaced = true;
+            cleanupBackup = true;
+          } catch (replaceError) {
+            lastError = replaceError;
+            if (moved) {
+              try { fs.renameSync(backup, this.file); }
+              catch (restoreError) { lastError = restoreError; throw restoreError; }
+            }
+          }
+          if (!replaced) Atomics.wait(sleepCell, 0, 0, 5);
+        }
+      }
+      if (!replaced) throw lastError;
       this.signature = fileSignature(this.file);
+      if (cleanupBackup) {
+        try { fs.unlinkSync(backup); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      }
     } finally {
       try { fs.unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }

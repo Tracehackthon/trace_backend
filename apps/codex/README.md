@@ -18,7 +18,8 @@ $trace 现在的来源使用状态是什么？
 
 ```text
 Codex event cwd
-  → nearest .trace/project.json
+  → nearest .trace/project.json candidate
+  → descriptor + Git root + worktree identity verification
   → this project source.profile.json + state.sqlite
   → Trace source lease / evidence handler
 ```
@@ -29,7 +30,7 @@ Codex event cwd
 
 | 事件 | Trace 的行为 | Codex 的行为 |
 |---|---|---|
-| `SessionStart` | 根据 cwd 找项目，可提供 source lease | 获得当前项目的协作边界 |
+| `SessionStart` | 从 cwd 发现候选；身份核验通过才提供 source lease | 获得已验证项目的协作边界；冲突时不激活 |
 | `UserPromptSubmit` | 提供 formal source root、prefix、预算和隐私约束；未附着 Host Session 时不持久化 prompt | 决定是否需要并怎样使用来源 |
 | `PreToolUse` | 对可识别的 formal Markdown native read 检查单轮预算 | 工具调用仍由 Codex 发起；超过预算的可识别读会被拒绝 |
 | `PostToolUse` | 观察实际 native tool 访问，写入安全 evidence；Host Session 只留 event/tool identity | 保持原始工具结果和推理控制权 |
@@ -91,7 +92,7 @@ Codex event cwd
 
 ## Plugin 更新与维护者接口
 
-安装或更新 `trace-codex` Plugin 不会启用 hooks，也不会迁移任何项目。hooks 仍需单独 proposal → 用户采用 → 备份/receipt；旧项目仍按当前 cwd 找到自己的 `.trace/`。
+安装或更新 `trace-codex` Plugin 不会启用 hooks，也不会迁移任何项目。hooks 仍需单独 proposal → 用户采用 → 备份/receipt；旧项目由当前 cwd 发现 `.trace/` 候选，并在 descriptor、Git root 与 worktree 核验通过后使用。
 
 ## 维护者接口
 

@@ -141,6 +141,7 @@ export interface CodexHostSessionIngest {
     hook_event_name: string;
     session_id?: string;
     turn_id?: string;
+    cwd?: string;
     tool_use_id?: string;
     tool_input?: unknown;
     tool_response?: unknown;
@@ -232,8 +233,13 @@ function sourceAvailability(sourceProfile: MyWikiSourceProfile | undefined): {st
   } catch { return {status: 'unavailable'}; }
 }
 
+function hookSessionId(input: CodexHookInput): string | undefined {
+  return typeof input.session_id === 'string' && input.session_id.length > 0 ? input.session_id : undefined;
+}
 function hookThreadId(input: CodexHookInput): string {
-  return typeof input.session_id === 'string' && input.session_id.length > 0 ? input.session_id : `codex-hook-${Date.now()}`;
+  const sessionId = hookSessionId(input);
+  if (sessionId === undefined) throw new Error('Codex hook session_id is required for a durable host identity');
+  return sessionId;
 }
 function hookTurnId(input: CodexHookInput): string | undefined {
   return typeof input.turn_id === 'string' && input.turn_id.length > 0 ? input.turn_id : undefined;
@@ -338,6 +344,30 @@ function safeHostSessionReceipt(value: Record<string, unknown>): Record<string, 
   // prompt back through the activation context (the host already owns it).
   const {turn: _turn, ...safe} = value;
   return safe;
+}
+
+function hostBindingBlocked(value: Record<string, unknown> | undefined): boolean {
+  if (value === undefined) return false;
+  const binding = value.project_binding;
+  if (!binding || typeof binding !== 'object' || Array.isArray(binding)) return false;
+  const status = (binding as Record<string, unknown>).status;
+  return status === 'unresolved' || status === 'conflict';
+}
+
+function failClosedHookOutput(input: CodexHookInput, reason: string, hostSessionEvent?: Record<string, unknown>): Record<string, unknown> {
+  // Pre/Post tool hooks must not replace or annotate the native tool result;
+  // returning an empty object is the safe no-op for those events.  Lifecycle
+  // hooks can expose a machine-readable diagnostic without creating a Trace
+  // activation or durable session identity.
+  if (input.hook_event_name !== 'SessionStart' && input.hook_event_name !== 'UserPromptSubmit') return {};
+  const binding = hostSessionEvent?.project_binding;
+  const bindingStatus = binding && typeof binding === 'object' && !Array.isArray(binding) && (binding as Record<string, unknown>).status === 'conflict' ? 'conflict' : 'unresolved';
+  const visible = {
+    trace: 'host_session', status: reason === 'missing_session_id' ? 'unresolved' : bindingStatus, reason,
+    ...(reason === 'missing_session_id' ? {durable_identity: 'session_id_required'} : {}),
+    ...(hostSessionEvent === undefined ? {} : {host_session_event: safeHostSessionReceipt(hostSessionEvent)}),
+  };
+  return {hookSpecificOutput: {hookEventName: input.hook_event_name, additionalContext: JSON.stringify(visible)}};
 }
 
 function buildSourceActivationHookOutput(input: CodexHookInput, runtime: TraceRuntime, configuration: CodexHookConfiguration, hostSessionEvent?: Record<string, unknown>, hostWorkflow?: CodexHostWorkflow): Record<string, unknown> {
@@ -520,6 +550,12 @@ function hookConfiguration(value?: MyWikiSourceProfile | CodexHookConfiguration)
 }
 
 export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntime, configuration?: MyWikiSourceProfile | CodexHookConfiguration, hostSessionIngest?: CodexHostSessionIngest, hostWorkflow?: CodexHostWorkflow): Record<string, unknown> {
+  if (input.hook_event_name !== undefined && HOST_SESSION_HOOK_EVENTS.has(input.hook_event_name) && hookSessionId(input) === undefined) {
+    // Never invent a durable identity from wall-clock time.  In particular,
+    // do not call activateCodexTurn or host ingest: both would make a missing
+    // Codex session look persistent and could misroute a turn across projects.
+    return failClosedHookOutput(input, 'missing_session_id');
+  }
   const normalized = hookConfiguration(configuration);
   const hostSessionEvent = hostSessionIngest !== undefined && input.hook_event_name !== undefined && HOST_SESSION_HOOK_EVENTS.has(input.hook_event_name)
     ? hostSessionIngest.ingestEvent({
@@ -527,6 +563,7 @@ export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntim
       hook_event_name: input.hook_event_name,
       ...(input.session_id === undefined ? {} : {session_id: input.session_id}),
       ...(input.turn_id === undefined ? {} : {turn_id: input.turn_id}),
+      ...(input.cwd === undefined ? {} : {cwd: input.cwd}),
       ...(input.tool_use_id === undefined ? {} : {tool_use_id: input.tool_use_id}),
       ...(input.tool_input === undefined ? {} : {tool_input: input.tool_input}),
       ...(input.tool_response === undefined ? {} : {tool_response: input.tool_response}),
@@ -534,6 +571,7 @@ export function buildCodexHookOutput(input: CodexHookInput, runtime: TraceRuntim
       ...(input.last_assistant_message === undefined ? {} : {last_assistant_message: input.last_assistant_message}),
     })
     : undefined;
+  if (hostBindingBlocked(hostSessionEvent)) return failClosedHookOutput(input, String(hostSessionEvent?.reason ?? 'project_binding_drift'), hostSessionEvent);
   if (input.hook_event_name === 'SessionStart' || input.hook_event_name === 'UserPromptSubmit') return buildSourceActivationHookOutput(input, runtime, normalized, hostSessionEvent, hostWorkflow);
   if (input.hook_event_name === 'PreToolUse') return buildPreToolHookOutput(input, runtime, normalized.source_profile);
   if (input.hook_event_name === 'PostToolUse') return buildPostToolHookOutput(input, runtime, normalized.source_profile);

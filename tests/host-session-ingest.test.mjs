@@ -36,7 +36,10 @@ function event(sessionId, turnId, hookEventName, extra = {}) {
 }
 
 function attach(store, sessionId, commandId = `attach-${sessionId}`) {
-  return store.hostSessions.attach({host: 'codex', sessionId, commandId, projectRef: 'D:\\workspace\\demo'});
+  // These lifecycle tests exercise Host ingest, not project binding.  A
+  // personal session is explicit and avoids manufacturing an invalid project
+  // identity now that project_ref must resolve to a real descriptor/repo.
+  return store.hostSessions.attach({host: 'codex', sessionId, commandId, projectRef: null});
 }
 
 async function serve(t, file) {
@@ -102,7 +105,7 @@ test('explicit attach captures a turn, replays the same event exactly, and rejec
   const attached = attach(store, 'session-capture');
   assert.equal(attached.status, 'attached');
   assert.equal(attached.session.capture_policy, 'explicit');
-  assert.equal(attached.session.project_ref, 'D:\\workspace\\demo');
+  assert.equal(attached.session.project_ref, null);
   assert.equal(store.read().revision, 0);
 
   const promptInput = event('session-capture', 'turn-1', 'UserPromptSubmit', {prompt: '第一行\n第二行\t带制表符'});

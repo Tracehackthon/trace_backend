@@ -256,6 +256,20 @@
         ]
       },
       "visualReferences": []
+    },
+    {
+      "key": "vendor.d3-attention",
+      "path": "src/vendor/d3-attention.bundle.mjs",
+      "source": "src/vendor/d3-attention.bundle.mjs (audited offline bundle)",
+      "sha256": "AC6182A7CE3BEC5613AAC1E25614BE06148AE978E1C2B5DFA422CB5229056732",
+      "bytes": 191142,
+      "license": {
+        "type": "ISC-and-BSD-transitive",
+        "entries": [
+          "src/vendor/d3-attention.LICENSE.txt"
+        ]
+      },
+      "visualReferences": []
     }
   ]
 }

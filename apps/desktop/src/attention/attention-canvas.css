@@ -1,0 +1,117 @@
+.attention-canvas {
+  --canvas-ink: #173c36;
+  --canvas-muted: #61766f;
+  --canvas-line: #90b5a7;
+  --canvas-focus: #2b6956;
+  --canvas-mint: #bfe8d7;
+  --canvas-surface: rgba(249, 253, 247, .86);
+  --canvas-shadow: 0 18px 48px rgba(22, 70, 56, .16);
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  overflow: hidden;
+  color: var(--canvas-ink);
+  background: #eaf3ee;
+  font-family: "Trace Chain Sans", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.45;
+  touch-action: none;
+}
+.attention-canvas *,
+.attention-canvas *::before,
+.attention-canvas *::after { box-sizing: border-box; }
+.attention-canvas__camera-surface,
+.attention-canvas__world,
+.attention-canvas__screen { position: absolute; inset: 0; }
+.attention-canvas__camera-surface { z-index: 1; outline: none; overflow: hidden; touch-action: none; }
+.attention-canvas__world { transform-origin: 0 0; will-change: transform; pointer-events: none; }
+.attention-canvas__edges { position: absolute; inset: -24%; width: 148%; height: 148%; overflow: visible; pointer-events: none; }
+.attention-canvas__edges path { stroke: var(--canvas-line); stroke-width: 2.4; vector-effect: non-scaling-stroke; opacity: .72; transition: opacity .18s ease; }
+.attention-canvas__nodes { position: absolute; inset: 0; pointer-events: none; }
+.attention-canvas__node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 16px 18px 14px;
+  border: 1px solid rgba(255, 255, 255, .88);
+  border-radius: 28px 31px 25px 34px;
+  background: linear-gradient(140deg, rgba(255, 255, 255, .92), rgba(240, 251, 244, .78));
+  box-shadow: 0 8px 24px rgba(28, 78, 64, .12), inset 0 0 0 1px rgba(144, 185, 166, .17);
+  color: var(--canvas-ink);
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  outline: none;
+  transform-origin: center;
+  /* Keep every node in the accessible DOM, while allowing Chromium to skip
+     paint/layout work for world-space cards outside the viewport. */
+  content-visibility: auto;
+  contain-intrinsic-size: 112px 220px;
+  transition: box-shadow .18s ease, border-color .18s ease, opacity .18s ease;
+}
+.attention-canvas__node:hover,
+.attention-canvas__node:focus-visible,
+.attention-canvas__node[data-current-focus="true"] { border-color: var(--canvas-focus); box-shadow: 0 9px 27px rgba(28, 89, 68, .18), 0 0 0 4px rgba(185, 232, 212, .54); }
+.attention-canvas__node:active,
+.attention-canvas__node[data-dragging] { cursor: grabbing; }
+.attention-canvas__node[data-dragging] { opacity: .78; transition: none; }
+.attention-canvas__node-kind,
+.attention-canvas__node-lane { color: var(--canvas-muted); font-size: 11px; letter-spacing: .08em; }
+.attention-canvas__node-kind { text-transform: uppercase; }
+.attention-canvas__node-title { margin: 0; font: 600 20px/1.32 "Trace Chain Serif", "Noto Serif SC", serif; overflow-wrap: anywhere; }
+.attention-canvas__node-summary { margin: 0; color: #47665d; font-size: 13px; line-height: 1.55; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.attention-canvas__node-lane { margin-top: auto; }
+.attention-canvas[data-canvas-semantic-level="0"] .attention-canvas__node-summary,
+.attention-canvas[data-canvas-semantic-level="1"] .attention-canvas__node-summary { display: none; }
+.attention-canvas[data-canvas-semantic-level="0"] .attention-canvas__node { padding: 11px 14px; }
+.attention-canvas[data-canvas-semantic-level="0"] .attention-canvas__node-title { font-size: 16px; }
+.attention-canvas[data-canvas-semantic-level="0"] .attention-canvas__node-lane { display: none; }
+.attention-canvas[data-canvas-semantic-level="2"] .attention-canvas__node-summary { flex: 0 0 auto; min-height: 1.55em; max-height: 3.1em; }
+.attention-canvas[data-canvas-semantic-level="3"] .attention-canvas__node-summary { flex: 0 0 auto; min-height: 1.55em; max-height: 7.75em; -webkit-line-clamp: 5; }
+.attention-canvas__bird { position: absolute; z-index: 2; width: 84px; max-width: none; height: auto; pointer-events: none; transition: left .65s cubic-bezier(.2,.75,.25,1), top .65s cubic-bezier(.2,.75,.25,1), opacity .2s ease; }
+.attention-canvas__bird[hidden] { display: none; }
+.attention-canvas__bird[data-bird-phase="takingOff"],
+.attention-canvas__bird[data-bird-phase="flying"] { opacity: .88; }
+.attention-canvas__screen { z-index: 5; pointer-events: none; }
+.attention-canvas__header { position: absolute; inset: 22px 26px auto; display: flex; align-items: center; gap: 16px; pointer-events: auto; }
+.attention-canvas__brand { font: 600 19px/1.2 "Trace Chain Serif", "Noto Serif SC", serif; }
+.attention-canvas__zoom { margin-left: auto; min-width: 86px; padding: 8px 13px; border: 1px solid rgba(255, 255, 255, .9); border-radius: 18px; background: rgba(250, 255, 249, .72); color: var(--canvas-muted); text-align: center; font-size: 12px; box-shadow: 0 3px 14px rgba(30, 70, 53, .08); }
+.attention-canvas__fullscreen { padding: 8px 15px; border: 1px solid rgba(255, 255, 255, .9); border-radius: 18px; background: rgba(250, 255, 249, .78); color: var(--canvas-ink); cursor: pointer; font: inherit; font-size: 12px; pointer-events: auto; }
+.attention-canvas__fullscreen:hover,
+.attention-canvas__fullscreen:focus-visible { background: #f9fff8; outline: 2px solid var(--canvas-focus); outline-offset: 2px; }
+.attention-canvas__sidebar { position: absolute; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(42vw, 660px); min-width: 330px; max-width: 100%; padding: 28px 30px 34px; border-left: 1px solid rgba(255,255,255,.92); background: rgba(250, 254, 248, .94); box-shadow: -18px 0 60px rgba(24, 61, 49, .12); pointer-events: auto; overflow: hidden auto; }
+.attention-canvas__sidebar[hidden] { display: none; }
+.attention-canvas__sidebar > header { display: flex; align-items: center; gap: 14px; }
+.attention-canvas__sidebar h2 { flex: 1; margin: 0; font: 600 28px/1.35 "Trace Chain Serif", "Noto Serif SC", serif; overflow-wrap: anywhere; }
+.attention-canvas__sidebar-close { flex: 0 0 auto; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: rgba(223, 241, 231, .72); color: var(--canvas-ink); font-size: 24px; line-height: 1; cursor: pointer; }
+.attention-canvas__sidebar-close:focus-visible { outline: 2px solid var(--canvas-focus); outline-offset: 2px; }
+.attention-canvas__sidebar-body { min-height: 0; padding-top: 28px; color: #3d5f55; font-size: 16px; line-height: 1.75; }
+.attention-canvas__sidebar-meta { color: #6c8279; font-size: 12px; letter-spacing: .05em; }
+.attention-canvas__sidebar-summary { white-space: pre-wrap; }
+.attention-canvas__composer { position: absolute; left: 50%; bottom: 25px; display: grid; grid-template-columns: 1fr auto; gap: 8px 13px; width: min(568px, calc(100% - 32px)); padding: 12px 14px 12px 20px; border: 1px solid rgba(255,255,255,.95); border-radius: 26px; background: rgba(249, 255, 249, .88); box-shadow: 0 8px 32px rgba(28, 73, 58, .13); transform: translateX(-50%); pointer-events: auto; }
+.attention-canvas__composer label { grid-column: 1 / -1; color: #6b8178; font-size: 11px; letter-spacing: .06em; }
+.attention-canvas__composer-input { width: 100%; min-height: 40px; max-height: 110px; padding: 4px 0; border: 0; outline: none; background: transparent; color: var(--canvas-ink); resize: vertical; font: inherit; font-size: 15px; line-height: 1.6; }
+.attention-canvas__composer-input::placeholder { color: #8aa098; }
+.attention-canvas__composer button { align-self: end; padding: 9px 17px; border: 1px solid #075a46; border-radius: 18px; background: #075a46; color: #fff; cursor: pointer; font: inherit; font-size: 13px; }
+.attention-canvas__composer button:disabled { opacity: .5; cursor: wait; }
+.attention-canvas__composer button:focus-visible,
+.attention-canvas__composer-input:focus-visible { outline: 2px solid var(--canvas-focus); outline-offset: 2px; }
+.attention-canvas__status { position: absolute; left: 50%; bottom: 110px; max-width: calc(100% - 32px); color: #43665a; font-size: 12px; transform: translateX(-50%); pointer-events: none; }
+.attention-canvas[data-canvas-fullscreen="true"] .attention-canvas__brand,
+.attention-canvas[data-canvas-fullscreen="true"] .attention-canvas__fullscreen { opacity: .82; }
+.attention-canvas[data-canvas-fullscreen="true"] .attention-canvas__header { inset: 14px 18px auto; }
+@media (max-width: 720px) {
+  .attention-canvas__sidebar { width: 100%; min-width: 0; }
+  .attention-canvas__composer { bottom: 14px; }
+  .attention-canvas__brand { font-size: 16px; }
+  .attention-canvas__node-title { font-size: 17px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .attention-canvas *, .attention-canvas *::before, .attention-canvas *::after { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
+}
+@media (max-width: 1100px) {
+  /* Keep the camera controls in their own band below the global nav. */
+  .attention-home .attention-canvas__header { top: 70px; right: 18px; left: auto; }
+}

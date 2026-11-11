@@ -5,7 +5,7 @@ import { h, titleOf, homeEntries, mattersView, recordsOf, mountLibrary } from '.
 import { mountHostSession } from './product/host-session.mjs';
 
 const root=document.querySelector('#app'),styles=new Map(),copy=structuredClone;
-let host,revision=0,storage,screen,route,renderId=0,dirty=0,saved=0,timer,tail=Promise.resolve(),pending=null,pendingGeneration=0,continuation=null,busy=false,dialog,queued=[];
+let host,revision=0,storage,screen,route,renderId=0,dirty=0,saved=0,timer,tail=Promise.resolve(),pending=null,pendingGeneration=0,continuation=null,busy=false,dialog,dialogReturnFocus,recordReturnFocus,queued=[];
 const uid=kind=>`${kind}-${crypto.randomUUID()}`;
 const sourceUrl=value=>{try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url.href:null;}catch{return null;}};
 const matter=()=>host?.chain.matters.find(m=>m.id===route?.matterId);
@@ -13,19 +13,19 @@ const status=document.createElement('aside');status.className='web-status';statu
 const nav=document.createElement('nav');nav.className='web-continuity';nav.setAttribute('aria-label','接续导航');document.body.append(nav);
 const menu=document.createElement('nav');menu.className='web-context-menu';menu.setAttribute('aria-label','事项工具');document.body.append(menu);
 const allowed=['home','matters','chain','compare','worksite','works','search','all','host','discussion'];
-function urlFor(r){const u=new URL(location.href);u.search='';u.hash='';u.searchParams.set('view',r.view);for(const [key,param]of [['matterId','matter'],['workId','work'],['sessionId','session'],['screen','screen'],['q','q'],['kind','kind'],['recordId','record']])if(r[key])u.searchParams.set(param,r[key]);return u;}
+function urlFor(r){const u=new URL(location.href);u.search='';u.hash='';u.searchParams.set('view',r.view);for(const [key,param]of [['matterId','matter'],['workId','work'],['sessionId','session'],['screen','screen'],['q','q'],['kind','kind'],['recordId','record'],['findingId','finding']])if(r[key])u.searchParams.set(param,r[key]);return u;}
 function fromUrl(){
   const p=new URLSearchParams(location.search);let view=p.get('view')||(['from','observationId','text','status','source'].some(k=>p.has(k))?'discussion':'home');if(!allowed.includes(view))view='home';
   if(view==='matters'&&p.has('matter'))view='chain';if(view==='matters'&&p.has('q'))view='search';
   let memory;try{memory=history.state?.traceRoute||JSON.parse(sessionStorage.getItem(`trace:${location.search}`)||'null');}catch{}
-  const r={view};for(const [key,param]of [['matterId','matter'],['workId','work'],['sessionId','session'],['screen','screen'],['q','q'],['kind','kind'],['recordId','record']])if(p.has(param))r[key]=p.get(param);
+  const r={view};for(const [key,param]of [['matterId','matter'],['workId','work'],['sessionId','session'],['screen','screen'],['q','q'],['kind','kind'],['recordId','record'],['findingId','finding']])if(p.has(param))r[key]=p.get(param);
   return memory&&urlFor(memory).search===location.search?memory:r;
 }
 function retain(){if(!route)return;route.scroll=[];for(const el of root.querySelectorAll('[data-scroll-key]')){if(el.scrollTop>0)route.scroll.push({key:el.dataset.scrollKey,top:el.scrollTop});}history.replaceState({traceRoute:route},'',location.href);try{sessionStorage.setItem(`trace:${location.search.slice(0,512)}`,JSON.stringify(route));}catch{}}
-function go(next,{replace=false,render=true,origin}={}){if(pending&&continuation){message('本次保存尚未确认，请先重试或导出内容。');return;}retain();const r={...next};if(r.view==='home')delete r.returnTarget;else if(!Object.hasOwn(r,'returnTarget'))r.returnTarget=copy(origin||(r.view===route?.view&&((r.view==='chain'&&r.matterId===route.matterId)||(r.view==='worksite'&&r.workId===route.workId))?route.returnTarget:route)||{view:'home'});route=r;history[replace?'replaceState':'pushState']({traceRoute:r},'',urlFor(r));try{sessionStorage.setItem(`trace:${location.search}`,JSON.stringify(r));}catch{}if(render)void renderRoute();}
+function go(next,{replace=false,render=true,origin}={}){if(pending&&continuation){message('本次保存尚未确认，请先重试或导出内容。');return;}retain();const r={...next},returnOrigin=origin&&origin.view===route?.view?{...origin,scroll:route.scroll}:origin;if(r.view==='home')delete r.returnTarget;else if(!Object.hasOwn(r,'returnTarget'))r.returnTarget=copy(returnOrigin||(r.view===route?.view&&((r.view==='chain'&&r.matterId===route.matterId)||(r.view==='worksite'&&r.workId===route.workId))?route.returnTarget:route)||{view:'home'});route=r;history[replace?'replaceState':'pushState']({traceRoute:r},'',urlFor(r));try{sessionStorage.setItem(`trace:${location.search}`,JSON.stringify(r));}catch{}if(render)void renderRoute();}
 const back=()=>go(route.returnTarget||{view:'home'});
 function statusText(state,text){status.dataset.state=state;status.innerHTML=`<i></i><span>${h(text)}</span>${state==='error'?'<button data-retry>重试保存</button><button data-export>导出未保存内容</button><button data-load>载入已保存版本</button>':''}`;}
-async function style(name){if(!styles.has(name)){const file={web:'product/web.css',home:'home.css',matters:'matters/matters.css',chain:'product/chain.css',compare:'product/comparison.css',worksite:'product/worksite.css',host:'product/host-session.css',discussion:'style.css'}[name];if(!file)return;const link=document.createElement('link');link.rel='stylesheet';link.media='not all';link.href=new URL(file,import.meta.url).href;link.dataset.desktopStyle=name;const ready=new Promise((yes,no)=>{link.onload=yes;link.onerror=()=>no(new Error(`样式未加载：${name}`));});styles.set(name,{link,ready});document.head.append(link);}await styles.get(name).ready;}
+async function style(name){if(!styles.has(name)){const file={web:'product/web.css',home:'attention/attention-home.css','home-legacy':'home.css',matters:'matters/matters.css',chain:'product/chain.css',compare:'product/comparison.css',worksite:'product/worksite.css',host:'product/host-session.css',discussion:'style.css'}[name];if(!file)return;const link=document.createElement('link');link.rel='stylesheet';link.media='not all';link.href=new URL(file,import.meta.url).href;link.dataset.desktopStyle=name;const ready=new Promise((yes,no)=>{link.onload=yes;link.onerror=()=>no(new Error(`样式未加载：${name}`));});styles.set(name,{link,ready});document.head.append(link);}await styles.get(name).ready;}
 async function read(){const r=await fetch('/api/product/workspace',{cache:'no-store'});if(!r.ok)throw new Error(r.status===404?'当前服务尚未载入产品命令接口，请重启 Trace 服务；没有修改原数据。':`读取本机内容失败（${r.status}），没有重置数据。`);const data=await r.json();if(!Number.isInteger(data.revision)||data.writeMode!=='product-commands')throw new Error('服务版本不支持产品命令，请重启服务');return data;}
 async function write(payload){
   pending=payload;statusText('saving','正在保存在本机…');let r,data;
@@ -47,8 +47,24 @@ async function commit(operations,after=update){
   catch(e){if(!pending)message(e.message);}finally{busy=false;root.inert=nav.inert=menu.inert=!!continuation;}
 }
 function download(value,name){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function close(){dialog?.traceCleanup?.();dialog?.close();dialog?.remove();dialog=null;}
-function modal(title,body,setup){close();dialog=document.createElement('dialog');dialog.className='web-dialog';dialog.setAttribute('aria-label',title);dialog.innerHTML=`<header><h2>${h(title)}</h2><button aria-label="关闭">×</button></header>${body}`;document.body.append(dialog);dialog.querySelector('header button').onclick=close;dialog.oncancel=e=>{e.preventDefault();close();};setup?.(dialog);dialog.showModal();}
+function close({restoreFocus=true}={}){
+  if(!dialog)return;
+  const previous=dialog,returnFocus=dialogReturnFocus;
+  if(previous.dataset.recordId && route?.recordId===previous.dataset.recordId){delete route.recordId;history.replaceState({traceRoute:route},'',urlFor(route));}
+  previous.traceCleanup?.();previous.close();previous.remove();dialog=null;dialogReturnFocus=null;
+  if(restoreFocus&&returnFocus?.element?.isConnected&&returnFocus.route===location.search) returnFocus.element.focus({preventScroll:true});
+}
+function dismiss(){
+  const id=dialog?.dataset.recordId,target=id&&route?.recordId===id&&['all','search','works'].includes(route.returnTarget?.view)?copy(route.returnTarget):null;
+  close({restoreFocus:!target});
+  if(target){recordReturnFocus={id,search:urlFor(target).search};go(target,{replace:true});}
+}
+function modal(title,body,setup){
+  const returnFocus=dialog?dialogReturnFocus:{element:document.activeElement,route:location.search};
+  close({restoreFocus:false});dialogReturnFocus=returnFocus;
+  dialog=document.createElement('dialog');dialog.className='web-dialog';dialog.setAttribute('aria-label',title);dialog.innerHTML=`<header><h2>${h(title)}</h2><button aria-label="关闭">×</button></header>${body}`;document.body.append(dialog);
+  dialog.querySelector('header button').onclick=()=>dismiss();dialog.oncancel=e=>{e.preventDefault();dismiss();};setup?.(dialog);dialog.showModal();dialog.querySelector('header button').focus({preventScroll:true});
+}
 function message(text){modal('这一步还没有完成',`<p>${h(text)}</p><footer><button class="web-primary" data-ok>回到原处</button></footer>`,d=>d.querySelector('[data-ok]').onclick=close);}
 status.onclick=async e=>{
   if(e.target.matches('[data-export]'))download({revision,host,pendingPayload:pending,queuedOperations:queued,unsaved:true},`Trace-recovery-${Date.now()}.json`);
@@ -71,15 +87,23 @@ async function agentPanel(){
   const focus=B.selectChain(host,m.id)?.focus;
   const selection=focus?.field==='understanding'&&m.understandingDraft.slice(focus.start,focus.end)===focus.text
     ?{field:'understandingDraft',start:focus.start,end:focus.end,text:focus.text}:null;
+  const workView=route.view==='worksite'&&route.workId?B.selectWorksite(host,route.workId):null;
+  const work=workView?.work||null;
+  const includedIntake=(workView?.intake||[]).filter(item=>item.role!=='exclude');
+  const worksiteContext=work?{workId:work.id,matterId:m.id,
+    role:new Set(includedIntake.map(item=>item.role)).size===1?includedIntake[0]?.role||'reference':'mixed',
+    intake:includedIntake, findings:(workView?.contextFindings||[]), project:work.project,
+    projectIdentity:work.projectIdentity||work.projectRealpath||work.projectDir||work.project}:null;
   const {mountAgentPanel}=await import('./product/agent-panel.mjs');
   modal('问 Agent，继续分清','',d=>mountAgentPanel(d,{workspace:{revision,host},matterId:m.id,selection,
+    workIdentity:{workId:work?.id||null,project:work?.project||null,projectIdentity:work?.projectIdentity||work?.projectRealpath||work?.projectDir||work?.project||null},worksiteContext,
     sourceIds:[...new Set([...(m.sourceIds||[]),...(m.links||[]).map(link=>link.sourceId)])],onWorkspace:data=>{
       host=data.host;revision=data.revision;storage=data.storage;saved=++dirty;preferences();statusText('saved','Agent 候选已由你确认并保存在本机草稿');update();
     }}));
 }
 function profile(){
   const p=host.preferences||{};
-  modal('个人与设置',`<p>这是你在本机的 Trace 空间。没有开通 Trace 账号或云同步；知乎连接需单独授权。</p><p><button type="button" data-zhihu>知乎与全网 · 检索和授权</button></p><form><label>怎么称呼你<input name="name" type="text" maxlength="60" value="${h(p.displayName)}" placeholder="你的称呼（可不填）"></label><label><input name="motion" type="checkbox" ${p.reduceMotion?'checked':''}> 减少界面动效</label><h3>你的内容保存在这里</h3><p>${h(storage?.location)}</p><p>${host.chain.matters.length} 件事 · ${host.chain.sources.length} 份材料 · ${Object.keys(host.worksite.works).length} 个工作记录</p><h3>重置与示例</h3><p>替换当前工作区前请导出内容。重置不等于物理清除数据库历史。</p><footer><button type="button" data-reset-demo>载入示例</button><button type="button" data-reset-clear>清空本机内容</button></footer><footer><a href="/api/web/export" download>导出全部内容</a><button class="web-primary" type="submit">保存设置</button></footer></form>`,d=>{
+  modal('个人与设置',`<p>这是你在本机的 Trace 空间。没有开通 Trace 账号或云同步；知乎连接需单独授权。</p><p><button type="button" data-zhihu>知乎与全网 · 检索和授权</button></p><form><label>怎么称呼你<input name="name" type="text" maxlength="60" value="${h(p.displayName)}" placeholder="你的称呼（可不填）"></label><label><input name="motion" type="checkbox" ${p.reduceMotion?'checked':''}> 减少界面动效</label><h3>你的内容保存在这里</h3><p>内容只保存在这台设备上；默认不显示系统路径。</p><details class="web-diagnostics"><summary>诊断信息</summary><p>本机内容库：${storage?.kind==='sqlite'?'SQLite':'本机存储'}（完整路径已隐藏）。</p></details><p>${host.chain.matters.length} 件事 · ${host.chain.sources.length} 份材料 · ${Object.keys(host.worksite.works).length} 个工作记录</p><h3>重置与示例</h3><p>替换当前工作区前请导出内容。重置不等于物理清除数据库历史。</p><footer><button type="button" data-reset-demo>载入示例</button><button type="button" data-reset-clear>清空本机内容</button></footer><footer><a href="/api/web/export" download>导出全部内容</a><button class="web-primary" type="submit">保存设置</button></footer></form>`,d=>{
     d.querySelector('[data-zhihu]').onclick=zhihuPanel;
     d.querySelector('form').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);void commit({type:'preferences.update',displayName:String(f.get('name')||'').trim(),reduceMotion:f.get('motion')==='on'},()=>{close();statusText('saved','设置已保存');});};
     d.querySelector('[data-reset-demo]').onclick=()=>resetWorkspace({demo:true});
@@ -93,12 +117,13 @@ function resetWorkspace({demo}){
     d.querySelector('[data-confirm]').onclick=()=>{close();void commit({type:'workspace.reset',mode:demo?'demo':'empty',confirm:'replace-current-workspace'},()=>go({view:'home'}));};
   });
 }
-function sources(){const m=matter();if(!m)return;const list=host.chain.sources.filter(s=>s.ownerMatterId===m.id);modal('这件事的对照与来处',`<p>${h(titleOf(m))}</p>${list.length?list.map(s=>{const link=m.links?.find(l=>l.sourceId===s.id),url=sourceUrl(s.url);return `<section class="web-linked-item"><strong>${h(s.title)}</strong><small>${h(s.kind==='external'?(s.source==='authorized'?'我的知乎内容':s.source==='global'?'全网来源':'知乎来源')+(s.author?` · ${s.author}`:''):'用户带入材料')}</small><p>${h(s.excerpt)}</p>${url?`<a href="${h(url)}" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>`:''}<small>${link?`已接为${h(({limit:'限制',limitation:'限制',support:'支持',challenge:'挑战',supplement:'补充'})[link.relationship.type]||'有关')} · 关联本身不改变理解`:'尚未关联 · 原材料仍保留'}</small></section>`;}).join(''):'<p>还没有材料，可以先选一句原话找个对照。</p>'}<footer><button data-all>查看这件事的全部痕迹</button></footer>`,d=>d.querySelector('[data-all]').onclick=()=>{close();go({view:'all',matterId:m.id});});}
-function workContext(){const v=B.selectWorksite(host,route.workId);if(!v)return;const text=[`任务：${v.work.title}`,`项目：${v.work.project}`,`工具 / Agent：${v.work.agent}`,'',...v.context.flatMap(i=>[`【${i.role} · 理解 v${i.sourceVersion}】`,i.instruction,i.text,i.note||'','']),...v.contextFindings.map(i=>i.text)].join('\n'),connection=v.work.connection;const connected=connection?.hostType==='codex';const returned=connection?.status==='returned_for_review';const state=connected?returned?`Codex 已带回结果，正在等你复核。接收任务 ${h(connection.sessionId)}，上下文 ${h(connection.contextHash.slice(0,12))}…`:`Codex 已真实接收这份上下文。接收任务 ${h(connection.sessionId)}，上下文 ${h(connection.contextHash.slice(0,12))}…`:'这份上下文正在等待 Codex 接收；也可以先复制，作为手工降级路径。';modal('本次带入的内容',`<p>${state}</p><pre>${h(text)}</pre><footer><button class="web-primary" data-copy>复制本次上下文</button></footer>`,d=>d.querySelector('[data-copy]').onclick=async()=>{try{await navigator.clipboard.writeText(text);d.querySelector('[data-copy]').textContent=connected?'已复制 · Codex 回执仍保留':'已复制 · 等待 Codex 接收';}catch{d.querySelector('[data-copy]').textContent='请手动选择文字复制';}});}
+function sources(){const m=matter();if(!m)return;const list=host.chain.sources.filter(s=>s.ownerMatterId===m.id||m.sourceIds?.includes(s.id));modal('这件事的对照与来处',`<p>${h(titleOf(m))}</p>${list.length?list.map(s=>{const link=m.links?.find(l=>l.sourceId===s.id),url=sourceUrl(s.url);return `<section class="web-linked-item"><strong>${h(s.title)}</strong><small>${h(s.kind==='external'?(s.source==='authorized'?'我的知乎内容':s.source==='global'?'全网来源':'知乎来源')+(s.author?` · ${s.author}`:''):'用户带入材料')}</small><p>${h(s.excerpt)}</p>${url?`<a href="${h(url)}" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>`:''}<small>${link?`已接为${h(({limit:'限制',limitation:'限制',support:'支持',challenge:'挑战',supplement:'补充'})[link.relationship.type]||'有关')} · 关联本身不改变理解`:'尚未关联 · 原材料仍保留'}</small></section>`;}).join(''):'<p>还没有材料，可以先选一句原话找个对照。</p>'}<footer><button data-all>查看这件事的全部痕迹</button></footer>`,d=>d.querySelector('[data-all]').onclick=()=>{close();go({view:'all',matterId:m.id});});}
+function sourceMaterial(id){const s=host.chain.sources.find(source=>source.id===id&&(source.ownerMatterId===route.matterId||matter()?.sourceIds?.includes(id)));if(!s)return null;const material=Object.fromEntries(['id','title','excerpt','context','sourceType','url','provider','source','author','contentType','contentMode','fetchedAt'].filter(key=>s[key]!==undefined).map(key=>[key,key==='url'?sourceUrl(s[key]):s[key]]));if(s.kind==='user-observation'||s.kind==='work-finding'){material.sourceType ||=s.kind==='user-observation'?'本次观察':'工作中发现';material.context ||=s.kind==='user-observation'?'这是你先留下的观察，尚未核对与当前问题的具体关系。':'这是工作中留下的发现，尚未自动成为理解。';}return material;}
+  function workContext(){const v=B.selectWorksite(host,route.workId);if(!v)return;const text=[`任务：${v.work.title}`,`项目：${v.work.project}`,`工具 / Agent：${v.work.agent}`,'',...v.context.flatMap(i=>[`【${i.role} · 理解 v${i.sourceVersion}】`,i.instruction,i.text,i.note||'','']),...v.contextFindings.map(i=>i.text)].join('\n'),connection=v.work.connection;const delivery=connection?.status,connected=['received','returned_for_review','revised'].includes(delivery);const state=delivery==='revised'?'结果已复核，理解已修订；本次上下文仍保留。':delivery==='returned_for_review'?'Agent 已带回结果，正在等你复核。':delivery==='received'?'Agent 已接收这份工作上下文。':'这份上下文尚未发送；可以先复制到外部 Agent。';const diagnostics=connection?`<details class="web-diagnostics"><summary>诊断信息</summary><p>接收任务标识与上下文校验值仅用于支持排查，默认已隐藏。</p></details>`:'';modal('本次带入的内容',`<p>${state}</p>${diagnostics}<pre>${h(text)}</pre><footer><button class="web-primary" data-copy>复制本次上下文</button></footer>`,d=>d.querySelector('[data-copy]').onclick=async()=>{try{await navigator.clipboard.writeText(text);d.querySelector('[data-copy]').textContent=connected?'已复制 · 回执仍保留':'已复制 · 尚未发送';}catch{d.querySelector('[data-copy]').textContent='请手动选择文字复制';}});}
 function projection(){let v;if(route.view==='chain'){v=B.selectChain(host,route.matterId);if(v&&route.anchor?.field==='originalText')v.focus=route.anchor;}if(route.view==='compare')v=B.selectComparison(host,route.sessionId);if(route.view==='worksite')v=B.selectWorksite(host,route.workId);if(v)v.notice=(v.notice||'').replaceAll('本次会话','本机').replaceAll('本地原型','本地记录');return v;}
 function chrome(){nav.replaceChildren();menu.replaceChildren();const add=(parent,text,fn)=>{const b=document.createElement('button');b.textContent=text;b.onclick=fn;parent.append(b);};if(route.returnTarget&&route.view!=='home')add(nav,`← ${route.returnTarget.view==='search'?'返回搜索结果':route.returnTarget.view==='all'?'返回全部痕迹':route.returnTarget.view==='worksite'?'返回这次工作':route.returnTarget.view==='chain'?'返回原来的事情':'返回来处'}`,route.view==='compare'?returnComparison:back);if(route.view!=='host')add(menu,'宿主会话',()=>go({view:'host'}));if(['chain','compare'].includes(route.view))add(menu,'知乎与全网',zhihuPanel);if(['chain','compare','worksite'].includes(route.view)&&matter())add(menu,'问 Agent',agentPanel);const m=matter();if(m&&['chain','compare','worksite'].includes(route.view)){add(nav,m.understanding?`我的理解 v${m.understandingVersion}`:'原话已保留 · 还没有写理解',()=>go({view:'chain',matterId:m.id,screen:'understanding'}));if(m.links?.length)add(nav,`${m.links.length} 份对照已关联`,sources);}if(route.view==='chain'){add(menu,'搜索',()=>go({view:'search'}));add(menu,'全部痕迹',()=>go({view:'all',matterId:route.matterId}));add(menu,'个人与设置',profile);}}
 function update(){screen?.update?.(['all','search','works'].includes(route.view)?host:route.view==='matters'?mattersView(host):projection());chrome();}
-function restore(){for(const entry of route.scroll||[]){const el=[...root.querySelectorAll('*')].find(e=>e.className===entry.className);if(el)el.scrollTop=entry.top;}const a=route.anchor;if(!a||route.view!=='chain')return;const el=root.querySelector(`[data-selection="${a.field}"]`);if(!el)return;const value=el instanceof HTMLTextAreaElement?el.value:el.textContent;if(value.slice(a.start,a.end)!==a.text)return;if(el instanceof HTMLTextAreaElement){el.focus({preventScroll:true});el.setSelectionRange(a.start,a.end);return;}const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let offset=0,n,start,end;while(n=walker.nextNode()){if(!start&&offset+n.length>=a.start)start=[n,a.start-offset];if(offset+n.length>=a.end){end=[n,a.end-offset];break;}offset+=n.length;}if(start&&end){const r=document.createRange();r.setStart(...start);r.setEnd(...end);getSelection().removeAllRanges();getSelection().addRange(r);}}
+function restore(){for(const entry of route.scroll||[]){const el=[...root.querySelectorAll('[data-scroll-key]')].find(e=>e.dataset.scrollKey===entry.key);if(el)el.scrollTop=entry.top;}const a=route.anchor;if(!a||route.view!=='chain')return;const el=root.querySelector(`[data-selection="${a.field}"]`);if(!el)return;const value=el instanceof HTMLTextAreaElement?el.value:el.textContent;if(value.slice(a.start,a.end)!==a.text)return;if(el instanceof HTMLTextAreaElement){el.focus({preventScroll:true});el.setSelectionRange(a.start,a.end);return;}const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let offset=0,n,start,end;while(n=walker.nextNode()){if(!start&&offset+n.length>=a.start)start=[n,a.start-offset];if(offset+n.length>=a.end){end=[n,a.end-offset];break;}offset+=n.length;}if(start&&end){const r=document.createRange();r.setStart(...start);r.setEnd(...end);getSelection().removeAllRanges();getSelection().addRange(r);}}
 function openCompare(focus,material){
   retain();const m=matter();if(!m)return;
   const fresh=host.chain.sessions[m.id].contextMode==='fresh',selected=focus||route.anchor;
@@ -122,7 +147,7 @@ function chainAction(a){
   if(a.type==='NAVIGATE'&&['work','results','revised'].includes(a.screen)){const works=Object.values(host.worksite.works).filter(w=>host.worksite.sessions[w.id].intake.some(i=>i.matterId===route.matterId));if(works.length)go({view:'worksite',workId:works.at(-1).id,matterId:route.matterId,screen:a.screen==='work'?'overview':'results'});else message('还没有本次工作。先从「带去用」确认工作和带入的内容。');return;}
   if(a.type==='CONFIRM_HANDOFF'){
     const handoff=B.selectChain(host,route.matterId).handoff,workId=uid('work'),matterId=route.matterId;
-    void commit({type:'handoff.create',matterId,workId,destination:handoff.destination,role:handoff.role,note:handoff.note,selectedText:handoff.selectedText},()=>go({view:'worksite',matterId,workId,screen:'overview'}));return;
+    void commit({type:'handoff.create',matterId,workId,destination:handoff.destination,role:handoff.role,note:handoff.note,selectedText:handoff.selectedText},()=>go({view:'worksite',matterId,workId,screen:'overview'},{origin:{view:'chain',matterId,screen:'resume'}}));return;
   }
   if(a.type==='OPEN'&&a.id!==route.matterId){go({view:'chain',matterId:a.id,screen:a.screen||'resume'});return;}
   const operation={type:'chain.action',matterId:route.matterId,action:a};
@@ -141,20 +166,41 @@ async function comparisonAction(a){
 function workAction(a){
   if(busy)return;
   if(a.type==='SELECT_WORK'){go({view:'worksite',workId:a.id,screen:'overview'});return;}
+  if(a.type==='EXPAND_FINDING'){
+    const workId=route.workId,origin=copy(route);
+    void commit({type:'worksite.action',workId,action:{type:'KEEP_FINDING'}},()=>{
+      if(a.matterId)go({view:'chain',matterId:a.matterId,screen:'understanding'},{origin});
+      else message('这条发现已保留；先选择要接回的事，再展开想想。');
+    });
+    return;
+  }
+  const {findingId,recordId,...workRoute}=route;
   const operation={type:'worksite.action',workId:route.workId,action:a};
-  if(/_DRAFT$/.test(a.type)){if(draft(operation))update();return;}
-  if(a.type==='NAVIGATE'){if(draft(operation))go({...route,screen:host.worksite.sessions[route.workId].screen});return;}
-  void commit(operation,()=>{if(a.type==='TRY_AGAIN')go({view:'chain',matterId:route.matterId,screen:'handoff'});else {const nextScreen=B.selectWorksite(host,route.workId).screen;nextScreen!==route.screen?go({...route,screen:nextScreen}):update();}});
+  if(/_DRAFT$/.test(a.type)){if(draft(operation)){if(findingId&&host.worksite.sessions[route.workId].finding.id!==findingId)go({...workRoute},{replace:true,render:false});update();}return;}
+  if(a.type==='NAVIGATE'){if(draft(operation))go({...workRoute,screen:host.worksite.sessions[route.workId].screen});return;}
+  void commit(operation,()=>{if(a.type==='TRY_AGAIN')go({view:'chain',matterId:route.matterId,screen:'handoff'});else {const nextScreen=B.selectWorksite(host,route.workId).screen;if(nextScreen!==route.screen||findingId&&host.worksite.sessions[route.workId].finding.id!==findingId)go({...workRoute,screen:nextScreen},{replace:nextScreen===route.screen});else update();}});
 }
 function missing(){root.innerHTML='<section class="web-loading"><h1>没有找到这段来处。</h1><p>这个地址对应的内容不在当前空间里，没有用示例替换它。</p><button>到全部痕迹里找找</button></section>';root.querySelector('button').onclick=()=>go({view:'all'});}
 async function renderRoute(){
-  const token=++renderId,view=route.view;close();
+  const token=++renderId,view=route.view;close({restoreFocus:false});
   try{
     await Promise.all([style('web'),style(view)]);if(token!==renderId)return;screen?.destroy?.();screen=null;root.replaceChildren();root.className='';root.removeAttribute('style');for(const [key,v]of styles)v.link.media=key==='web'||key===view?'all':'not all';document.body.className=view==='home'?'home-page':view==='matters'?'matters-page':'';root.dataset.route=view;preferences();chrome();
     if(['chain','compare'].includes(view)&&!matter()||view==='compare'&&!host.comparisons[route.sessionId]||view==='worksite'&&!host.worksite.works[route.workId]){missing();return;}
     if(view==='home'){
-      const {mountHome}=await import('./home.js');if(token!==renderId)return;
-      screen=mountHome({product:true,entries:homeEntries(host),snapshot:{captureDraft:host.chain.capture.text||''},onOpen:key=>{const entry=homeEntries(host)[key];if(entry)go({view:'chain',matterId:entry.matterId,screen:'resume'});},onAll:()=>go({view:'all'}),onSearch:()=>go({view:'search'}),onMatters:()=>go({view:'matters'}),onWorks:()=>go({view:'works'}),onProfile:profile,onDraft:text=>draft({type:'capture.draft',text}),onCapture:text=>{const matterId=uid('matter');void commit({type:'capture.create',matterId,text},()=>go({view:'chain',matterId,screen:'resume'}));}});
+      document.title='Trace · Attention Canvas';
+      const callbacks={onAll:()=>go({view:'all'}),onSearch:()=>go({view:'search'}),onMatters:()=>go({view:'matters'}),onWorks:()=>go({view:'works'}),onProfile:profile,onEnterMatter:matterId=>go({view:'chain',matterId,screen:'resume'}),onDraft:text=>draft({type:'capture.draft',text}),onCapture:text=>{const matterId=uid('matter');void commit({type:'capture.create',matterId,text},()=>go({view:'chain',matterId,screen:'resume'}));}};
+      try {
+        const {mountAttentionHome}=await import('./attention/attention-home.mjs');if(token!==renderId)return;
+        screen=mountAttentionHome({root,host,...callbacks});
+      } catch (attentionError) {
+        // Keep the shipped home.js as an explicit, observable fallback.  A
+        // renderer/import failure must not make the product page disappear.
+        console.error('Attention Canvas unavailable; using legacy home fallback', attentionError);
+        await style('home-legacy');
+        styles.get('home-legacy').link.media='all';
+        const {mountHome}=await import('./home.js');if(token!==renderId)return;
+        screen=mountHome({product:true,entries:homeEntries(host),snapshot:{captureDraft:host.chain.capture.text||''},onOpen:key=>{const entry=homeEntries(host)[key];if(entry)go({view:'chain',matterId:entry.matterId,screen:'resume'});},...callbacks});
+      }
     }else if(view==='host'){
       document.title='Trace · 宿主会话';
       screen=mountHostSession({root,onBack:back});
@@ -165,15 +211,34 @@ async function renderRoute(){
       const [{animate,svg},{mountSceneGlass}]=await Promise.all([import('./vendor/anime.esm.js'),import('./home/scene-glass.js')]);if(token!==renderId)return;const services={animate:(target,params)=>animate(target,host.preferences?.reduceMotion?{...params,duration:0,delay:0}:params),svg,mountSceneGlass};
       if(view==='matters'){const {mountMattersScreen}=await import('./matters/matters-screen.mjs');screen=mountMattersScreen({root,view:mattersView(host),assets:ASSETS.matters,services:{...services,onWorks:()=>go({view:'works'})},onHome:()=>go({view:'home'}),onAll:()=>go({view:'all'}),onAction:a=>{if(a.type==='OPEN')go({view:'chain',matterId:a.id,screen:'resume'});else if(a.type==='SEARCH')go({view:'search',q:a.query});else if(a.type==='BACK')back();}});}
       if(view==='chain'){
+        document.title=`Trace · ${titleOf(matter()).slice(0,40)}`;
         if(host.chain.screen !== (route.screen||'resume') || host.chain.selectedId !== route.matterId) draft({type:'chain.action',matterId:route.matterId,action:{type:'OPEN',id:route.matterId,screen:route.screen||'resume'}});const {mountChainScreen}=await import('./product/chain-screen.mjs');screen=mountChainScreen({root,view:projection(),assets:ASSETS.chain,services,onAction:chainAction,onHome:()=>go({view:'home'}),onMatters:()=>go({view:'matters'}),onBack:()=>route.screen==='resume'?back():go({...route,screen:'resume'}),onWorkspaces:()=>go({view:'works'})});
       }
-      if(view==='compare'){const {mountComparisonScreen}=await import('./product/comparison-screen.mjs');screen=mountComparisonScreen({root,view:projection(),assets:ASSETS.compare,services,onAction:comparisonAction,onReturn:returnComparison,onContinue:()=>{if(draft({type:'comparison.return',sessionId:route.sessionId}))go({...host.route,screen:'discussion'});},onAll:()=>go({view:'all',matterId:route.matterId}),onProfile:profile});}
+      if(view==='compare'){document.title=`Trace · 对照 · ${titleOf(matter()).slice(0,32)}`;const {mountComparisonScreen}=await import('./product/comparison-screen.mjs');screen=mountComparisonScreen({root,view:projection(),assets:ASSETS.compare,services,onAction:comparisonAction,onReturn:returnComparison,onContinue:()=>{if(draft({type:'comparison.return',sessionId:route.sessionId}))go({...host.route,screen:'discussion'});},onAll:()=>go({view:'all',matterId:route.matterId}),onProfile:profile});}
       if(view==='worksite'){
-        route.matterId ||=host.worksite.sessions[route.workId].intake[0]?.matterId;if(host.worksite.sessions[route.workId]?.screen !== (route.screen||'overview') || host.worksite.selectedWorkId !== route.workId) draft({type:'worksite.action',workId:route.workId,action:{type:'NAVIGATE',screen:route.screen||'overview'}});const {mountWorksiteScreen}=await import('./product/worksite-screen.mjs');screen=mountWorksiteScreen({root,view:projection(),assets:ASSETS.worksite,services,onAction:workAction,onHome:()=>go({view:'home'}),onBack:back,onOpenMatter:value=>{const id=typeof value==='string'?value:value?.id||value?.matterId;if(id)go({view:'chain',matterId:id,screen:'understanding'});else message('还没有为这条发现关联事项。');},onReturnToAgent:workContext,onOpenArtifact:item=>message(item?.excerpt||'还没有实际产物或来源链接，不会跳到演示文件。'),onProfile:profile,onWorkspaces:()=>go({view:'works'}),onCreateWork:()=>go({view:'chain',matterId:route.matterId,screen:'handoff'})});
+        document.title=`Trace · 工作现场 · ${host.worksite.works[route.workId].title.slice(0,32)}`;
+        const session=host.worksite.sessions[route.workId];route.matterId ||=session.intake[0]?.matterId;if(route.findingId&&route.screen==='finding'){if(!session.findings.some(item=>item.id===route.findingId)){missing();return;}if(session.finding?.id!==route.findingId || session.screen!=='finding')draft({type:'worksite.action',workId:route.workId,action:{type:'OPEN_SAVED_FINDING',id:route.findingId}});}else if(session.screen !== (route.screen||'overview') || host.worksite.selectedWorkId !== route.workId)draft({type:'worksite.action',workId:route.workId,action:{type:'NAVIGATE',screen:route.screen||'overview'}});const {mountWorksiteScreen}=await import('./product/worksite-screen.mjs');screen=mountWorksiteScreen({root,view:projection(),assets:ASSETS.worksite,services,onAction:workAction,onHome:()=>go({view:'home'}),onBack:back,onOpenMatter:value=>{const id=typeof value==='string'?value:value?.id||value?.matterId;if(id)go({view:'chain',matterId:id,screen:'understanding'});else message('还没有为这条发现关联事项。');},onReturnToAgent:workContext,onOpenArtifact:item=>{const url=sourceUrl(item?.url);if(url)window.open(url,'_blank','noopener,noreferrer');else message('还没有实际产物或来源链接，不会跳到演示文件。');},onProfile:profile,onWorkspaces:()=>go({view:'works'}),onCreateWork:()=>go({view:'chain',matterId:route.matterId,screen:'handoff'})});
       }
     }
-    if(token!==renderId)return;chrome();requestAnimationFrame(restore);
-    if(route.recordId){const r=recordsOf(host).find(r=>r.id===route.recordId);if(r&&['source','result','revision'].includes(r.kind))modal(r.kind==='result'?'保存下来的这次结果':r.kind==='source'?'原材料与来处':'这次修订的记录',`<p>${h(r.meta)}</p>${r.before?`<h3>修改前</h3><p>${h(r.before)}</p>`:''}<h3>${h(r.title)}</h3><p>${h(r.text)}</p>${r.interpretation?`<h3>我的解释</h3><p>${h(r.interpretation)}</p>`:''}${r.unconfirmed?`<h3>还不确定</h3><p>${h(r.unconfirmed)}</p>`:''}`);}
+    if(token!==renderId)return;chrome();requestAnimationFrame(()=>{
+      restore();
+      if(recordReturnFocus){
+        const trigger=recordReturnFocus.search===location.search
+          ?[...root.querySelectorAll('.web-record-open[data-open]')].find(button=>button.dataset.open===recordReturnFocus.id):null;
+        if(trigger?.isConnected)trigger.focus({preventScroll:true});
+        recordReturnFocus=null;
+      }
+    });
+    if(route.recordId){
+      const r=recordsOf(host).find(row=>row.id===route.recordId);
+      if(r&&['source','result','revision'].includes(r.kind)){
+        const material=r.kind==='source'?sourceMaterial(r.id):null;
+        const otherMatters=material?host.chain.matters.filter(item=>item.id!==route.matterId):[];
+        modal(r.kind==='result'?'保存下来的这次结果':r.kind==='source'?'原材料与来处':'这次修订的记录',
+          `<p>${h(r.meta)}</p>${r.before?`<h3>修改前</h3><p>${h(r.before)}</p>`:''}<h3>${h(r.title)}</h3><p>${h(r.text)}</p>${r.interpretation?`<h3>我的解释</h3><p>${h(r.interpretation)}</p>`:''}${r.unconfirmed?`<h3>还不确定</h3><p>${h(r.unconfirmed)}</p>`:''}${material?`<footer><button class="web-primary" data-compare-source>在这件事中继续对照</button></footer>${otherMatters.length?`<label>也可以在另一件事中核对同一份材料<select data-source-target><option value="">选择另一件事</option>${otherMatters.map(item=>`<option value="${h(item.id)}">${h(titleOf(item).slice(0,60))}</option>`).join('')}</select></label><footer><button data-compare-other disabled>去所选事项对照</button></footer>`:''}`:''}`,
+          d=>{d.dataset.recordId=r.id;if(material)d.querySelector('[data-compare-source]').onclick=()=>{close();openCompare(undefined,material);};const select=d.querySelector('[data-source-target]');if(select){const button=d.querySelector('[data-compare-other]');select.onchange=()=>button.disabled=!select.value;button.onclick=()=>{const targetMatterId=select.value,focus=B.selectComparisonAnchor(host,targetMatterId,{field:'originalText'});if(!focus){message('这件事还没有可核对的原话，未关联材料。');return;}close();go({view:'chain',matterId:targetMatterId,screen:'resume'},{render:false});openCompare(focus,material);};}});
+      }
+    }
   }catch(e){if(token!==renderId)return;console.error(e);root.innerHTML=`<section class="web-loading"><h1>页面没有加载完成。</h1><p>${h(e.message)}</p><button>重新载入</button></section>`;root.querySelector('button').onclick=()=>location.reload();}
 }
 window.addEventListener('popstate',()=>{route=fromUrl();void renderRoute();});

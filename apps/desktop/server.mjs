@@ -12,7 +12,7 @@ const root = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(root, '../..')
 const defaultStateRoot = path.resolve(root, '../../..')
 const productModuleRoot = path.join(repositoryRoot, 'packages/product/workspace/src')
-const productBrowserAssets = new Set(['index.mjs', 'bridge.mjs', 'commands.mjs', 'demo-workspace.mjs', 'chain-model.mjs', 'comparison-model.mjs', 'worksite-model.mjs'])
+const productBrowserAssets = new Set(['index.mjs', 'bridge.mjs', 'commands.mjs', 'demo-workspace.mjs', 'chain-model.mjs', 'comparison-model.mjs', 'worksite-model.mjs', 'scope-contract.mjs'])
 const productWorkspace = createProductWorkspace({
   file: path.resolve(process.env.TRACE_WEB_STATE_FILE || path.join(defaultStateRoot, '.trace/state/web.sqlite')),
   // Set only by the packaged Electron host. It is never exposed to a renderer,
@@ -79,6 +79,13 @@ function resolveAsset(url = '/') {
   return absolute === root || absolute.startsWith(`${root}${path.sep}`) ? absolute : null
 }
 
+let taskHandoffOwner=null;
+// In-process composition only; a renderer or HTTP body cannot choose a DB.
+export function bindTaskHandoffOwner(handler){
+  if(taskHandoffOwner||typeof handler!=='function')throw Error('Task handoff owner is already bound or invalid');
+  taskHandoffOwner=handler;
+}
+
 const server = http.createServer(async (request, response) => {
   try {
   const requestUrl = new URL(request.url || '/', 'http://127.0.0.1')
@@ -102,6 +109,10 @@ const server = http.createServer(async (request, response) => {
     response.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
     response.end(JSON.stringify({status: 'ok'}))
     return
+  }
+  if(requestUrl.pathname.startsWith('/api/product/task-handoffs/')){
+    if(!taskHandoffOwner){response.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});response.end(JSON.stringify({error:{code:'TASK_OWNER_NOT_CONNECTED',message:'新任务内容owner尚未连接；没有回退旧内容库。'}}));return;}
+    await taskHandoffOwner(request,response);return;
   }
   if (await productWorkspace.handle(request, response)) return
   if (await zhihu.handle(request, response)) return
@@ -157,6 +168,7 @@ let closing = false
 export async function close() {
   if (closing) return
   closing = true
+  taskHandoffOwner=null
   const stopped = new Promise(resolve => server.close(resolve))
   try { await agent.close() } finally { zhihu.close() }
   await stopped

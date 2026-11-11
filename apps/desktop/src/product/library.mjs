@@ -3,6 +3,7 @@ export const h = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;',
 export const titleOf = matter => matter?.title || (matter?.originalText || matter?.whyCare || '未命名的事').split('\n')[0];
 export const short = (value,n=70) => Array.from(value||'').slice(0,n).join('')+(Array.from(value||'').length>n?'…':'');
 const label = {matter:'在意的事',expression:'原表达',understanding:'当前理解',discussion:'补充',source:'对照材料',result:'工作结果',revision:'修订记录',work:'工作现场',branch:'旁支'};
+const deliveryLabel = work => ({received:'Agent 已接收',returned_for_review:'Agent 已带回 · 待复核',revised:'结果已复核 · 理解已修订'})[work.connection?.status] || '本机工作记录 · 尚未发送';
 export function recordsOf(host) {
   const rows=[];
   for(const m of host.chain.matters) {
@@ -16,22 +17,23 @@ export function recordsOf(host) {
   }
   for(const s of host.chain.sources) {
     const m=host.chain.matters.find(m=>m.id===s.ownerMatterId);
-    const links=(m?.links||[]).filter(l=>l.sourceId===s.id);
+    const relatedMatters=host.chain.matters.filter(item=>item.id===s.ownerMatterId||item.sourceIds?.includes(s.id)||item.links?.some(link=>link.sourceId===s.id));
+    const links=relatedMatters.flatMap(item=>(item.links||[]).filter(link=>link.sourceId===s.id));
     const provenance=s.kind==='external'?`${s.source==='authorized'?'我的知乎内容':s.source==='global'?'全网来源':'知乎来源'}${s.author?` · ${s.author}`:''}`:'用户粘贴，来源未核验';
-    rows.push({kind:'source',id:s.id,matterId:m?.id,title:s.title||'手工带入的材料',text:s.excerpt||'',url:s.url||null,provider:s.provider||null,author:s.author||null,meta:links.length?`已关联 · ${links.map(l=>({limit:'限制',limitation:'限制',support:'支持',supplement:'补充',challenge:'挑战'}[l.relationship.type]||'有关')).join('、')} · ${provenance} · 未自动采用`:`尚未关联 · ${provenance}`,route:m?{view:'chain',matterId:m.id,screen:'resume'}:null});
+    rows.push({kind:'source',id:s.id,matterId:m?.id,relatedMatterIds:relatedMatters.map(item=>item.id),title:s.title||'手工带入的材料',text:s.excerpt||'',url:s.url||null,provider:s.provider||null,author:s.author||null,meta:links.length?`已关联 · ${links.length>1?`${relatedMatters.length} 件事 · `:''}${links.map(l=>({limit:'限制',limitation:'限制',support:'支持',supplement:'补充',challenge:'挑战'}[l.relationship.type]||'有关')).join('、')} · ${provenance} · 未自动采用`:`尚未关联 · ${provenance}`,route:m?{view:'chain',matterId:m.id,screen:'resume'}:null});
   }
   for(const w of Object.values(host.worksite.works)) {
     const s=host.worksite.sessions[w.id];
     const matterId=s?.intake[0]?.matterId;
-    rows.push({kind:'work',id:w.id,matterId,title:w.title,text:`${w.agent} · ${w.project}`,meta:'本地工作记录 · 尚未发送',route:{view:'worksite',workId:w.id,matterId,screen:'overview'}});
+    rows.push({kind:'work',id:w.id,matterId,title:w.title,text:`${w.agent} · ${w.project}`,meta:deliveryLabel(w),route:{view:'worksite',workId:w.id,matterId,screen:'overview'}});
     for(const r of s?.results||[]) rows.push({kind:'result',id:`${w.id}:${r.id}`,matterId:r.matterId,title:w.title,text:r.fact,interpretation:r.interpretation,unconfirmed:r.unconfirmed,meta:r.decision==='revised'?'依据此结果确认过修订':'只留下结果 · 理解未改变',route:{view:'worksite',workId:w.id,matterId:r.matterId,screen:'results',resultId:r.id}});
-    for(const f of s?.findings||[])rows.push({kind:'discussion',id:`${w.id}:${f.id}`,matterId:f.matterId,title:w.title,text:f.text,meta:'工作中留下的发现',route:{view:'worksite',workId:w.id,matterId,screen:'finding'}});
+    for(const f of s?.findings||[]){const linkedMatterId=f.relation==='linked'?f.suggestedMatterId:null;rows.push({kind:'discussion',id:`${w.id}:${f.id}`,matterId:linkedMatterId,title:w.title,text:f.text,meta:linkedMatterId?'工作中留下的发现 · 已关联事项':'工作中留下的发现 · 尚未关联事项',route:{view:'worksite',workId:w.id,matterId:linkedMatterId||matterId,screen:'finding',findingId:f.id}});}
   }
   return rows;
 }
 export function queryRecords(host,{q='',kind='',matterId=''}={}) {
   const needle=q.trim().toLocaleLowerCase();
-  return recordsOf(host).filter(r=>(!kind||r.kind===kind)&&(!matterId||r.matterId===matterId)&&(!needle||[r.title,r.text,r.interpretation,r.unconfirmed,r.before].join('\n').toLocaleLowerCase().includes(needle))).reverse();
+  return recordsOf(host).filter(r=>(!kind||r.kind===kind)&&(!matterId||r.matterId===matterId||r.relatedMatterIds?.includes(matterId))&&(!needle||[r.title,r.text,r.interpretation,r.unconfirmed,r.before].join('\n').toLocaleLowerCase().includes(needle))).reverse();
 }
 export function homeEntries(host) {
   return Object.fromEntries([...host.chain.matters].reverse().slice(0,4).map((m,i)=>[['thought','work','fresh','handoff'][i],{matterId:m.id,title:short(titleOf(m),40),subtitle:m.stop?`停在：${short(m.stop,35)}`:m.understanding?`我的理解 v${m.understandingVersion} · ${short(m.understanding,30)}`:'原话已保留 · 从这里接着'}]));
@@ -62,7 +64,7 @@ export function mountLibrary({root,host,route,onNavigate,onBack,onProfile}) {
     if(b.hasAttribute('data-clear-scope'))onNavigate({...current,matterId:null});
     if(b.hasAttribute('data-kind'))change({kind:b.dataset.kind});
     if(b.classList.contains('web-profile'))onProfile();
-    if(b.dataset.open){if(current.q!==input.value)change({q:input.value});const r=recordsOf(host).find(r=>r.id===b.dataset.open);if(r?.route)onNavigate({...r.route,recordId:r.id},{origin:current});}
+    if(b.dataset.open){if(current.q!==input.value)change({q:input.value});const r=recordsOf(host).find(r=>r.id===b.dataset.open);if(r?.route){const target=r.kind==='source'&&current.matterId&&r.relatedMatterIds?.includes(current.matterId)?{view:'chain',matterId:current.matterId,screen:'resume'}:r.route;onNavigate({...target,recordId:r.id},{origin:current});}}
   });
   const input=root.querySelector('input');let composing=false;let debounce;
   on(input,'compositionstart',()=>composing=true);

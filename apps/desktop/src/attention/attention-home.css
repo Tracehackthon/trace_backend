@@ -1,0 +1,187 @@
+@import url('./attention-canvas.css');
+@import url('./attention-reader.css');
+
+/* Product home adapter: a real projection-backed canvas, not a poster/demo. */
+.attention-home {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  color: #173c36;
+  background: #eaf3ee url('../../public/home/environment.png') center/cover no-repeat;
+  font-family: "Trace Web Sans", "Trace Chain Sans", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+.attention-home__canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.attention-home[data-attention-sidebar-open="true"] .attention-home__canvas { z-index: 30; }
+.attention-home__canvas > .attention-canvas {
+  min-height: 100%;
+  background: rgba(234, 243, 238, .38) url('../../public/home/environment.png') center/cover no-repeat;
+  backdrop-filter: saturate(.94);
+}
+.attention-home__nav {
+  position: absolute;
+  z-index: 20;
+  top: 19px;
+  left: 29px;
+  right: 28px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  pointer-events: none;
+}
+.attention-home[data-attention-sidebar-open="true"] .attention-home__nav { z-index: 10; }
+.attention-home__nav button { pointer-events: auto; }
+.attention-home__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #173c36;
+  font: 600 29px/1.1 "Trace Web Serif", "Trace Serif", Georgia, serif;
+  letter-spacing: -.03em;
+}
+.attention-home__brand span {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: linear-gradient(145deg, #08634d, #004433);
+  color: #fff;
+  font: 700 25px/1 "Trace Web Sans", sans-serif;
+  box-shadow: inset 0 1px 2px rgba(255,255,255,.36), 0 5px 17px rgba(29,78,59,.12);
+}
+.attention-home__nav-links {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  margin-left: auto;
+}
+.attention-home__nav-links button,
+.attention-home__profile {
+  padding: 8px 3px;
+  border: 0;
+  border-radius: 18px;
+  background: rgba(247, 253, 246, .45);
+  color: #3d6857;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.attention-home__nav-links button:hover,
+.attention-home__nav-links button:focus-visible,
+.attention-home__profile:hover,
+.attention-home__profile:focus-visible {
+  color: #0c5b43;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.attention-home__profile {
+  margin-left: 2px;
+  padding-inline: 12px;
+  border: 1px solid rgba(255,255,255,.86);
+  background: rgba(247, 253, 246, .68);
+}
+.attention-home__empty {
+  position: absolute;
+  z-index: 11;
+  top: 50%;
+  left: 50%;
+  width: min(520px, calc(100% - 38px));
+  padding: 27px 29px 25px;
+  transform: translate(-50%, -54%);
+  border: 1px solid rgba(255,255,255,.92);
+  border-radius: 24px;
+  background: rgba(249, 255, 248, .73);
+  box-shadow: 0 16px 42px rgba(27, 75, 57, .13);
+  text-align: center;
+  backdrop-filter: blur(14px);
+}
+.attention-home__empty h1 {
+  margin: 0;
+  color: #234f40;
+  font: 600 27px/1.35 "Trace Web Serif", "Trace Serif", Georgia, serif;
+}
+.attention-home__empty p {
+  margin: 12px auto 19px;
+  max-width: 410px;
+  color: #5b7569;
+  font-size: 14px;
+  line-height: 1.75;
+}
+.attention-home__empty-action {
+  padding: 10px 19px;
+  border: 1px solid #075a46;
+  border-radius: 20px;
+  background: #075a46;
+  color: #fff;
+  font-size: 13px;
+}
+.attention-home__empty-action:focus-visible { outline: 2px solid #d8a03d; outline-offset: 3px; }
+.attention-home__notice {
+  position: absolute;
+  z-index: 80;
+  left: 50%;
+  bottom: 116px;
+  max-width: min(620px, calc(100% - 32px));
+  padding: 9px 15px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255,255,255,.93);
+  border-radius: 18px;
+  background: rgba(247, 253, 247, .92);
+  color: #43665a;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 8px 25px rgba(24,66,49,.13);
+  pointer-events: none;
+}
+.attention-canvas__brand { display: none; }
+.attention-home .attention-canvas__header { top: 70px; right: 24px; left: auto; }
+.attention-canvas__sidebar-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  margin: 18px 8px 0 0;
+  padding: 8px 14px;
+  border: 1px solid rgba(104, 153, 126, .4);
+  border-radius: 20px;
+  background: rgba(232, 246, 237, .86);
+  color: #285f4c;
+  cursor: pointer;
+  font-size: 13px;
+}
+.attention-canvas__sidebar-action--primary { background: #075a46; color: #fff; border-color: #075a46; }
+.attention-canvas__sidebar-action:hover,
+.attention-canvas__sidebar-action:focus-visible { outline: 2px solid #d7a03a; outline-offset: 2px; }
+.attention-canvas__sidebar-boundary { margin: 18px 0 0; color: #8c713d; font-size: 12px; line-height: 1.5; }
+.attention-home[data-attention-fullscreen="true"] .attention-home__nav { opacity: .76; }
+.attention-home__reader { position: absolute; inset: 0; z-index: 90; pointer-events: none; }
+@media (min-width: 721px) {
+  /* Reserve the context rail's width so the composer remains fully usable. */
+  .attention-home[data-attention-sidebar-open="true"] .attention-canvas__composer { left: 20px; right: calc(max(330px, min(42vw, 660px)) + 16px); width: auto; transform: none; }
+}
+@media (min-width: 741px) and (max-width: 1100px) {
+  /* The compact global nav no longer sits above the reader's tab strip. */
+  .attention-reader { padding-top: 56px; }
+}
+@media (max-width: 760px) {
+  .attention-home__nav { top: 13px; left: 15px; right: 15px; gap: 8px; }
+  .attention-home__brand { font-size: 20px; }
+  .attention-home__brand span { width: 31px; height: 31px; border-radius: 9px; font-size: 19px; }
+  .attention-home__nav-links { gap: 7px; overflow: auto; }
+  .attention-home__nav-links button, .attention-home__profile { padding-inline: 6px; font-size: 11px; }
+  .attention-home__profile { display: none; }
+  .attention-canvas__header { top: 55px; right: 14px; }
+  .attention-home__notice { bottom: 93px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .attention-home *, .attention-home *::before, .attention-home *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}

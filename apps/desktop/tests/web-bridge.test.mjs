@@ -227,7 +227,8 @@ test('new matters have no hardcoded destination and empty handoff cannot create 
   assert.equal(explicit.error, null);
   assert.equal(selectWorksite(explicit, 'w').intake[0].sourceText, ORIGINAL);
   assert.equal(selectWorksite(explicit, 'w').work.connected, false);
-  assert.equal(selectChain(explicit, ID).handoffSnapshot.actualDelivery, false);
+  assert.equal(selectChain(explicit, ID).handoffSnapshot.historical, true);
+  assert.equal(Object.hasOwn(selectChain(explicit, ID).handoffSnapshot, 'actualDelivery'), false);
 });
 
 test('same literal first-line title is projected consistently without inventing a summary', () => {
@@ -529,7 +530,8 @@ test('handoff snapshot remains version 1 while current canonical understanding a
   let h = work();
   assert.equal(own(h.worksite, 'matters'), false);
   assert.equal(selectWorksite(h, 'work:1').work.connected, false);
-  assert.equal(selectChain(h, ID).handoffSnapshot.actualDelivery, false);
+  assert.equal(selectChain(h, ID).handoffSnapshot.historical, true);
+  assert.equal(Object.hasOwn(selectChain(h, ID).handoffSnapshot, 'actualDelivery'), false);
   h = comparison(h);
   h = reviseRequest(imported(h));
   h = commitComparison(h, ids(h));

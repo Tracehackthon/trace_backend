@@ -18,8 +18,42 @@
     <div id="app"></div>
     <script type="module" src="./src/web-main.js"></script>
     <script>
+      // Service-worker setup is an optional offline enhancement. Keep a small
+      // allowlisted state on the document and emit a safe event so diagnostics
+      // can distinguish a degraded offline cache from a page/runtime failure.
+      const traceServiceWorkerStates = new Set(['registering', 'registered', 'ready', 'degraded']);
+      const setTraceServiceWorkerState = (state, code) => {
+        if (!traceServiceWorkerStates.has(state)) return;
+        document.documentElement.dataset.traceServiceWorker = state;
+        const detail = {state};
+        if (state === 'degraded' && (code === 'PRECACHE_FAILED' || code === 'REGISTRATION_FAILED')) detail.code = code;
+        window.dispatchEvent(new CustomEvent('trace:service-worker-status', {detail}));
+      };
       if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
+        const observeWorker = worker => {
+          if (!worker) return;
+          const update = () => {
+            if (worker.state === 'activated') setTraceServiceWorkerState('ready');
+            else if (worker.state === 'redundant') setTraceServiceWorkerState('degraded', 'PRECACHE_FAILED');
+          };
+          worker.addEventListener('statechange', update);
+          update();
+        };
+        navigator.serviceWorker.addEventListener('message', event => {
+          const data = event.data;
+          if (!data || data.type !== 'trace-sw-status') return;
+          if (data.state === 'ready') setTraceServiceWorkerState('ready');
+          else if (data.state === 'degraded' && data.code === 'PRECACHE_FAILED') setTraceServiceWorkerState('degraded', 'PRECACHE_FAILED');
+        });
+        setTraceServiceWorkerState('registering');
+        navigator.serviceWorker.register('./sw.js').then(registration => {
+          setTraceServiceWorkerState(registration.active ? 'ready' : 'registered');
+          observeWorker(registration.installing || registration.waiting || registration.active);
+        }, () => {
+          // Registration is not a prerequisite for online rendering. Do not
+          // expose the browser error object, which may contain local paths.
+          setTraceServiceWorkerState('degraded', 'REGISTRATION_FAILED');
+        });
       }
     </script>
   </body>

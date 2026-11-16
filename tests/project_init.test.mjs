@@ -68,13 +68,36 @@ test('project init external mode keeps the external root in local profile only',
   assert.equal(JSON.stringify(activationLock).includes(source), false);
 });
 
-test('project init refuses a non-empty existing .trace without leaving staging files', () => {
+test('project init safely extends a non-empty unowned .trace namespace', () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-project-'));
-  fs.mkdirSync(path.join(project, '.trace'), {recursive: true});
-  fs.writeFileSync(path.join(project, '.trace', 'marker.txt'), 'keep');
+  const trace = path.join(project, '.trace');
+  fs.mkdirSync(path.join(trace, 'project-adoptions'), {recursive: true});
+  fs.mkdirSync(path.join(trace, 'state'), {recursive: true});
+  fs.writeFileSync(path.join(trace, 'project-adoptions', 'adoption.json'), '{"status":"adopted"}\n');
+  fs.writeFileSync(path.join(trace, 'state', 'agent.sqlite'), Buffer.from([0, 1, 2, 255]));
+  fs.writeFileSync(path.join(trace, 'state', 'web.sqlite'), Buffer.from([4, 5, 6, 255]));
+  const beforeAdoption = fs.readFileSync(path.join(trace, 'project-adoptions', 'adoption.json'));
+  const beforeAgent = fs.readFileSync(path.join(trace, 'state', 'agent.sqlite'));
+  const beforeWeb = fs.readFileSync(path.join(trace, 'state', 'web.sqlite'));
+  const run = spawnSync(process.execPath, [cli, 'project', 'init', '--project-dir', project, '--user-id', 'test-user', '--template', 'trace.codex-empty', '--confirm', 'true'], {encoding: 'utf8'});
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.equal(JSON.parse(run.stdout).ok, true);
+  assert.equal(fs.existsSync(path.join(trace, 'project.json')), true);
+  assert.deepEqual(fs.readFileSync(path.join(trace, 'project-adoptions', 'adoption.json')), beforeAdoption);
+  assert.deepEqual(fs.readFileSync(path.join(trace, 'state', 'agent.sqlite')), beforeAgent);
+  assert.deepEqual(fs.readFileSync(path.join(trace, 'state', 'web.sqlite')), beforeWeb);
+  assert.deepEqual(fs.readdirSync(project).filter(name => name.startsWith('.trace-init-')), []);
+});
+
+test('project init blocks exact managed-path collisions without modifying existing data', () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-project-'));
+  const collision = path.join(project, '.trace', 'profiles', 'source.profile.json');
+  fs.mkdirSync(path.dirname(collision), {recursive: true});
+  fs.writeFileSync(collision, 'user-owned profile\n');
   const run = spawnSync(process.execPath, [cli, 'project', 'init', '--project-dir', project, '--user-id', 'test-user', '--template', 'trace.codex-empty', '--confirm', 'true'], {encoding: 'utf8'});
   assert.notEqual(run.status, 0);
-  assert.match(run.stdout, /INSTANCE_EXISTS/);
+  assert.match(run.stdout, /PROJECT_INIT_CONFLICT/);
+  assert.equal(fs.readFileSync(collision, 'utf8'), 'user-owned profile\n');
+  assert.equal(fs.existsSync(path.join(project, '.trace', 'project.json')), false);
   assert.deepEqual(fs.readdirSync(project).filter(name => name.startsWith('.trace-init-')), []);
-  assert.equal(fs.readFileSync(path.join(project, '.trace', 'marker.txt'), 'utf8'), 'keep');
 });

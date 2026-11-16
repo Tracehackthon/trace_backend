@@ -65,7 +65,7 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, serv
           reply(res, 200, { protocolVersion: 1, enabled: !!service, runtime: 'trace-agent-runtime', ...executors,
             ...(serviceIdentity === null ? {} : {serviceIdentity}),
             purposes: PURPOSES, contextTools: ['trace_context_read', 'trace_context_search'], streaming: 'sse',
-            cancellation: true, externalRetrieval: (service?.searchSources.length ?? 0) > 0, searchSources: service?.searchSources ?? [],
+            receipt: 'paged-json-v1', cancellation: true, externalRetrieval: (service?.searchSources.length ?? 0) > 0, searchSources: service?.searchSources ?? [],
             retrievalDefault: 'disabled', fileExecution: false, autoApply: false, authenticationChecked: false,
             candidateAdoption: !!service?.candidateAdoption,
             boundary: 'single-user-loopback-same-origin', sensemaking: sensemakingWorker?.health?.() ?? {status: 'disabled', mode: 'disabled'} }); return true;
@@ -79,11 +79,11 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, serv
           const body = await readBody(req); demand(keys(body, ['limit']) && (body.limit === undefined || integer(body.limit) && body.limit >= 1 && body.limit <= 1000), 'INVALID_REQUEST', 'drain 只接受 1..1000 的 limit。', 400);
           const result = await sensemakingWorker.drain({limit: body.limit ?? 16}); reply(res, 200, result); return true;
         }
-        const runMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)(?:\/(events|cancel|adoption))?$/.exec(pathname);
+        const runMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)(?:\/(events|receipt|cancel|adoption|worksite|worksite-result))?$/.exec(pathname);
         const interactionMatch = /^\/api\/agent\/runs\/([a-zA-Z0-9-]+)\/(approval|input)$/.exec(pathname);
         const requestMatch = /^\/api\/agent\/requests\/([^/]+)$/.exec(pathname);
         const allowed = pathname === '/api/agent/runs' || pathname === '/api/agent/check' || pathname === '/api/agent/sensemaking/drain'
-          || ['cancel', 'adoption'].includes(runMatch?.[2]) || interactionMatch ? 'POST'
+          || ['cancel', 'adoption', 'worksite', 'worksite-result'].includes(runMatch?.[2]) || interactionMatch ? 'POST'
           : pathname === '/api/agent/sensemaking/health' || runMatch || requestMatch ? 'GET' : null;
         demand(allowed, 'NOT_FOUND', '没有这个 Agent 接口。', 404);
         if (req.method !== allowed) { reply(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: '不支持这个方法。' } }, { allow: allowed }); return true; }
@@ -122,6 +122,14 @@ export function createAgentHttp({ service = null, sensemakingWorker = null, serv
               'INVALID_REQUEST', '采纳或撤销需要有效的 commandId 与 expectedRevision。', 400);
             reply(res, 200, body.action === 'accept' ? service.adopt(runMatch[1], body) : service.undoAdoption(runMatch[1], body));
           }
+        } else if (['worksite', 'worksite-result'].includes(runMatch[2])) {
+          const body = await readBody(req);
+          reply(res, 200, service.returnWorksite(runMatch[1], body));
+        } else if (runMatch[2] === 'receipt') {
+          const run=service.get(runMatch[1]),url=new URL(req.url,'http://127.0.0.1'),cursor=url.searchParams.get('after')??'0';
+          demand(/^(0|[1-9]\d*)$/.test(cursor)&&Number.isSafeInteger(Number(cursor))&&Number(cursor)<=run.lastEventId,'INVALID_CURSOR','事件游标无效或超过已保存回执。',400);
+          const events=service.events(run.runId,Number(cursor)).filter(event=>event.sequence<=run.lastEventId),next=events.at(-1)?.sequence??Number(cursor);
+          reply(res,200,{protocolVersion:1,run,events,after:Number(cursor),next,hasMore:next<run.lastEventId});
         } else if (runMatch[2] !== 'events') reply(res, 200, service.get(runMatch[1]));
         else {
           const runId = runMatch[1], run = service.get(runId), url = new URL(req.url, 'http://127.0.0.1');

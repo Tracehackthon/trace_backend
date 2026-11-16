@@ -20,7 +20,7 @@ const validatedRuntimeRoot = resolveRuntimeRoot(configuredRuntimeRoot ?? reposit
 if (path.resolve(validatedRuntimeRoot).toLowerCase() !== path.resolve(repositoryRoot).toLowerCase()) throw new Error('TRACE_RUNTIME_ROOT does not match the desktop entrypoint runtime')
 const defaultStateRoot = path.resolve(root, '../../..')
 const productModuleRoot = path.join(repositoryRoot, 'packages/product/workspace/src')
-const productBrowserAssets = new Set(['index.mjs', 'bridge.mjs', 'commands.mjs', 'demo-workspace.mjs', 'chain-model.mjs', 'comparison-model.mjs', 'worksite-model.mjs'])
+const productBrowserAssets = new Set(['index.mjs', 'bridge.mjs', 'commands.mjs', 'demo-workspace.mjs', 'chain-model.mjs', 'comparison-model.mjs', 'worksite-model.mjs', 'scope-contract.mjs'])
 const runtimeIdentity = loadRuntimeIdentity(root)
 const identityEnv = {
   ...(process.env.TRACE_WORKSPACE_ID === undefined ? {} : {workspaceId: process.env.TRACE_WORKSPACE_ID}),
@@ -67,19 +67,19 @@ function rejectIdentityRequest(request, response) {
   const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address)
   if (!loopback || typeof host !== 'string' || !/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i.test(host)) {
     response.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
-    response.end(JSON.stringify({error: {code: 'LOCAL_ONLY', message: 'Trace identity handshake only accepts loopback hosts.'}}))
+    response.end(JSON.stringify({error: {code: 'LOCAL_ONLY', message: 'Trace 本机身份与心跳接口只接受回环请求。'}}))
     return true
   }
   const expected = `${request.socket.encrypted ? 'https' : 'http'}://${host}`
   if (request.headers.origin !== undefined && request.headers.origin !== expected) {
     response.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
-    response.end(JSON.stringify({error: {code: 'ORIGIN_REQUIRED', message: 'Trace identity handshake must use the local same-origin endpoint.'}}))
+    response.end(JSON.stringify({error: {code: 'ORIGIN_REQUIRED', message: 'Trace 本机身份与心跳接口必须使用本机同源地址。'}}))
     return true
   }
   const site = request.headers['sec-fetch-site']
   if (site !== undefined && site !== 'same-origin' && site !== 'none') {
     response.writeHead(403, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
-    response.end(JSON.stringify({error: {code: 'CROSS_SITE_REQUEST', message: 'Trace identity handshake rejects cross-site requests.'}}))
+    response.end(JSON.stringify({error: {code: 'CROSS_SITE_REQUEST', message: 'Trace 本机身份与心跳接口拒绝跨站请求。'}}))
     return true
   }
   return false
@@ -96,6 +96,13 @@ function resolveAsset(url = '/') {
   return absolute === root || absolute.startsWith(`${root}${path.sep}`) ? absolute : null
 }
 
+let taskHandoffOwner=null;
+// In-process composition only; a renderer or HTTP body cannot choose a DB.
+export function bindTaskHandoffOwner(handler){
+  if(taskHandoffOwner||typeof handler!=='function')throw Error('Task handoff owner is already bound or invalid');
+  taskHandoffOwner=handler;
+}
+
 const server = http.createServer(async (request, response) => {
   try {
   const requestUrl = new URL(request.url || '/', 'http://127.0.0.1')
@@ -109,6 +116,21 @@ const server = http.createServer(async (request, response) => {
     response.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-trace-runtime-protocol': '1'})
     response.end(JSON.stringify(desktopServiceIdentity))
     return
+  }
+  if (requestUrl.pathname === '/api/runtime/heartbeat') {
+    if (rejectIdentityRequest(request, response)) return
+    if (request.method !== 'GET') {
+      response.writeHead(405, {'content-type': 'application/json; charset=utf-8', allow: 'GET', 'cache-control': 'no-store'})
+      response.end(JSON.stringify({error: {code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 本机心跳。'}}))
+      return
+    }
+    response.writeHead(200, {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'})
+    response.end(JSON.stringify({status: 'ok'}))
+    return
+  }
+  if(requestUrl.pathname.startsWith('/api/product/task-handoffs/')){
+    if(!taskHandoffOwner){response.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});response.end(JSON.stringify({error:{code:'TASK_OWNER_NOT_CONNECTED',message:'新任务内容owner尚未连接；没有回退旧内容库。'}}));return;}
+    await taskHandoffOwner(request,response);return;
   }
   if (await productWorkspace.handle(request, response)) return
   if (await zhihu.handle(request, response)) return
@@ -164,6 +186,7 @@ let closing = false
 export async function close() {
   if (closing) return
   closing = true
+  taskHandoffOwner=null
   const stopped = new Promise(resolve => server.close(resolve))
   try { await agent.close() } finally { zhihu.close() }
   await stopped

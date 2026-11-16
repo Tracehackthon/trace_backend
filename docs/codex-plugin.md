@@ -43,7 +43,7 @@ node <TRACE_RUNTIME>\native\install-codex-plugin.mjs --confirm true
 
 | 你说的话 | Trace 的行为 | 你需要看见的内容 |
 | --- | --- | --- |
-| `$trace 帮我开始这个项目` | 检查项目；若尚未初始化，提出创建方案 | 项目边界、starter、来源模式、会创建与不会触碰的内容 |
+| `$trace 帮我开始这个项目` | 检查项目；若尚未初始化，提出创建方案 | 协作模型与来源地图的实际内容、starter、来源模式、将保留的既有 `.trace/` 条目、精确新增路径与冲突 |
 | `$trace 现在是什么状态？` | 读取状态 | 当前 profile/lock、版本差异、待审阅数量、实际来源 evidence 数量 |
 | `$trace-adapt 我希望你更适配我的工作方式` | 先讨论适配含义，再形成 profile proposal | 新增/避免的协作行为、来源边界、仍保持 transient 的信息 |
 | `$trace-review 你沉淀了什么？` | 列出待审阅候选 | 候选是什么、为什么仍未采用、下一步由谁决定 |

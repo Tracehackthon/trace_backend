@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {enqueueSensemakingJob, ensureHostWorkflowSchema} from './host-workflow.mjs';
+import {scopeContractFromFindingRow, validateScopeContract, upcastLegacyScope} from './scope-contract.mjs';
 
 /**
  * The Codex host stream is deliberately stored beside Product Workspace, not
@@ -454,6 +455,7 @@ function turnView(row) {
 }
 
 function findingView(row) {
+  const scopeContract = scopeContractFromFindingRow(row, {project_ref: row.attached_project_ref ?? null});
   return {
     finding_id: row.finding_id,
     host: row.host,
@@ -475,6 +477,8 @@ function findingView(row) {
     target_hint: row.target_hint ?? null,
     source_event_key: row.source_event_key ?? null,
     created_at: row.created_at,
+    scope_contract: scopeContract,
+    scopeContract,
   };
 }
 
@@ -818,7 +822,16 @@ export function createHostSessionIngest({db, transaction}) {
     const suppliedTurnId = optionalIdentity(input.turn_id ?? input.turnId, 'turn_id');
     const observation = validText(input.observation, 'observation');
     const desiredBehavior = optionalText(input.desired_behavior ?? input.desiredBehavior, 'desired_behavior');
-    const fingerprint = sha(stableHostJson({operation: 'finding', host: identityValue.host, session_id: identityValue.sessionId, turn_id: suppliedTurnId, observation, desired_behavior: desiredBehavior}));
+    const suppliedScopeContract = input.scope_contract ?? input.scopeContract;
+    let normalizedScopeContract = null;
+    if (suppliedScopeContract !== undefined && suppliedScopeContract !== null) {
+      try { normalizedScopeContract = validateScopeContract(suppliedScopeContract); }
+      catch (error) { fail('INVALID_SCOPE_CONTRACT', error instanceof Error ? error.message : 'scope contract is invalid'); }
+    }
+    // Keep the legacy command fingerprint for captures that did not provide a
+    // contract. Existing command receipts must remain replayable after this
+    // additive migration. New explicit contracts are part of idempotency.
+    const fingerprint = sha(stableHostJson({operation: 'finding', host: identityValue.host, session_id: identityValue.sessionId, turn_id: suppliedTurnId, observation, desired_behavior: desiredBehavior, ...(normalizedScopeContract === null ? {} : {scope_contract: normalizedScopeContract})}));
     return transaction(() => {
       const session = readSession(db, identityValue.host, identityValue.sessionId);
       if (!session || session.status === 'ended') fail(session ? 'HOST_SESSION_ENDED' : 'HOST_SESSION_NOT_FOUND', 'A workflow finding requires an attached or paused host session', session ? 409 : 404);
@@ -837,15 +850,27 @@ export function createHostSessionIngest({db, transaction}) {
       if (!turnId) fail('HOST_TURN_NOT_FOUND', 'A workflow finding must reference the current open HostTurn', 404);
       const turn = readTurn(db, identityValue.host, identityValue.sessionId, turnId);
       if (!turn) fail('HOST_TURN_NOT_FOUND', 'A workflow finding must reference a captured HostTurn', 404);
+      let scopeContract = normalizedScopeContract;
+      if (scopeContract !== null) {
+        const attachment = scopeContract.attachment_context;
+        if (attachment.host !== null && attachment.host !== identityValue.host || attachment.session_id !== null && attachment.session_id !== identityValue.sessionId || attachment.turn_id !== null && attachment.turn_id !== turnId) {
+          fail('SCOPE_ATTACHMENT_CONFLICT', 'scope contract attachment context does not match the Host Session/Turn', 409);
+        }
+        if (attachment.project_ref !== null && session.project_ref !== null && attachment.project_ref !== session.project_ref) fail('SCOPE_ATTACHMENT_CONFLICT', 'scope contract project attachment does not match the Host Session project', 409);
+      } else {
+        scopeContract = upcastLegacyScope({scope: 'unknown', project_ref: session.project_ref, host: identityValue.host, session_id: identityValue.sessionId, turn_id: turnId, source_refs: [{type: 'host-turn', host: identityValue.host, session_id: identityValue.sessionId, turn_id: turnId}], status: 'captured'});
+      }
       const timestamp = now();
       const findingId = `workflow-finding:${fingerprint.slice(0, 40)}`;
       const existingFinding = db.prepare('SELECT * FROM workflow_findings WHERE finding_id=?').get(findingId);
       if (!existingFinding) {
         const sourceRefs = JSON.stringify([{type: 'host-turn', host: identityValue.host, session_id: identityValue.sessionId, turn_id: turnId}]);
-        db.prepare(`INSERT INTO workflow_findings(finding_id,host,session_id,turn_id,observation,desired_behavior,scope,target_kind,status,source_event_key,created_at,finding_kind,origin,source_refs)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(findingId, identityValue.host, identityValue.sessionId, turnId, observation, desiredBehavior, 'unknown', 'unresolved', 'captured', null, timestamp, 'captured', 'explicit', sourceRefs);
+        db.prepare(`INSERT INTO workflow_findings(finding_id,host,session_id,turn_id,observation,desired_behavior,scope,target_kind,status,source_event_key,created_at,finding_kind,origin,source_refs,scope_contract_json)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(findingId, identityValue.host, identityValue.sessionId, turnId, observation, desiredBehavior, 'unknown', 'unresolved', 'captured', null, timestamp, 'captured', 'explicit', sourceRefs, stableHostJson(scopeContract));
       }
-      const finding = findingView(db.prepare('SELECT * FROM workflow_findings WHERE finding_id=?').get(findingId));
+      const finding = findingView(db.prepare(`SELECT f.*, s.project_ref AS attached_project_ref
+        FROM workflow_findings f LEFT JOIN host_sessions s ON s.host=f.host AND s.session_id=f.session_id
+        WHERE f.finding_id=?`).get(findingId));
       return saveControl(db, identityValue, 'finding', fingerprint, commandResult('captured', identityValue, {operation: 'finding', finding}), timestamp);
     });
   }
@@ -881,10 +906,10 @@ export function createHostSessionIngest({db, transaction}) {
     const resolvedSession = sessionId ?? alternateSessionId;
     if (resolvedSession !== undefined) identity(resolvedSession, 'session_id');
     let rows;
-    if (resolvedHost === undefined && resolvedSession === undefined) rows = db.prepare('SELECT * FROM workflow_findings ORDER BY created_at DESC').all();
-    else if (resolvedHost !== undefined && resolvedSession !== undefined) rows = db.prepare('SELECT * FROM workflow_findings WHERE host=? AND session_id=? ORDER BY created_at DESC').all(resolvedHost, resolvedSession);
-    else if (resolvedHost !== undefined) rows = db.prepare('SELECT * FROM workflow_findings WHERE host=? ORDER BY created_at DESC').all(resolvedHost);
-    else rows = db.prepare('SELECT * FROM workflow_findings WHERE session_id=? ORDER BY created_at DESC').all(resolvedSession);
+    if (resolvedHost === undefined && resolvedSession === undefined) rows = db.prepare('SELECT f.*, s.project_ref AS attached_project_ref FROM workflow_findings f LEFT JOIN host_sessions s ON s.host=f.host AND s.session_id=f.session_id ORDER BY f.created_at DESC').all();
+    else if (resolvedHost !== undefined && resolvedSession !== undefined) rows = db.prepare('SELECT f.*, s.project_ref AS attached_project_ref FROM workflow_findings f LEFT JOIN host_sessions s ON s.host=f.host AND s.session_id=f.session_id WHERE f.host=? AND f.session_id=? ORDER BY f.created_at DESC').all(resolvedHost, resolvedSession);
+    else if (resolvedHost !== undefined) rows = db.prepare('SELECT f.*, s.project_ref AS attached_project_ref FROM workflow_findings f LEFT JOIN host_sessions s ON s.host=f.host AND s.session_id=f.session_id WHERE f.host=? ORDER BY f.created_at DESC').all(resolvedHost);
+    else rows = db.prepare('SELECT f.*, s.project_ref AS attached_project_ref FROM workflow_findings f LEFT JOIN host_sessions s ON s.host=f.host AND s.session_id=f.session_id WHERE f.session_id=? ORDER BY f.created_at DESC').all(resolvedSession);
     return rows.map(findingView);
   }
 

@@ -1,6 +1,7 @@
 // Trace local-first web workspace — minimal offline asset cache.
 // API requests (/api/web/*) and dynamic ES module fetches always go to the network.
-const CACHE = 'trace-web-v3';
+const CACHE = 'trace-web-v5';
+const STATUS_TYPE = 'trace-sw-status';
 const PRECACHE = [
   './',
   './index.html',
@@ -12,6 +13,15 @@ const PRECACHE = [
   './src/home-icons.js',
   './src/home.css',
   './src/home/scene-glass.js',
+  './src/attention/attention-home.mjs',
+  './src/attention/attention-home.css',
+  './src/attention/attention-canvas.mjs',
+  './src/attention/attention-canvas.css',
+  './src/attention/attention-projection.mjs',
+  './src/attention/attention-reader.mjs',
+  './src/attention/attention-reader.css',
+  './src/attention/camera.mjs',
+  './src/attention/geometry.mjs',
   './src/style.css',
   './src/matters/matters-screen.mjs',
   './src/matters/matters-model.mjs',
@@ -23,6 +33,7 @@ const PRECACHE = [
   './runtime/product-workspace/chain-model.mjs',
   './runtime/product-workspace/comparison-model.mjs',
   './runtime/product-workspace/worksite-model.mjs',
+  './runtime/product-workspace/scope-contract.mjs',
   './src/product/library.mjs',
   './src/product/assets.mjs',
   './src/product/agent-panel.mjs',
@@ -37,6 +48,7 @@ const PRECACHE = [
   './src/product/worksite.css',
   './src/product/web.css',
   './src/vendor/anime.esm.js',
+  './src/vendor/d3-attention.bundle.mjs',
   './src/vendor/shape-only.mjs',
   './public/home/environment.png',
   './public/home/bird-perched.png',
@@ -48,9 +60,36 @@ const PRECACHE = [
   './public/matters/environment.png',
 ];
 
-self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRECACHE).catch(() => undefined)));
+async function reportStatus(message) {
+  // Only send a fixed, allowlisted status. The install error can contain local
+  // paths or cache implementation details and must never cross this boundary.
+  try {
+    const clients = await self.clients.matchAll({type: 'window', includeUncontrolled: true});
+    for (const client of clients) {
+      try { client.postMessage(message); } catch { /* a closing tab is harmless */ }
+    }
+  } catch { /* status reporting must not change the install result */ }
+}
+
+async function installPrecache() {
+  try {
+    const cache = await caches.open(CACHE);
+    await cache.addAll(PRECACHE);
+  } catch {
+    await reportStatus({type: STATUS_TYPE, state: 'degraded', code: 'PRECACHE_FAILED'});
+    // Keep the rejection: the browser must mark this worker redundant instead
+    // of activating a worker whose offline dependency set is incomplete.
+    throw new Error('TRACE_SW_PRECACHE_FAILED');
+  }
+  await reportStatus({type: STATUS_TYPE, state: 'ready'});
   self.skipWaiting();
+}
+
+self.addEventListener('install', event => {
+  // A missing renderer dependency must fail installation rather than leave an
+  // apparently installed worker that will return offline 504s later. The page
+  // observes the safe status message and continues its normal online startup.
+  event.waitUntil(installPrecache());
 });
 
 self.addEventListener('activate', event => {

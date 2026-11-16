@@ -48,6 +48,7 @@ export function createAgentBackend({ productWorkspace, env = process.env, retrie
       databaseRole: DATABASE_ROLES.agent, apiSurface: AGENT_API_SURFACE});
     return createAgentHttp({ sensemakingWorker, serviceIdentity, service: createAgentService({ store, readWorkspace: productWorkspace.read,
       executeProduct: productWorkspace.execute, adoptCandidate: productWorkspace.adoptAgentCandidate,
+      returnAgentWorksiteResult: productWorkspace.returnAgentWorksiteResult,
       executorRegistry, timeoutMs, retrievalProvider }) });
   } catch (e) { store.close(); throw e; }
 }

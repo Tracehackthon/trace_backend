@@ -2,6 +2,7 @@ import {h} from './library.mjs';
 import {ensureRuntimeIdentity} from './runtime-identity.mjs';
 
 const failures = {
+  FEATURE_DISABLED: '知乎检索功能当前未启用。请在本机后端开启知乎入口；没有用演示内容代替。',
   AUTH_REQUIRED: '检索还没有配置：请在本机后端设置知乎 Access Secret。',
   OAUTH_NOT_CONFIGURED: '授权还没有配置：请在后端设置 App ID、App Key 和登记的回调地址。',
   OAUTH_RELAY_UNAVAILABLE: '登记的回调服务还不可用。请先部署回调服务，再重新发起授权。',

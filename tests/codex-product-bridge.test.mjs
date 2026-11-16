@@ -118,7 +118,8 @@ test('Codex receives a bounded snapshot with a server receipt, then returns only
 
 test('Codex delivery rejects wrong project, session, hash, matter and excluded context without mutation', async t => {
   const app = await fixture(t), initialRevision = app.revision();
-  const wrongProject = await app.request('/api/product/codex/receive', receive('wrong-project', {projectDir: path.join(path.dirname(projectDir), 'other-project')}));
+  const wrongProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-wrong-project-'));
+  const wrongProject = await app.request('/api/product/codex/receive', receive('wrong-project', {projectDir: wrongProjectDir}));
   assert.equal(wrongProject.status, 409);
   assert.equal(wrongProject.json.error.code, 'PROJECT_MISMATCH');
   assert.equal((await app.request('/api/product/workspace')).json.revision, initialRevision);
@@ -153,4 +154,84 @@ test('excluded intake is never delivered and malformed return fields are rejecte
   });
   assert.equal(malformed.status, 400);
   assert.equal(malformed.json.error.code, 'INVALID_RESULT');
+});
+
+test('Codex project delivery requires an existing directory and pins realpath identity', async t => {
+  const app = await fixture(t);
+  const missingParent = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-missing-parent-'));
+  const missing = path.join(missingParent, path.basename(projectDir));
+  const before = app.revision();
+  const missingResult = await app.request('/api/product/codex/receive', receive('codex-receive:missing', {projectDir: missing}));
+  assert.equal(missingResult.status, 400, JSON.stringify(missingResult.json));
+  assert.equal(missingResult.json.error.code, 'INVALID_PROJECT_DIR');
+  assert.equal(app.revision(), before, 'a missing directory must not select or mutate a work');
+
+  const delivered = await app.request('/api/product/codex/receive', receive());
+  assert.equal(delivered.status, 200, JSON.stringify(delivered.json));
+  const realpath = fs.realpathSync.native(projectDir);
+  const expectedIdentity = (process.platform === 'win32' ? path.normalize(realpath).toLocaleLowerCase('en-US') : path.normalize(realpath));
+  assert.equal(delivered.json.receipt.projectDir, path.resolve(projectDir));
+  assert.equal(delivered.json.receipt.projectRealpath, path.normalize(realpath));
+  assert.equal(delivered.json.receipt.projectIdentity, expectedIdentity);
+
+  const sameNameParent = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-same-name-'));
+  const sameNameDifferentDirectory = path.join(sameNameParent, path.basename(projectDir));
+  fs.mkdirSync(sameNameDifferentDirectory);
+  const wrongDirectory = await app.request('/api/product/codex/receive', receive('codex-receive:wrong-directory', {projectDir: sameNameDifferentDirectory}));
+  assert.equal(wrongDirectory.status, 409, JSON.stringify(wrongDirectory.json));
+  assert.equal(wrongDirectory.json.error.code, 'PROJECT_MISMATCH');
+
+  const linkParent = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-link-'));
+  const link = path.join(linkParent, 'trace-runtime-alias');
+  try {
+    fs.symlinkSync(projectDir, link, 'junction');
+  } catch (error) {
+    t.diagnostic(`directory junction unavailable; symlink alias assertion skipped: ${error}`);
+    return;
+  }
+  const alias = await app.request('/api/product/codex/receive', receive('codex-receive:symlink-alias', {projectDir: link}));
+  assert.equal(alias.status, 200, JSON.stringify(alias.json));
+  assert.deepEqual(alias.json.receipt, delivered.json.receipt, 'symlink aliases share the same delivery identity');
+  if (process.platform === 'win32') {
+    const caseVariant = await app.request('/api/product/codex/receive', receive('codex-receive:case-variant', {projectDir: projectDir.toUpperCase()}));
+    assert.equal(caseVariant.status, 200, JSON.stringify(caseVariant.json));
+    assert.deepEqual(caseVariant.json.receipt, delivered.json.receipt, 'Windows path case variants share the same delivery identity');
+  }
+});
+
+test('Codex return enforces the bound realpath identity, including aliases', async t => {
+  const app = await fixture(t);
+  const delivered = await app.request('/api/product/codex/receive', receive());
+  assert.equal(delivered.status, 200, JSON.stringify(delivered.json));
+  const baseReturn = {
+    protocolVersion: 1,
+    commandId: 'codex-return:identity',
+    workId: 'work-codex',
+    sessionId: 'codex-session-1',
+    projectDir,
+    deliveryId: delivered.json.receipt.deliveryId,
+    contextHash: delivered.json.receipt.contextHash,
+    result: {matterId: 'matter-codex', fact: 'identity check'},
+  };
+  const sameNameParent = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-return-same-name-'));
+  const sameNameDifferentDirectory = path.join(sameNameParent, path.basename(projectDir));
+  fs.mkdirSync(sameNameDifferentDirectory);
+  const wrong = await app.request('/api/product/codex/return', {...baseReturn, projectDir: sameNameDifferentDirectory});
+  assert.equal(wrong.status, 409, JSON.stringify(wrong.json));
+  assert.equal(wrong.json.error.code, 'PROJECT_MISMATCH');
+
+  const linkParent = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-return-link-'));
+  const link = path.join(linkParent, 'trace-runtime-return-alias');
+  try {
+    fs.symlinkSync(projectDir, link, 'junction');
+  } catch (error) {
+    t.diagnostic(`directory junction unavailable; return alias assertion skipped: ${error}`);
+    return;
+  }
+  const returned = await app.request('/api/product/codex/return', {...baseReturn, projectDir: link});
+  assert.equal(returned.status, 200, JSON.stringify(returned.json));
+  assert.equal(returned.json.receipt.status, 'returned_for_review');
+  assert.equal(returned.json.receipt.projectDir, delivered.json.receipt.projectDir);
+  assert.equal(returned.json.receipt.projectIdentity, delivered.json.receipt.projectIdentity);
+  assert.equal(returned.json.receipt.projectRealpath, delivered.json.receipt.projectRealpath);
 });

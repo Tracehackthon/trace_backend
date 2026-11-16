@@ -89,6 +89,14 @@ Host Session 的后续闭环也保持相同的 owner 边界：Stop 只在 Produc
 
 Host Session、WorkflowFinding、RoutingProposal、activation receipt、RepositoryPreflight 与 guard receipt 的权威内容均在 `web.sqlite` 的独立表中；sensemaking 的运行/profile/事件/结果哈希在 `agent.sqlite`，不复制用户 prompt/final。上述 host/workflow 表采用独立事务，不推进整个 Product Workspace snapshot revision。
 
+WorkflowFinding 的作用域不再由单一 `scope` 字段承担。`workflow_findings.scope_contract_json`
+保存 `trace.scope-contract@1` 的 owner、来源/attachment、content scope、project links、
+discovery/activation policy、classification 和 lifecycle；旧 scope 只在读时保守 upcast。
+它把“项目 A 中产生”与“内容属于项目 A”分开：个人判断可以保留项目 A provenance 并在显式
+采用后跨项目激活，项目私有事实则只接受当前项目 binding。该字段通过
+`product-workspace.scope-contract.v1` additive migration 加入 `web.sqlite`，不改变
+`PRAGMA user_version`，不写项目 `trace.sqlite`。详见 [Trace 多维 Scope Contract](scope-contract.md)。
+
 生成采用整工作区 revision 校验：别的事项写入也可能让运行过期。已有回答仍可作为历史；真实修订候选已有绑定运行与结果哈希的采纳／撤销命令，但细粒度事项 revision 和运行归档仍需实现，不能靠前端绕过。
 
 ## 原生认知 runtime 的内部机制

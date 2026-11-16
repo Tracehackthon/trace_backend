@@ -7,6 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
   CODEX_APP_SERVER_REQUIRED_SURFACE,
+  canonicalPathForComparison,
   canonicalJson,
   codexAppServerSchemaFingerprint,
   createCodexQualificationRecord,
@@ -70,6 +71,11 @@ test('qualification cache invalidates when binary or schema changes', () => {
   assert.throws(() => validateCodexQualificationRecord(record, { schemaBundle: schemaArgs, executableIdentity: { ...record.executable, sha256: 'd'.repeat(64) } }), /executable identity is stale/);
   const changed = JSON.parse(JSON.stringify(schemaArgs)); changed.serverNotification.description = `${changed.serverNotification.description ?? ''} changed`;
   assert.throws(() => validateCodexQualificationRecord(record, { schemaBundle: changed }), /schema fingerprint is stale/);
+});
+
+test('qualification executable paths compare Windows casing without widening identity', () => {
+  assert.equal(canonicalPathForComparison('C:\\Users\\Trace\\Codex.EXE'), canonicalPathForComparison('c:/users/trace/codex.exe'));
+  assert.notEqual(canonicalPathForComparison('C:\\Users\\Trace\\Codex.EXE'), canonicalPathForComparison('C:\\Users\\Other\\Codex.EXE'));
 });
 
 test('qualification records are persisted as local replay evidence', () => {

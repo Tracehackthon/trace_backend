@@ -21,6 +21,18 @@ const surface=(name,classes,content,tone='cool')=>`<section class="worksite-surf
 const orbit=name=>`<span class="worksite-orbit">${icon(name)}</span>`;
 const label=(id,text)=>`<label for="${id}">${text}</label>`;
 
+// Work records keep the project identity needed by the runtime, which may be
+// an absolute local path. The worksite header is a user-facing surface: show
+// only the final semantic project name and never echo the local path there.
+function semanticProjectName(value, fallback='未选择项目') {
+  const raw=String(value??'').trim();
+  if(!raw)return fallback;
+  const normalized=raw.replace(/[\\/]+$/,'');
+  const absolute=/^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(normalized);
+  if(!absolute)return normalized;
+  return normalized.split(/[\\/]/).filter(Boolean).at(-1)||fallback;
+}
+
 /** Pure view-driven native DOM screen. No internal business store. */
 export function mountWorksiteScreen({root,view,onAction,onHome,onBack,onWorkspaces,onCreateWork,onProfile,onOpenMatter,onOpenArtifact,onReturnToAgent,assets={},services={}}={}) {
   if(!root?.appendChild || typeof onAction!=='function') throw new TypeError('mountWorksiteScreen requires root and onAction');
@@ -165,7 +177,7 @@ export function mountWorksiteScreen({root,view,onAction,onHome,onBack,onWorkspac
   function renderWorkList(force=false){
     const list=q('.worksite-work-list');if(!list||localPanel!=='switch')return;
     const signature=JSON.stringify([current.works,current.selectedWorkId]);if(!force&&signature===lastWorkList)return;lastWorkList=signature;
-    list.innerHTML=(current.works||[]).length?current.works.map(work=>button('select-work',`${esc(work.title)}<small>${esc(work.agent)} · ${esc(work.project)}</small>`,{cls:work.id===current.selectedWorkId?'worksite-selected':'',attrs:`data-id="${esc(work.id)}" aria-pressed="${work.id===current.selectedWorkId}"`})).join(''):'<p>当前没有接入的工作</p>';
+    list.innerHTML=(current.works||[]).length?current.works.map(work=>button('select-work',`${esc(work.title)}<small>${esc(work.agent)} · ${esc(semanticProjectName(work.project))}</small>`,{cls:work.id===current.selectedWorkId?'worksite-selected':'',attrs:`data-id="${esc(work.id)}" aria-pressed="${work.id===current.selectedWorkId}"`})).join(''):'<p>当前没有接入的工作</p>';
   }
   function updateLists(){
     const signature=JSON.stringify([current.intake,current.context,current.contextSummary,current.selectedIntakeId]);if(signature===lastLists)return;lastLists=signature;
@@ -223,7 +235,7 @@ export function mountWorksiteScreen({root,view,onAction,onHome,onBack,onWorkspac
     host.dataset.screen=screen;host.dataset.demo=String(Boolean(current.isDemo));host.dataset.hasIntake=String(Boolean(current.intake?.length));
     qa('.worksite-state').forEach(el=>el.hidden=el.dataset.screen!==screen);
     text('work-title',current.work?.title||'当前没有接入的工作');
-    text('work-agent',current.work?`${current.work.agent||'Agent'} · ${current.work.project||'未选择项目'}`:'尚未连接');
+    text('work-agent',current.work?`${current.work.agent||'Agent'} · ${semanticProjectName(current.work.project)}`:'尚未连接');
     text('demo-status',current.isDemo?'示例':'');text('prototype-demo',current.isDemo?' · 示例内容':'');
     q('.worksite-agent-button span').textContent=current.work?.connected?`回到 ${current.work?.agent||'Agent'}`:'查看本次带入内容';
     text('intake-count',`· ${current.intake?.length||0}`);
@@ -250,7 +262,7 @@ export function mountWorksiteScreen({root,view,onAction,onHome,onBack,onWorkspac
     field('composer',current.composer?.text,switched);
     const finding=current.finding||{};
     field('finding-text',finding.text,switched);field('finding-note',finding.note,switched);
-    text('finding-source',finding.source?.title||`${current.work?.agent||'Agent'} · ${current.work?.project||'未选择项目'}`);
+    text('finding-source',finding.source?.title||`${current.work?.agent||'Agent'} · ${semanticProjectName(current.work?.project)}`);
     const candidate=current.matters?.find(item=>item.id===finding.suggestedMatterId);
     text('suggested-matter-title',candidate?.title||'暂无可关联的事');text('suggested-stop',candidate?`上次停在：${candidate.stop||'尚无停点'}`:'原始发现会保留，不必接受建议关联。');
     text('finding-relation',finding.relation==='linked'?'已关联':finding.relation==='unrelated'?'已选择不关联':'无需现在决定。');
@@ -295,13 +307,13 @@ export function mountWorksiteScreen({root,view,onAction,onHome,onBack,onWorkspac
     if(SCREENS.includes(type)||type==='open-intake'||type==='other-intake')pendingOrigin=(el.closest('[data-surface]')||el).getBoundingClientRect();
     if(type==='home')callExternal(onHome,undefined,'首页尚未连接。');
     else if(SCREENS.includes(type))dispatch({type:'NAVIGATE',screen:type});
-    else if(type==='agent'){if(typeof onReturnToAgent!=='function')showNotice('此工作尚未连接外部 Agent。');else callExternal(onReturnToAgent,current.work,'此工作尚未连接外部 Agent。');}
-    else if(type==='profile'&&onProfile)callExternal(onProfile,current,'个人设置尚未连接。');
+    else if(type==='agent'){event.stopPropagation();if(typeof onReturnToAgent!=='function')showNotice('此工作尚未连接外部 Agent。');else callExternal(onReturnToAgent,current.work,'此工作尚未连接外部 Agent。');}
+    else if(type==='profile'&&onProfile){event.stopPropagation();callExternal(onProfile,current,'个人设置尚未连接。');}
     else if(type==='switch'&&onWorkspaces)callExternal(onWorkspaces,current,'工作列表尚未连接。');
     else if(type==='create-work')callExternal(onCreateWork,current,'工作创建入口尚未连接。');
     else if(type==='back'&&onBack)callExternal(onBack,current,'返回位置尚未连接。');
     else if(['switch','source','correction','profile','finding-source'].includes(type))openPanel(type);
-    else if(type==='close-panel')closePanel();
+    else if(type==='close-panel'){event.stopPropagation();closePanel();}
     else if(type==='select-work'){closePanel(false);dispatch({type:'SELECT_WORK',id:el.dataset.id});}
     else if(type==='open-intake')dispatch({type:'OPEN_INTAKE',id:el.dataset.id});
     else if(type==='other-intake'){const other=current.intake?.find(item=>item.id!==intake?.id);if(other)dispatch({type:'OPEN_INTAKE',id:other.id});}
@@ -314,7 +326,7 @@ export function mountWorksiteScreen({root,view,onAction,onHome,onBack,onWorkspac
     else if(type==='save-correction'){const value=q('[data-local-field="correction"]')?.value.trim();if(value){closePanel();dispatch({type:'DISPUTE_IMPACT',text:value});}}
     else if(type==='keep-finding')dispatch({type:'KEEP_FINDING'});
     else if(type==='use-finding')dispatch({type:'USE_FINDING_IN_WORK'});
-    else if(type==='expand-finding'){dispatch({type:'KEEP_FINDING'});openMatter(current.finding?.relation==='linked'?current.finding.suggestedMatterId:null);}
+    else if(type==='expand-finding')dispatch({type:'EXPAND_FINDING',matterId:current.finding?.relation==='linked'?current.finding.suggestedMatterId:null});
     else if(type==='link-finding'){if(current.finding?.suggestedMatterId)dispatch({type:'SET_FINDING_RELATION',decision:'linked',matterId:current.finding.suggestedMatterId});else openPanel('finding-matter');}
     else if(type==='choose-finding-matter'){closePanel(false);dispatch({type:'SET_FINDING_RELATION',decision:'linked',matterId:el.dataset.id});}
     else if(type==='unlink-finding')dispatch({type:'SET_FINDING_RELATION',decision:'unrelated'});
@@ -350,7 +362,7 @@ export function mountWorksiteScreen({root,view,onAction,onHome,onBack,onWorkspac
   const startComposition=event=>composition.add(event.target);
   const endComposition=event=>{composition.delete(event.target);input(event);};
   host.addEventListener('click',onClick);host.addEventListener('input',input);host.addEventListener('change',input);host.addEventListener('submit',submit);host.addEventListener('keydown',keydown);host.addEventListener('compositionstart',startComposition);host.addEventListener('compositionend',endComposition);
-  q('.worksite-panel-backdrop').addEventListener('click',()=>{if(localPanel)closePanel();});
+  q('.worksite-panel-backdrop').addEventListener('click',event=>{if(event.target!==event.currentTarget)return;if(localPanel)closePanel();});
   update(view);resize();
   return {update,destroy(){if(destroyed)return;destroyed=true;clearTimeout(toastTimer);birdAnimation?.cancel?.();birdAnimation?.pause?.();panelAnimation?.cancel?.();panelAnimation?.pause?.();resizeObserver?.disconnect();window.removeEventListener('resize',resize);glass.forEach(item=>item.destroy());fontFaces.forEach(face=>document.fonts.delete(face));host.remove();}};
 }

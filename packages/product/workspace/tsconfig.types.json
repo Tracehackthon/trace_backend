@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": false,
+    "types": [],
+    "rootDir": "src",
+    "outDir": "types"
+  },
+  "files": ["src/index.mjs"]
+}

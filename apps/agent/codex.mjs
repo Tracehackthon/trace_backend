@@ -11,6 +11,9 @@ import { CODEX_APP_SERVER_PROTOCOL_PROFILE, validateCodexAppServerInstallation, 
 const INTERACTION_DECISIONS = Object.freeze(['accept', 'accept_for_session', 'decline', 'cancel']);
 const INTERACTION_TTL_MS = 120000;
 
+// Library contract: stream ownership and future context use are separate gates.
+export const TASK_EXECUTION_GATES_VERSION = 1;
+
 function safeInteractionText(value, max = 200) {
   if (typeof value !== 'string') return null;
   const compact = value.replace(/[\r\n\t]+/g, ' ').trim();
@@ -202,6 +205,65 @@ export function boundedCodexEnv(env, redactEnvKeys = []) {
   return childEnv;
 }
 
+/**
+ * Resolve the identity of a project directory on the server.  The native
+ * profile's cwd is configuration-owned, while a Worksite request carries the
+ * canonical identity persisted by Product Workspace.  Both sides must pass
+ * through the same realpath/case-folding step; comparing basenames or the
+ * caller's spelling would allow same-name directories and aliases to cross
+ * the execution boundary.
+ */
+function existingProjectPath(value, unavailableCode = 'CODEX_PROJECT_CWD_UNAVAILABLE') {
+  let resolved;
+  try {
+    const absolute = path.resolve(value);
+    const resolveRealpath = fs.realpathSync.native ?? fs.realpathSync;
+    resolved = path.normalize(resolveRealpath(absolute));
+    if (!fs.statSync(resolved).isDirectory()) throw new Error('not a directory');
+  } catch {
+    throw new AgentError(unavailableCode, 'native Codex 选定的项目目录不可用。', 503);
+  }
+  return resolved;
+}
+
+export function canonicalProjectIdentity(value) {
+  demand(typeof value === 'string' && path.isAbsolute(value), 'CODEX_PROJECT_SCOPE_MISMATCH', '工作现场缺少可比较的 canonical projectIdentity。', 403);
+  const resolved = existingProjectPath(value, 'CODEX_PROJECT_SCOPE_MISMATCH');
+  return process.platform === 'win32' ? resolved.toLocaleLowerCase('en-US') : resolved;
+}
+
+function requestProjectIdentity(value) {
+  if (typeof value === 'string') return value;
+  if (plain(value)) return value.identity ?? value.projectRealpath ?? value.projectDir;
+  return null;
+}
+
+/**
+ * Validate the fixed native profile cwd against a Worksite's canonical
+ * identity.  This is intentionally exposed on the adapter so the service can
+ * validate before creating a run, and is repeated by execute/return paths to
+ * catch a changed junction, deleted directory, or profile cwd mutation.
+ */
+function assertNativeProjectBinding(configuredProjectCwd, request) {
+  if (request?.workId === undefined && request?.projectIdentity === undefined) return null;
+  // Keep the resolved cwd that was compared and hand that exact spelling to
+  // the child process.  Resolving once avoids a stat/realpath → spawn gap in
+  // which a junction could be swapped between the comparison and spawn.
+  const configuredPath = existingProjectPath(configuredProjectCwd);
+  const configured = process.platform === 'win32' ? configuredPath.toLocaleLowerCase('en-US') : configuredPath;
+  const requestedRaw = requestProjectIdentity(request?.projectIdentity);
+  if (typeof requestedRaw !== 'string' || !path.isAbsolute(requestedRaw))
+    throw new AgentError('CODEX_PROJECT_SCOPE_MISMATCH', '工作现场缺少可比较的 canonical projectIdentity。', 403);
+  let requested;
+  try { requested = canonicalProjectIdentity(requestedRaw); }
+  catch (error) {
+    if (error instanceof AgentError && error.code === 'CODEX_PROJECT_SCOPE_MISMATCH') throw error;
+    throw new AgentError('CODEX_PROJECT_SCOPE_MISMATCH', '工作现场项目身份不可用。', 403);
+  }
+  demand(configured === requested, 'CODEX_PROJECT_SCOPE_MISMATCH', 'native Codex project cwd 与工作现场项目身份不一致。', 403);
+  return { projectRealpath: configuredPath, projectIdentity: configured };
+}
+
 /** Newline JSON-RPC, bounded frames, concurrent notifications/server requests,
  * no raw prompts, provider errors, stderr or credentials in public diagnostics. */
 export class CodexConnection {
@@ -287,14 +349,15 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
   // create a scratch root. Bounded mode owns its disposable run directories.
   if (!nativeMode) fs.mkdirSync(runtimeRoot, { recursive: true });
   const activeControls = new Map();
-  async function open(signal) {
+  async function open(signal, request = null) {
     demand(!signal?.aborted, 'CANCELLED', '请求已取消。', 409);
     let cwd, generatedCwd = false;
     if (nativeMode) {
-      try { cwd = fs.realpathSync(configuredProjectCwd); }
-      catch { throw new AgentError('CODEX_PROJECT_CWD_UNAVAILABLE', 'native Codex 选定的项目目录不可用。', 503); }
-      try { demand(fs.statSync(cwd).isDirectory(), 'CODEX_PROJECT_CWD_UNAVAILABLE', 'native Codex 选定的项目目录不是目录。', 503); }
-      catch (error) { if (error instanceof AgentError) throw error; throw new AgentError('CODEX_PROJECT_CWD_UNAVAILABLE', 'native Codex 选定的项目目录不可用。', 503); }
+      // Validate the Worksite identity before spawning the child process.  The
+      // same check is repeated by execute/return callers so a changed native
+      // profile cwd cannot reuse a previously valid thread or result.
+      const binding = assertNativeProjectBinding(configuredProjectCwd, request);
+      cwd = binding?.projectRealpath ?? existingProjectPath(configuredProjectCwd);
     } else {
       cwd = fs.mkdtempSync(path.join(runtimeRoot, 'run-')); generatedCwd = true;
       fs.mkdirSync(path.join(cwd, '.git')); // Stop project-local config/rule discovery at this empty root.
@@ -357,6 +420,13 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
     } catch (error) { await dispose(); throw error; }
   }
   return {
+    capabilities: { tools: true, streaming: true, cancellation: true, output: 'trace-result-v1',
+      executionMode: mode, persistentThreads: nativeMode, nativeWorkspace: nativeMode,
+      approvalPolicy: nativeMode ? 'on-request-fail-closed' : 'never' },
+    validateProjectBinding(request) {
+      if (!nativeMode) return null;
+      return assertNativeProjectBinding(configuredProjectCwd, request);
+    },
     async check({ signal } = {}) {
       const host = await open(signal);
       try {
@@ -367,10 +437,11 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
             : { boundedPolicy: 'trace-bounded-v1' }) };
       } finally { await host.dispose(); }
     },
-    async execute({ request, context, signal, onEvent, isCurrent, retrieval, runId = null, profile = null }) {
+    async execute({ request, context, signal, onEvent, isCurrent, canUseContext = isCurrent, onRawOutput, retrieval, runId = null, profile = null }) {
       demand(nativeMode || request.threadId === undefined, 'CODEX_THREAD_NOT_ALLOWED', 'bounded-analysis 不恢复持久 Codex thread。', 400);
-      const host = await open(signal), rpc = host.connection;
-      let threadId, turnId, completed = false, outputBytes = 0;
+      if (nativeMode) assertNativeProjectBinding(configuredProjectCwd, request);
+      const host = await open(signal, request), rpc = host.connection;
+      let threadId, turnId, completed = false, completedSuccessfully = false, outputBytes = 0;
       const texts = new Map(); let finish, fail;
       const interactions = new Map();
       const cleanupInteractions = (error = new AgentError('CODEX_DISCONNECTED', 'Codex 连接已断开。', 502)) => {
@@ -416,6 +487,8 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
       };
       const resolveInteraction = (interactionId, body) => {
         const entry = findInteraction(interactionId);
+        current();
+        if (body?.decision !== 'decline' && body?.decision !== 'cancel') eligible();
         const payload = responseForInteraction(entry.interaction, entry.params, body);
         interactions.delete(interactionId); clearTimeout(entry.timer);
         entry.interaction.state = 'resolved'; entry.interaction.recoverable = false;
@@ -434,7 +507,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
       const emit = (type, data = {}) => onEvent(type, nativeMode
         ? { ...data, threadId: data.threadId ?? threadId ?? null, turnId: data.turnId ?? turnId ?? null }
         : data);
-      const tools = createRunToolBridge({ context, retrieval, signal, isCurrent, onEvent: emit });
+      const tools = createRunToolBridge({ context, retrieval, signal, isCurrent: () => isCurrent() && canUseContext(), onEvent: emit });
       const sensemaking = request.purpose === 'sensemaking';
       const approvalMethods = new Set(['item/commandExecution/requestApproval', 'item/fileChange/requestApproval',
         'item/permissions/requestApproval', 'mcpServer/elicitation/request', 'applyPatchApproval', 'execCommandApproval']);
@@ -446,8 +519,9 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         if (!completed && threadId && turnId && !rpc.closed) rpc.send({ id: ++rpc.sequence, method: 'turn/interrupt', params: { threadId, turnId } });
       };
       const current = () => demand(!signal.aborted && isCurrent(), 'STALE_CONTEXT', '目标版本或上下文已变化。', 409);
+      const eligible = () => { current(); demand(canUseContext(), 'CONTEXT_USE_REVOKED', '来源不再允许新读取或调用；已收到的原始输出仍保留。', 409); };
       rpc.onRequest = async (method, params, rpcRequestId) => {
-        current();
+        eligible();
         if (sensemaking) throw new AgentError('TOOL_NOT_ALLOWED', 'sensemaking profile 不开放工具。', 403);
         if (nativeMode && (approvalMethods.has(method) || inputMethods.has(method))) {
           const registered = registerInteraction(method, params, rpcRequestId);
@@ -457,7 +531,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         demand(threadId && params.threadId === threadId && (!turnId || params.turnId === turnId) && !completed,
           'TOOL_SCOPE_MISMATCH', '工具调用的会话不匹配。', 403);
         const outcome = await tools.call(params.tool, params.arguments);
-        current();
+        eligible();
         return { contentItems: [{ type: 'inputText', text: JSON.stringify(outcome.result) }], success: outcome.success };
       };
       rpc.onNotification = (method, params) => {
@@ -488,7 +562,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
           throw new AgentError('RUNTIME_POLICY_VIOLATION', '运行时尝试使用本模式未开放的能力，执行已停止。', 502);
         }
         if (method === 'turn/completed') {
-          completed = true;
+          completed = true; completedSuccessfully = params.turn.status === 'completed';
           if (params.turn.status === 'completed') finish({ raw: [...texts.values()].at(-1) ?? '', threadId, turnId: params.turn.id,
             // Profile bindings identify the Codex app-server, not merely the
             // CLI semver.  Keep the legacy runtime identity for ordinary
@@ -511,7 +585,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
             'skills.config': skills.data.flatMap(e => e.skills).map(s => ({ path: s.path, enabled: false })),
           };
         }
-        current();
+        eligible();
         const instructions = sensemaking ? TRACE_SENSEMAKING_INSTRUCTIONS
           : nativeMode ? TRACE_NATIVE_CODEX_INSTRUCTIONS
           : retrieval?.tools.length ? TRACE_AGENT_RETRIEVAL_INSTRUCTIONS : TRACE_BOUNDED_ANALYSIS_INSTRUCTIONS;
@@ -540,15 +614,22 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
           threadId = started.thread.id;
           emit('runtime.connected', { threadId, runtimeVersion: host.version, model: started.model, mode, resumed: false });
         }
-        current();
+        eligible();
         const manifest = contextManifest(context);
+        const worksite = request.workId === undefined ? undefined : {workId: request.workId, matterId: request.matterId, role: request.role,
+          project: request.project, projectIdentity: request.projectIdentity, intake: request.intake, findings: request.findings, selection: request.selection};
         const turn = await rpc.rpc('turn/start', { threadId, effort: 'medium',
-          input: [{ type: 'text', text: JSON.stringify({ purpose: request.purpose, input: request.input, context: manifest }), text_elements: [] }],
+          input: [{ type: 'text', text: JSON.stringify({ purpose: request.purpose, input: request.input, context: manifest, ...(worksite ? {worksite} : {}) }), text_elements: [] }],
           ...(nativeMode ? {} : { sandboxPolicy: { type: 'readOnly', networkAccess: false } }),
           outputSchema: sensemaking ? SENSEMAKING_OUTPUT_SCHEMA : OUTPUT_SCHEMA });
         turnId ??= turn.turn.id;
         return await done;
       } finally {
+        // Report received bytes even when a cancelled/failed turn has no normal
+        // outcome. This callback is not a success or adoption receipt.
+        let captureError;
+        try { if (texts.size || completedSuccessfully) onRawOutput?.({ raw: [...texts.values()].at(-1) ?? '', complete: completedSuccessfully }); }
+        catch (error) { captureError = error; }
         if (!completed && threadId && turnId && !rpc.closed) {
           // Attempt the narrow interrupt first; disposal also terminates our own process.
           rpc.send({ id: ++rpc.sequence, method: 'turn/interrupt', params: { threadId, turnId } });
@@ -556,6 +637,7 @@ export function createCodexAdapter({ executable = process.env.TRACE_CODEX_BIN ||
         cleanupInteractions(new AgentError('CODEX_DISCONNECTED', 'Codex 连接已关闭；未完成的交互不会自动恢复。', 502));
         if (activeControls.get(runId) === control) activeControls.delete(runId);
         await host.dispose();
+        if (captureError) throw captureError;
       }
     },
     inspectInteraction(runId, interactionId) {

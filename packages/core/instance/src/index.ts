@@ -60,6 +60,31 @@ export interface ProjectInitResult {
   source_activation: SourceActivationManifest;
   activation_lock: ActivationLock;
   created_paths: string[];
+  preserved_paths: string[];
+}
+export interface ProjectInitInspection {
+  project_dir: string;
+  trace_dir: string;
+  trace_dir_exists: boolean;
+  preserved_entries: string[];
+  will_create_files: string[];
+  will_create_directories: string[];
+  conflicts: string[];
+}
+export interface ProjectInitPreview {
+  project_dir: string;
+  trace_dir: string;
+  instance_id: string;
+  user_id: string;
+  runtime_version: string;
+  manifest: TemplateBundleManifest;
+  source_mode: ProjectSourceMode;
+  source_profile: ProjectSourceProfileInput;
+  source_root: string;
+  source_scope: ProjectScopeType;
+  collaboration_model: CollaborationModel;
+  source_activation: SourceActivationManifest;
+  inspection: ProjectInitInspection;
 }
 export interface ProjectActivationConfigurationInput {
   collaboration_model: CollaborationModel;
@@ -104,6 +129,19 @@ function sha256(value: string): string { return createHash('sha256').update(valu
 function json(value: unknown): string { return `${JSON.stringify(value, null, 2)}\n`; }
 function ensureDirectory(dir: string): void { fs.mkdirSync(dir, {recursive: true}); }
 function writeNew(file: string, content: string): void { ensureDirectory(path.dirname(file)); fs.writeFileSync(file, content, {encoding: 'utf8', flag: 'wx'}); }
+function pathKind(file: string): 'directory' | 'file' | 'symlink' | 'other' | undefined {
+  try {
+    const stats = fs.lstatSync(file);
+    if (stats.isSymbolicLink()) return 'symlink';
+    if (stats.isDirectory()) return 'directory';
+    if (stats.isFile()) return 'file';
+    return 'other';
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+    throw error;
+  }
+}
 function slug(value: string): string { const candidate = value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80); return candidate || 'project'; }
 function scopeFor(mode: ProjectSourceMode): ProjectScopeType { if (mode === 'external') return 'personal'; if (mode === 'team') return 'team'; return 'project'; }
 function readJson(file: string): unknown { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -378,6 +416,7 @@ function profileFor(input: ProjectInitInput, traceDir: string): {profile: Projec
   if (input.source_profile === undefined && input.source_root === undefined) throw new ProtocolError('SOURCE_SELECTION_REQUIRED', `${mode} mode requires --source-profile or --source-root`);
   const supplied = input.source_profile;
   const sourceRoot = absolute(supplied?.root ?? input.source_root, 'source_root');
+  if (!fs.existsSync(sourceRoot) || !fs.statSync(sourceRoot).isDirectory()) throw new ProtocolError('INVALID_INPUT', 'source_profile.root must be an existing directory');
   const sourceId = text(supplied?.source_id ?? input.source_id, 'source_id', 240);
   if (input.source_id !== undefined && input.source_id !== sourceId) throw new ProtocolError('INVALID_INPUT', '--source-id does not match source profile');
   const formalPrefix = text(supplied?.formal_prefix ?? 'wiki', 'formal_prefix', 200);
@@ -392,8 +431,83 @@ function profileFor(input: ProjectInitInput, traceDir: string): {profile: Projec
   return {profile, sourceRoot, scope};
 }
 
-/** Create the project-local Trace boundary. This is create-only and never overwrites .trace. */
-export function initializeProject(input: ProjectInitInput): ProjectInitResult {
+const PROJECT_INIT_FILES = [
+  '.trace/project.json',
+  '.trace/.gitignore',
+  '.trace/instance/trace.lock.json',
+  '.trace/instance/template.manifest.json',
+  '.trace/instance/activation.lock.json',
+  '.trace/profiles/source.profile.json',
+  '.trace/profiles/collaboration-model.json',
+  '.trace/profiles/source-activation.json',
+  '.trace/state/trace.sqlite',
+] as const;
+
+/**
+ * Inspect only the project-local Trace namespace and planned write paths.
+ * Existing unowned `.trace` data is preserved; exact collisions are reported
+ * instead of being interpreted as a managed Trace instance or overwritten.
+ */
+export function inspectProjectInitialization(projectDirectory: string, sourceMode: ProjectSourceMode): ProjectInitInspection {
+  const projectDir = absolute(projectDirectory, 'project_dir');
+  if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) throw new ProtocolError('INVALID_INPUT', `project_dir must exist and be a directory: ${projectDir}`);
+  if (!['local', 'external', 'team', 'empty'].includes(sourceMode)) throw new ProtocolError('INVALID_INPUT', 'source_mode must be local, external, team, or empty');
+
+  const traceDir = path.join(projectDir, '.trace');
+  const rootKind = pathKind(traceDir);
+  const preservedEntries = rootKind === 'directory'
+    ? fs.readdirSync(traceDir, {withFileTypes: true}).sort((left, right) => left.name.localeCompare(right.name)).map(entry => `${entry.name}${entry.isDirectory() ? '/' : entry.isSymbolicLink() ? '@' : ''}`)
+    : [];
+  const conflicts: string[] = [];
+  if (rootKind !== undefined && rootKind !== 'directory') conflicts.push('.trace');
+  if (rootKind !== undefined && rootKind !== 'directory') {
+    return {project_dir: projectDir, trace_dir: traceDir, trace_dir_exists: false, preserved_entries: [], will_create_files: [], will_create_directories: [], conflicts};
+  }
+
+  const descriptorFile = path.join(traceDir, 'project.json');
+  if (pathKind(descriptorFile) === 'file') {
+    try {
+      validateProjectInstanceDescriptor(readJson(descriptorFile));
+      throw new ProtocolError('INSTANCE_EXISTS', 'This directory already contains a managed Trace project instance.');
+    } catch (error) {
+      if (error instanceof ProtocolError && error.code === 'INSTANCE_EXISTS') throw error;
+      conflicts.push('.trace/project.json');
+    }
+  }
+
+  const directories = [
+    '.trace', '.trace/instance', '.trace/profiles', '.trace/state', '.trace/receipts', '.trace/backups', '.trace/candidates',
+    ...(sourceMode === 'local' || sourceMode === 'empty' ? ['.trace/source', '.trace/source/wiki'] : []),
+  ];
+  const unsafeDirectories = new Set<string>();
+  for (const relative of directories) {
+    const kind = pathKind(path.join(projectDir, relative));
+    if (kind !== undefined && kind !== 'directory') {
+      conflicts.push(`${relative} (expected directory; found ${kind})`);
+      unsafeDirectories.add(relative);
+    }
+  }
+  for (const relative of PROJECT_INIT_FILES) {
+    if ([...unsafeDirectories].some(parent => relative.startsWith(`${parent}/`))) continue;
+    const kind = pathKind(path.join(projectDir, relative));
+    if (kind !== undefined) conflicts.push(relative);
+  }
+
+  const plannedDirectories = directories.filter(relative => ![...unsafeDirectories].some(parent => relative.startsWith(`${parent}/`)) && pathKind(path.join(projectDir, relative)) === undefined);
+  const plannedFiles = [...PROJECT_INIT_FILES].filter(relative => ![...unsafeDirectories].some(parent => relative.startsWith(`${parent}/`)) && pathKind(path.join(projectDir, relative)) === undefined);
+  return {
+    project_dir: projectDir,
+    trace_dir: traceDir,
+    trace_dir_exists: rootKind === 'directory',
+    preserved_entries: preservedEntries,
+    will_create_files: plannedFiles,
+    will_create_directories: plannedDirectories,
+    conflicts: [...new Set(conflicts)].sort(),
+  };
+}
+
+/** Pure semantic preview shared by project proposals and the write path. */
+export function previewProjectInitialization(input: ProjectInitInput): ProjectInitPreview {
   const projectDir = absolute(input.project_dir, 'project_dir');
   if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) throw new ProtocolError('INVALID_INPUT', `project_dir must exist and be a directory: ${projectDir}`);
   const userId = text(input.user_id, 'user_id', 240);
@@ -401,29 +515,119 @@ export function initializeProject(input: ProjectInitInput): ProjectInitResult {
   const runtimeVersion = text(input.runtime_version, 'runtime_version', 64);
   const instanceId = text(input.instance_id, 'instance_id', 200);
   const manifest = validateTemplateManifest(input.manifest);
+  const inspection = inspectProjectInitialization(projectDir, input.source_mode);
+  if (inspection.conflicts.length > 0) throw new ProtocolError('PROJECT_INIT_CONFLICT', `Trace initialization will not overwrite existing paths: ${inspection.conflicts.join(', ')}`);
   const traceDir = path.join(projectDir, '.trace');
-  if (fs.existsSync(traceDir)) { const entries = fs.readdirSync(traceDir); if (entries.length > 0) throw new ProtocolError('INSTANCE_EXISTS', `project already has a non-empty .trace directory: ${traceDir}`); }
+  const selected = profileFor({...input, project_dir: projectDir, user_id: userId}, traceDir);
+  if (manifest.cognitive_source !== undefined && !manifest.cognitive_source.allowed_scope_types.includes(selected.scope)) throw new ProtocolError('INVALID_INPUT', `source scope ${selected.scope} is not allowed by template ${manifest.bundle_id}`);
+  const collaborationModel = input.source_profile?.collaboration_model === undefined
+    ? defaultCollaborationModel(manifest.bundle_id)
+    : validateCollaborationModel(input.source_profile.collaboration_model);
+  const sourceActivation = input.source_profile?.activation_manifest === undefined
+    ? defaultSourceActivationManifest({source_id: selected.profile.source_id, source_mode: input.source_mode, template_id: manifest.bundle_id})
+    : validateSourceActivationManifest(input.source_profile.activation_manifest);
+  if (sourceActivation.source_id !== selected.profile.source_id) throw new ProtocolError('INVALID_INPUT', 'activation_manifest.source_id must match the selected source profile');
+  assertActivationMapWithinSourcePolicy(sourceActivation, selected.profile);
+  return {
+    project_dir: projectDir,
+    trace_dir: traceDir,
+    instance_id: instanceId,
+    user_id: userId,
+    runtime_version: runtimeVersion,
+    manifest,
+    source_mode: input.source_mode,
+    source_profile: selected.profile,
+    source_root: selected.sourceRoot,
+    source_scope: selected.scope,
+    collaboration_model: collaborationModel,
+    source_activation: sourceActivation,
+    inspection,
+  };
+}
+
+function mergeStagedTrace(stagedTrace: string, traceDir: string): string[] {
+  const stagedDirectories: string[] = [];
+  const stagedFiles: Array<{relative: string; source: string}> = [];
+  const collect = (directory: string, relativeDirectory = ''): void => {
+    for (const entry of fs.readdirSync(directory, {withFileTypes: true}).sort((left, right) => left.name.localeCompare(right.name))) {
+      const relative = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+      const source = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) throw new ProtocolError('PROJECT_INIT_CONFLICT', `Trace staging unexpectedly contains a symbolic link: ${relative}`);
+      if (entry.isDirectory()) {
+        stagedDirectories.push(relative);
+        collect(source, relative);
+      } else if (entry.isFile()) stagedFiles.push({relative, source});
+      else throw new ProtocolError('PROJECT_INIT_CONFLICT', `Trace staging contains an unsupported path: ${relative}`);
+    }
+  };
+  collect(stagedTrace);
+
+  const createdDirectories: string[] = [];
+  const createdFiles: string[] = [];
+  const createdPaths: string[] = [];
+  const ensureTargetDirectory = (target: string, relative: string): void => {
+    const kind = pathKind(target);
+    if (kind === 'directory') return;
+    if (kind !== undefined) throw new ProtocolError('PROJECT_INIT_CONFLICT', `Trace initialization will not replace ${relative} (${kind}).`);
+    try {
+      fs.mkdirSync(target);
+      createdDirectories.push(target);
+      createdPaths.push(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST' && pathKind(target) === 'directory') return;
+      throw error;
+    }
+  };
+  const installFile = (item: {relative: string; source: string}): void => {
+    const target = path.join(traceDir, ...item.relative.split('/'));
+    ensureTargetDirectory(path.dirname(target), path.posix.dirname(item.relative));
+    try {
+      // The staging directory is under the project root, so hard-linking is
+      // same-volume, atomic, and create-only. Existing files can never be
+      // replaced by platform-specific rename semantics.
+      fs.linkSync(item.source, target);
+      createdFiles.push(target);
+      createdPaths.push(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new ProtocolError('PROJECT_INIT_CONFLICT', `Trace initialization will not replace ${item.relative}.`);
+      throw error;
+    }
+  };
+
+  try {
+    ensureTargetDirectory(traceDir, '.trace');
+    for (const relative of stagedDirectories.sort((left, right) => left.split('/').length - right.split('/').length || left.localeCompare(right))) {
+      ensureTargetDirectory(path.join(traceDir, ...relative.split('/')), `.trace/${relative}`);
+    }
+    const descriptor = stagedFiles.find(item => item.relative === 'project.json');
+    if (!descriptor) throw new ProtocolError('PROJECT_INVALID', 'Trace initialization staging is missing project.json.');
+    for (const item of stagedFiles.filter(item => item.relative !== 'project.json').sort((left, right) => left.relative.localeCompare(right.relative))) installFile(item);
+    // project.json is the instance commit marker: publish it only after every
+    // other required file and directory is present.
+    installFile(descriptor);
+    return createdPaths;
+  } catch (error) {
+    for (const file of createdFiles.reverse()) { try { fs.unlinkSync(file); } catch {} }
+    for (const directory of createdDirectories.reverse()) { try { fs.rmdirSync(directory); } catch {} }
+    throw error;
+  }
+}
+
+/** Add a project-local Trace boundary without replacing pre-existing `.trace` data. */
+export function initializeProject(input: ProjectInitInput): ProjectInitResult {
+  const preview = previewProjectInitialization(input);
+  const {project_dir: projectDir, trace_dir: traceDir, instance_id: instanceId, user_id: userId, runtime_version: runtimeVersion, manifest, source_mode: sourceMode, source_profile: sourceProfile, source_root: sourceRoot, source_scope: sourceScope, collaboration_model: collaborationModel, source_activation: sourceActivation, inspection} = preview;
   const createdAt = input.created_at ?? new Date().toISOString();
   const staging = path.join(projectDir, `.trace-init-${process.pid}-${Date.now()}`);
   if (fs.existsSync(staging)) throw new ProtocolError('INSTANCE_EXISTS', `initialization staging path already exists: ${staging}`);
   const stagedTrace = path.join(staging, '.trace');
   try {
     ensureDirectory(stagedTrace);
-    const selected = profileFor({...input, user_id: userId}, traceDir);
-    if (manifest.cognitive_source !== undefined && !manifest.cognitive_source.allowed_scope_types.includes(selected.scope)) throw new ProtocolError('INVALID_INPUT', `source scope ${selected.scope} is not allowed by template ${manifest.bundle_id}`);
-    const profileText = json(selected.profile);
+    const profileText = json(sourceProfile);
     const profileHash = sha256(profileText);
-    const lock = buildTemplateLock(manifest, runtimeVersion, instanceId, createdAt, {source_id: selected.profile.source_id, profile_hash: profileHash, scope_type: selected.scope});
-    const collaborationModel = input.source_profile?.collaboration_model === undefined
-      ? defaultCollaborationModel(manifest.bundle_id)
-      : validateCollaborationModel(input.source_profile.collaboration_model);
-    const sourceActivation = input.source_profile?.activation_manifest === undefined
-      ? defaultSourceActivationManifest({source_id: selected.profile.source_id, source_mode: input.source_mode, template_id: manifest.bundle_id})
-      : validateSourceActivationManifest(input.source_profile.activation_manifest);
-    if (sourceActivation.source_id !== selected.profile.source_id) throw new ProtocolError('INVALID_INPUT', 'activation_manifest.source_id must match the selected source profile');
-    assertActivationMapWithinSourcePolicy(sourceActivation, selected.profile);
+    const lock = buildTemplateLock(manifest, runtimeVersion, instanceId, createdAt, {source_id: sourceProfile.source_id, profile_hash: profileHash, scope_type: sourceScope});
     const activationLock = buildActivationLock({template_id: manifest.bundle_id, model: collaborationModel, source: sourceActivation, created_at: createdAt});
-    const descriptor = validateProjectInstanceDescriptor({protocol_id: PROJECT_INSTANCE_PROTOCOL_ID, protocol_version: PROJECT_INSTANCE_PROTOCOL_VERSION, project_id: slug(path.basename(projectDir)), instance_id: instanceId, template_id: manifest.bundle_id, template_version: manifest.bundle_version, source_mode: input.source_mode, source_scope: selected.scope, state_file: '.trace/state/trace.sqlite', source_root: input.source_mode === 'local' || input.source_mode === 'empty' ? '.trace/source' : '.trace/profiles/source.profile.json', created_at: createdAt});
+    const descriptor = validateProjectInstanceDescriptor({protocol_id: PROJECT_INSTANCE_PROTOCOL_ID, protocol_version: PROJECT_INSTANCE_PROTOCOL_VERSION, project_id: slug(path.basename(projectDir)), instance_id: instanceId, template_id: manifest.bundle_id, template_version: manifest.bundle_version, source_mode: sourceMode, source_scope: sourceScope, state_file: '.trace/state/trace.sqlite', source_root: sourceMode === 'local' || sourceMode === 'empty' ? '.trace/source' : '.trace/profiles/source.profile.json', created_at: createdAt});
     writeNew(path.join(stagedTrace, 'project.json'), json(descriptor));
     writeNew(path.join(stagedTrace, 'instance', 'trace.lock.json'), json(lock));
     writeNew(path.join(stagedTrace, 'instance', 'template.manifest.json'), json(manifest));
@@ -431,12 +635,15 @@ export function initializeProject(input: ProjectInitInput): ProjectInitResult {
     writeNew(path.join(stagedTrace, 'profiles', 'source.profile.json'), profileText);
     writeNew(path.join(stagedTrace, 'profiles', 'collaboration-model.json'), json(collaborationModel));
     writeNew(path.join(stagedTrace, 'profiles', 'source-activation.json'), json(sourceActivation));
+    // Reserve the project-owned database path with an exclusive create before
+    // the descriptor is published. The host then initializes this empty DB;
+    // a concurrently-created file can never be mistaken for Trace state.
+    writeNew(path.join(stagedTrace, 'state', 'trace.sqlite'), '');
     writeNew(path.join(stagedTrace, '.gitignore'), ['# Trace project-local state (generated by `trace-runtime project init`)', 'state/', 'receipts/', 'backups/', 'candidates/', 'profiles/', '*.lock.tmp', ''].join('\n'));
-    for (const directory of ['state', 'receipts', 'backups', 'candidates', 'source/wiki']) ensureDirectory(path.join(stagedTrace, directory));
-    fs.renameSync(stagedTrace, traceDir);
+    for (const directory of ['state', 'receipts', 'backups', 'candidates']) ensureDirectory(path.join(stagedTrace, directory));
+    if (sourceMode === 'local' || sourceMode === 'empty') ensureDirectory(path.join(stagedTrace, 'source/wiki'));
+    const createdPaths = mergeStagedTrace(stagedTrace, traceDir);
     fs.rmSync(staging, {recursive: true, force: true});
-    const finalProfile = {...selected.profile, root: selected.sourceRoot};
-    const createdPaths = [path.join(traceDir, 'project.json'), path.join(traceDir, 'instance', 'trace.lock.json'), path.join(traceDir, 'instance', 'template.manifest.json'), path.join(traceDir, 'instance', 'activation.lock.json'), path.join(traceDir, 'profiles', 'source.profile.json'), path.join(traceDir, 'profiles', 'collaboration-model.json'), path.join(traceDir, 'profiles', 'source-activation.json'), path.join(traceDir, '.gitignore'), path.join(traceDir, 'state'), path.join(traceDir, 'receipts'), path.join(traceDir, 'backups'), path.join(traceDir, 'candidates'), path.join(traceDir, 'source', 'wiki')];
-    return {project_dir: projectDir, trace_dir: traceDir, descriptor, lock, source_profile: finalProfile, collaboration_model: collaborationModel, source_activation: sourceActivation, activation_lock: activationLock, created_paths: createdPaths};
+    return {project_dir: projectDir, trace_dir: traceDir, descriptor, lock, source_profile: {...sourceProfile, root: sourceRoot}, collaboration_model: collaborationModel, source_activation: sourceActivation, activation_lock: activationLock, created_paths: createdPaths, preserved_paths: inspection.preserved_entries.map(entry => `.trace/${entry}`)};
   } catch (error) { fs.rmSync(staging, {recursive: true, force: true}); throw error; }
 }

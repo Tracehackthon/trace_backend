@@ -1,4 +1,5 @@
-// Explicit, isolated visual fixture. These are not observations about the real project.
+// Worksite state model used by the live product host and explicit demo seeds.
+// Delivery truth lives on work.connection; demo data is never persisted.
 function savedFixture() {
   const matters = [
     { id: 'demo-worksite-recall', title: '收藏后为什么接不回来', stop: '恢复当时的触动，是否需要自己的附言？', understanding: '也许需要补一句自己的感受。', version: 1 },
@@ -97,7 +98,8 @@ function makeSession(work, matterIds) {
   };
 }
 
-/** Pure, in-memory prototype store. Supplied IDs are preserved; no connector is invoked. */
+/** Pure, in-memory worksite reducer. Supplied IDs are preserved; connectors
+ * update work.connection through the product bridge rather than this model. */
 export function createWorksiteState(options = {}) {
   const seed = options.fixture === 'saved' ? savedFixture() : { matters: [], works: [{ id: 'local-work', title: '尚未接入工作', agent: '', project: '', connected: false }] };
   const inputMatters = Array.isArray(options.matters) ? options.matters : seed.matters;
@@ -171,6 +173,16 @@ function canUndo(state, session) {
   return !!matter && receipt.workId === state.selectedWorkId && matter.version === receipt.version && matter.understanding === receipt.after;
 }
 
+/** The worksite connection is the sole current delivery state. Session
+ * receipts remain historical evidence, while this projection is updated as
+ * a returned result is reviewed and a revision is confirmed. */
+function markDeliveryRevised(state, session) {
+  const work = state.works[state.selectedWorkId];
+  if (!work?.connection) return;
+  work.connection = { ...work.connection, status: 'revised' };
+  if (session.codexDelivery) session.codexDelivery.status = 'revised';
+}
+
 export function reduceWorksite(state, action = {}) {
   if (!state || state.schemaVersion !== 1 || !action || typeof action.type !== 'string') return state;
   if (action.type === 'CLEAR_NOTICE') return state.notice ? { ...state, notice: '' } : state;
@@ -220,6 +232,13 @@ export function reduceWorksite(state, action = {}) {
       session.finding = { ...blankFinding(next.works[next.selectedWorkId]), text: session.composer.text, suggestedMatterId: session.result.matterId };
       move(session, 'finding');
       break;
+    case 'OPEN_SAVED_FINDING': {
+      const saved = session.findings.find(item => item.id === action.id);
+      if (!saved) return notice(state, '没有找到这条现场发现；当前内容未改变。');
+      session.finding = copy(saved);
+      move(session, 'finding');
+      break;
+    }
     case 'FINDING_DRAFT': {
       if (!action.patch || typeof action.patch !== 'object') return state;
       const changed = ['text', 'note'].some(key => typeof action.patch[key] === 'string' && action.patch[key] !== session.finding[key]);
@@ -333,6 +352,7 @@ export function reduceWorksite(state, action = {}) {
     default:
       return state;
   }
+  if (action.type === 'CONFIRM_REVISION' && session.receipt && session.result.decision === 'revised') markDeliveryRevised(next, session);
   return next;
 }
 

@@ -5,10 +5,12 @@
   "type": "module",
   "description": "Trace local-first Web workspace",
   "dependencies": {
-    "@trace/product-workspace": "workspace:*"
+    "@trace/product-workspace": "workspace:*",
+    "d3-shape": "3.2.0",
+    "d3-zoom": "3.0.0"
   },
   "scripts": {
-    "build": "node --check server.mjs && node --check src/main.js && node --check src/discussion.js && node --check src/home.js && node --check src/home-model.js && node --check src/home-icons.js && node --check src/home/scene-glass.js && node --check src/prototype-session.js && node --check src/matters/matters-model.mjs && node --check src/matters/matters-screen.mjs && node --check src/web-main.js && node --check src/product/chain-screen.mjs && node --check src/product/comparison-screen.mjs && node --check src/product/worksite-screen.mjs && node --check src/product/library.mjs && node --check src/product/host-session.mjs && node --check src/product/zhihu-panel.mjs && node --check src/product/agent-panel.mjs",
+    "build": "node --check server.mjs && node --check src/main.js && node --check src/discussion.js && node --check src/home.js && node --check src/home-model.js && node --check src/home-icons.js && node --check src/home/scene-glass.js && node --check src/prototype-session.js && node --check src/matters/matters-model.mjs && node --check src/matters/matters-screen.mjs && node --check src/web-main.js && node --check src/product/chain-screen.mjs && node --check src/product/comparison-screen.mjs && node --check src/product/worksite-screen.mjs && node --check src/product/library.mjs && node --check src/product/host-session.mjs && node --check src/product/zhihu-panel.mjs && node --check src/product/agent-panel.mjs && node --check src/attention/camera.mjs && node --check src/attention/geometry.mjs && node --check src/attention/attention-canvas.mjs && node --check src/attention/attention-projection.mjs && node --check src/attention/attention-reader.mjs && node --check src/attention/attention-home.mjs",
     "dev": "node server.mjs",
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs ../../tests/web-store.test.mjs ../../tests/product-commands.test.mjs ../../tests/codex-product-bridge.test.mjs"

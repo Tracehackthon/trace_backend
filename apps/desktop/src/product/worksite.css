@@ -18,8 +18,8 @@
 .worksite-root h1,.worksite-root h2,.worksite-root h3{font-family:var(--worksite-serif);font-weight:600;overflow-wrap:anywhere}
 .worksite-root button,.worksite-root a{-webkit-tap-highlight-color:transparent}
 .worksite-root .worksite-icon{width:23px;height:23px;flex-shrink:0;vertical-align:middle}
-.worksite-root .worksite-viewport{position:absolute;inset:0;overflow:auto;background-size:cover;background-position:center;background-repeat:no-repeat}
-.worksite-root .worksite-scene{position:relative;width:1672px;height:941px;transform-origin:top left}
+.worksite-root .worksite-viewport{position:absolute;inset:0;overflow-y:auto;overflow-x:clip;background-size:cover;background-position:center;background-repeat:no-repeat}
+.worksite-root .worksite-scene{position:absolute;width:1672px;height:941px;transform-origin:top left}
 .worksite-root .worksite-header{position:absolute;top:24px;left:59px;right:62px;height:48px;display:flex;align-items:center;justify-content:space-between;z-index:20}
 .worksite-root .worksite-brand{display:flex;align-items:center;gap:16px;padding:0}
 .worksite-root .worksite-brand strong{font-family:Arial,var(--worksite-sans);font-size:34px;font-weight:600;letter-spacing:-1px}
@@ -318,7 +318,7 @@
 @media(prefers-reduced-motion:reduce){.worksite-root *{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 
 /* Narrow windows switch to the same content in reading order, not a tiny scene. */
-.worksite-root.worksite-narrow .worksite-scene{width:100%;height:auto;min-height:100%;padding:22px 18px 78px;display:flex;flex-direction:column}
+.worksite-root.worksite-narrow .worksite-scene{position:relative;width:100%;height:auto;min-height:100%;padding:22px 18px 78px;display:flex;flex-direction:column}
 .worksite-root.worksite-narrow .worksite-header{position:relative;inset:auto;width:100%;height:auto;gap:18px;margin-bottom:22px}
 .worksite-root.worksite-narrow .worksite-brand{gap:10px}
 .worksite-root.worksite-narrow .worksite-brand strong{font-size:27px}

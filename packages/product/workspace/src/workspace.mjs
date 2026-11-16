@@ -1,16 +1,23 @@
+import {assertCapabilityPacketOperation} from './capability-packet-codec.mjs';
+import {createTaskHandoff,taskHandoffPath} from './task-handoff.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { applyProductOperations, validateProductCommand, ProductCommandError } from './commands.mjs';
+import {validateWorkbench,WorkbenchError,capabilityFeedbackNeedsProof,activationNeedsProof,taskInput,assertTaskInputUsable} from './workbench-model.mjs';
+import {CANVAS_TABLES,ensureCanvasSchema,createCanvasResourceStore} from './canvas-store.mjs';
 import {
   CodexBridgeError,
+  resolveCodexProjectDir,
   codexRequestFingerprint,
   findCodexBridgeResponse,
   receiveCodexContext,
   returnCodexResult,
   validateCodexReceiveRequest,
   validateCodexReturnRequest,
+  findAgentWorksiteResponse,
+  returnAgentWorksiteResult,
 } from './codex-bridge.mjs';
 import {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST_SESSION_STATUSES, HOST_SESSION_TABLES, HOST_TURN_STATES, HostIngestError, resolveProjectBinding, verifyHostSessionProjectBinding} from './host-ingest.mjs';
 import {createHostWorkflowService, ensureHostWorkflowSchema, HOST_WORKFLOW_TABLES, HostWorkflowError, computeRepositoryPreflight} from './host-workflow.mjs';
@@ -36,10 +43,12 @@ export {createHostSessionIngest, ensureHostSessionSchema, HOST_EVENT_KINDS, HOST
 // This database is deliberately independent of the cognitive/adopted ledgers.
 // The caller owns TRACE_WEB_STATE_FILE and chooses an explicit absolute path.
 const APPLICATION_ID = 0x54525731; // TRW1
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_ENTITIES = 10000;
-const KINDS = ['host-meta', 'chain-meta', 'matter', 'source', 'chain-session', 'comparison', 'worksite-meta', 'work', 'worksite-session', 'work-guard'];
+const LEGACY_KINDS = ['host-meta', 'chain-meta', 'matter', 'source', 'chain-session', 'comparison', 'worksite-meta', 'work', 'worksite-session', 'work-guard'];
+const CONTENT_CATALOGS = ['resources','materials','expressions','relations','capabilities','sessions','tasks','feedbacks','activations'];
+const KINDS = [...LEGACY_KINDS,...CONTENT_CATALOGS.map(key=>'content-'+key)];
 const CORE_TABLES = ['web_workspace', 'web_snapshots', 'web_entities', 'web_commands'];
 const PRODUCT_RUNTIME_VERSION = process.env.TRACE_RUNTIME_VERSION || '0.7.1';
 const PRODUCT_API_SURFACE = Object.freeze({
@@ -90,6 +99,7 @@ function objectMap(items, name) {
 /** Canonical entities plus separately scoped recovery state, never an opaque host blob. */
 function normalizeHost(input) {
   checkTree(input);
+  if (input?.schemaVersion === 2) return validateWorkbench(structuredClone(input));
   demand(plain(input) && input.schemaVersion === 1, 'INVALID_HOST', '需要 schemaVersion 1 的工作区对象。');
   const allowed = new Set(['schemaVersion', 'chain', 'comparisons', 'worksite', 'workGuards', 'preferences', 'route', 'error']);
   demand(Object.keys(input).every(key => allowed.has(key)), 'INVALID_HOST', '工作区包含未支持的顶层字段。');
@@ -147,6 +157,12 @@ function normalizeHost(input) {
 
 function splitHost(host) {
   const rows = []; const add = (kind, id, payload, ordinal = 0) => rows.push({ kind, id, ordinal, payload: stableJson(payload) });
+  if(host.schemaVersion===2){
+    const {resources,materials,expressions,relations,capabilities,sessions,tasks,feedbacks,activations,...meta}=host;
+    add('host-meta','$',meta);
+    for(const key of CONTENT_CATALOGS)Object.entries(host[key]||{}).forEach(([id,payload],ordinal)=>add('content-'+key,id,payload,ordinal));
+    return rows;
+  }
   add('host-meta', '$', { schemaVersion: host.schemaVersion, ...(host.preferences === undefined ? {} : { preferences: host.preferences }) });
   const { matters, sources, sessions, ...chainMeta } = host.chain;
   add('chain-meta', '$', chainMeta);
@@ -163,7 +179,7 @@ function splitHost(host) {
 }
 
 function databaseError(error) {
-  if (error instanceof WebStoreError || error instanceof ProductCommandError || error instanceof CodexBridgeError || error instanceof HostIngestError || error instanceof HostWorkflowError) return error;
+  if (error instanceof WorkbenchError || error instanceof WebStoreError || error instanceof ProductCommandError || error instanceof CodexBridgeError || error instanceof HostIngestError || error instanceof HostWorkflowError) return error;
   if (/SQLITE_BUSY|database is locked|database is busy/i.test(String(error))) return new WebStoreError(503, 'STORAGE_BUSY', '工作区存储正忙，请保留草稿并稍后重试。');
   return new WebStoreError(503, 'STORAGE_FAILURE', '工作区存储读取或写入失败，未重置原数据。');
 }
@@ -172,11 +188,11 @@ function assertDatabase(db, allowEmpty) {
   demand(integrity.length === 1 && integrity[0].quick_check === 'ok', 'STORAGE_CORRUPT', '工作区数据库损坏，未重置。', 503);
   const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
   if (allowEmpty && tables.length === 0 && db.prepare('PRAGMA application_id').get().application_id === 0) return false;
-  demand(db.prepare('PRAGMA application_id').get().application_id === APPLICATION_ID && db.prepare('PRAGMA user_version').get().user_version === SCHEMA_VERSION, 'WRONG_DATABASE', '这不是独立 Trace Web 数据库，未写入。', 503);
+  demand(db.prepare('PRAGMA application_id').get().application_id === APPLICATION_ID && [1,SCHEMA_VERSION].includes(db.prepare('PRAGMA user_version').get().user_version), 'WRONG_DATABASE', '这不是独立 Trace Web 数据库，未写入。', 503);
   // Host ingest is an additive extension. Older v1 web databases are valid
   // and receive the extension in the startup transaction below; arbitrary
   // tables still fail closed so a ledger cannot be mistaken for web.sqlite.
-  const allowed = new Set([...CORE_TABLES, ...HOST_SESSION_TABLES, ...HOST_WORKFLOW_TABLES, DATABASE_IDENTITY_TABLE]);
+  const allowed = new Set([...CORE_TABLES, ...HOST_SESSION_TABLES, ...HOST_WORKFLOW_TABLES, ...CANVAS_TABLES, DATABASE_IDENTITY_TABLE]);
   demand(CORE_TABLES.every(table => tables.includes(table)) && tables.every(table => allowed.has(table)), 'STORAGE_CORRUPT', '工作区数据表缺失或不一致，未重置。', 503);
   // A database copied from another Trace role can have a superficially
   // familiar filename and even a compatible SQLite header.  The durable
@@ -293,6 +309,9 @@ export function createProductWorkspace({
   allowSnapshotWrites = false,
   desktopSnapshotToken,
   hostWorkflowFaultInjector = null,
+  resolveFeedbackEvidence = null,
+  resolveActivationEvidence = null,
+  resolveTaskDispatchEvidence = null,
   workspaceId,
   installationId,
   runtimeVersion = PRODUCT_RUNTIME_VERSION,
@@ -318,8 +337,8 @@ export function createProductWorkspace({
     } finally { probe.close(); }
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new DatabaseSync(file); let closed = false;
-  const storage = { kind: 'sqlite', location: file };
+  const db = new DatabaseSync(file); let closed = false,taskHandoffBridge=null;
+  const storage = { kind: 'sqlite', location: file, features:['capability-packet-v1','capability-feedback-v1','message-reference-scope-v1','activation-v1','task-input-v1',...(resolveTaskDispatchEvidence?['task-dispatch-v1']:[]),...(resolveFeedbackEvidence?['capability-feedback-result-v1']:[]),...(resolveActivationEvidence?['activation-result-v1']:[])] };
   function transaction(fn) {
     db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); db.exec('COMMIT'); return result; }
@@ -339,9 +358,16 @@ export function createProductWorkspace({
         demand(plain(payload), 'STORAGE_CORRUPT', '实体格式损坏，未重置。', 503);
         groups[row.kind].push({ id: row.object_id, payload }); counts[row.kind]++;
       }
-      demand(stableJson(counts) === stableJson(expected), 'STORAGE_CORRUPT', '实体数量不一致，未重置。', 503);
+      demand(Object.keys(expected).every(key=>KINDS.includes(key))&&stableJson(counts) === stableJson(Object.fromEntries(KINDS.map(key=>[key,expected[key]??0]))), 'STORAGE_CORRUPT', '实体数量不一致，未重置。', 503);
       const meta = kind => { demand(groups[kind].length === 1 && groups[kind][0].id === '$', 'STORAGE_CORRUPT', '工作区恢复元数据缺失。', 503); return groups[kind][0].payload; };
       const map = kind => Object.fromEntries(groups[kind].map(row => [row.id, row.payload]));
+      if(meta('host-meta').schemaVersion===2){
+        demand(LEGACY_KINDS.filter(key=>key!=='host-meta').every(key=>groups[key].length===0),'STORAGE_CORRUPT','新内容不能同时持有旧正文副本。',503);
+        const host={...meta('host-meta'),...Object.fromEntries(CONTENT_CATALOGS.map(key=>[key,map('content-'+key)]))};
+        for(const key of CONTENT_CATALOGS)for(const row of groups['content-'+key])demand(row.payload.id===row.id,'STORAGE_CORRUPT','内容实体身份不一致。',503);
+        return {revision,host:normalizeHost(host),storage};
+      }
+      demand(CONTENT_CATALOGS.every(key=>groups['content-'+key].length===0),'STORAGE_CORRUPT','旧工作区不能混入新内容实体。',503);
       for (const kind of ['matter', 'source', 'work']) for (const row of groups[kind]) demand(row.payload.id === row.id, 'STORAGE_CORRUPT', '实体 ID 与数据库行不一致。', 503);
       const host = { ...meta('host-meta'), chain: { ...meta('chain-meta'), matters: groups.matter.map(row => row.payload), sources: groups.source.map(row => row.payload), sessions: map('chain-session') }, comparisons: map('comparison'), worksite: { ...meta('worksite-meta'), works: map('work'), sessions: map('worksite-session') }, workGuards: map('work-guard'), route: { view: 'home' }, error: null };
       return { revision, host: normalizeHost(host), storage };
@@ -366,6 +392,7 @@ export function createProductWorkspace({
   let databaseIdentity;
   try {
     const exists = assertDatabase(db, true);
+    if(exists)readSnapshot(currentRevision());
     db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
     if (!exists) transaction(() => {
       db.exec(`PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=${SCHEMA_VERSION};
@@ -375,12 +402,15 @@ export function createProductWorkspace({
         CREATE TABLE web_entities(workspace_revision INTEGER NOT NULL REFERENCES web_snapshots(revision),kind TEXT NOT NULL,object_id TEXT NOT NULL,ordinal INTEGER NOT NULL,payload TEXT NOT NULL,payload_sha256 TEXT NOT NULL,PRIMARY KEY(workspace_revision,kind,object_id));
         CREATE TABLE web_commands(command_id TEXT PRIMARY KEY,request_sha256 TEXT NOT NULL,committed_revision INTEGER NOT NULL REFERENCES web_snapshots(revision),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
       ensureHostSessionSchema(db);
+      ensureCanvasSchema(db);
       createIdentityTable(db);
       databaseIdentity = identityForProduct(file, {workspaceId, installationId, runtimeVersion}, false);
       insertIdentity(db, databaseIdentity);
     });
     else transaction(() => {
       ensureHostSessionSchema(db);
+      ensureCanvasSchema(db);
+      db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
       const current = readDatabaseIdentity(db);
       if (current === null) {
         // Pre-identity v1 databases are not guessed into a workspace.  The
@@ -418,6 +448,7 @@ export function createProductWorkspace({
   const assertWritableIdentity = () => {
     demand(databaseIdentity.verification_state === 'verified' || legacyWritesAllowed, 'LEGACY_IDENTITY_UNVERIFIED', '旧 Product 数据库仅允许读取；请先显式升级 workspace/installation identity。', 503);
   };
+  const canvasResources=createCanvasResourceStore({db,directory:path.join(path.dirname(file),path.basename(file)+'.resources'),readProduct:()=>readSnapshot(currentRevision()),transaction,assertWritableIdentity});
   function persist(host, fingerprint, commandId, revision) {
     assertWritableIdentity();
     demand(revision < Number.MAX_SAFE_INTEGER, 'REVISION_EXHAUSTED', '工作区修订已达上限。', 503);
@@ -431,17 +462,20 @@ export function createProductWorkspace({
   }
   function put(body) {
     assertWritableIdentity();
+    demand(body?.host?.schemaVersion!==2,'LEGACY_WRITE_DISABLED','新内容只接受明确命令，不能整份覆盖。',410);
     demand(plain(body) && Number.isSafeInteger(body.expectedRevision) && body.expectedRevision >= 0 && identity(body.commandId) && body.commandId.length <= 200, 'INVALID_COMMAND', '需要有效的 expectedRevision、commandId 和 host。', 400);
     demand(Object.keys(body).every(key => ['expectedRevision', 'host', 'commandId'].includes(key)), 'INVALID_COMMAND', '请求包含未支持的字段。', 400);
     const host = normalizeHost(body.host), fingerprint = sha(stableJson({ expectedRevision: body.expectedRevision, host }));
     return transaction(() => {
       const revision = currentRevision();
       // Validate the authoritative current snapshot before accepting any replacement.
-      readSnapshot(revision);
+      demand(readSnapshot(revision).host?.schemaVersion!==2,'LEGACY_WRITE_DISABLED','新内容工作区不能被旧快照覆盖。',410);
       const known = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(body.commandId);
       if (known) {
         if (known.request_sha256 !== fingerprint) throw new WebStoreError(409, 'COMMAND_CONFLICT', '相同 commandId 不能提交不同内容。', revision);
-        return readSnapshot(known.committed_revision);
+        const committed = readSnapshot(known.committed_revision);
+        // A replay proves the original commit, not that its snapshot is still head.
+        return revision === known.committed_revision ? committed : { ...committed, headRevision: revision };
       }
       if (body.expectedRevision !== revision) throw new WebStoreError(409, 'REVISION_CONFLICT', '工作区已有更新，未覆盖；请重新读取并保留当前草稿。', revision);
       return persist(host, fingerprint, body.commandId, revision);
@@ -453,11 +487,11 @@ export function createProductWorkspace({
       receipt: { protocolVersion: 1, receiptId: `product:${commandId}`, commandId, status: 'committed',
         beforeRevision: after - 1, afterRevision: after, requestHash: known.request_sha256.slice('product-v1:'.length), hostDelivery: 'not_requested' } };
   }
-  function executeProduct(body) {
+  function executeProduct(body,{nativeDispatch=false,withinTransaction=false}={}) {
     assertWritableIdentity();
     validateProductCommand(body);
     const fingerprint = `product-v1:${sha(stableJson(body))}`;
-    return transaction(() => {
+    const execute=() => {
       const revision = currentRevision();
       const current = readSnapshot(revision);
       const known = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(body.commandId);
@@ -468,9 +502,88 @@ export function createProductWorkspace({
       if (body.expectedRevision !== revision) throw new WebStoreError(409, 'REVISION_CONFLICT', '工作区已有更新；动作尚未执行，草稿应保留。', revision);
       // All domain guards and mutations run under the same SQLite write lock.
       // No caller-supplied host, receipt or final state is accepted.
-      const next = applyProductOperations(current.host, body.operations);
+      for(const op of body.operations)if(op.type==='capability.package.export'||op.type==='capability.package.receive'){const {bytes}=canvasResources.readResourceContent(op.packetResourceId);assertCapabilityPacketOperation(op,bytes,sha);}
+      const feedbackEvidence=Object.create(null);
+      for(const op of body.operations)if(capabilityFeedbackNeedsProof(op,current.host)){
+        demand(typeof resolveFeedbackEvidence==='function','FEEDBACK_RESULT_UNVERIFIED','当前宿主未连接受控运行库；不能声称已核验本机返回。',409);
+        try{feedbackEvidence[op.id]=resolveFeedbackEvidence(op.value.context);}catch(cause){throw new WorkbenchError('FEEDBACK_SOURCE_UNAVAILABLE',String(cause.message||'原运行暂不可读，未提交反馈。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
+      }
+      const activationEvidence=Object.create(null),activationPlacements=Object.create(null);
+      for(const op of body.operations){
+        if(op.type==='activation.result'&&op.source.kind==='manual'&&typeof resolveActivationEvidence==='function'){
+          try{resolveActivationEvidence(op.id,op.source);}catch(cause){throw new WorkbenchError('ACTIVATION_RUNNING',String(cause.message||'原激活运行状态尚未允许保存人工结果。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
+        }
+        if(activationNeedsProof(op)){
+          demand(typeof resolveActivationEvidence==='function','ACTIVATION_RESULT_UNVERIFIED','当前宿主未连接受控运行库；不能导入已核验AI候选。',409);
+          try{activationEvidence[op.id]=resolveActivationEvidence(op.id,op.source);}catch(cause){throw new WorkbenchError('ACTIVATION_SOURCE_UNAVAILABLE',String(cause.message||'原激活运行不可读，未导入。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
+        }
+        if(op.type==='activation.place.confirm'){
+          const plan=current.host?.activations?.[op.id]?.placements?.[op.candidateId];
+          if(plan)activationPlacements[op.id+':'+op.candidateId]=canvasResources.getCanvas(plan.canvasId);
+        }
+      }
+      const taskDispatchEvidence=Object.create(null);
+      for(const op of body.operations){
+        if(op.type==='task.cancel'&&typeof resolveTaskDispatchEvidence==='function')try{resolveTaskDispatchEvidence({phase:'cancel-preparation',taskId:op.id});}catch(cause){throw new WorkbenchError('TASK_DISPATCH_UNCONFIRMED',String(cause.message||'原任务执行占用尚未核验。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
+        if(!['task.dispatch.reserve','task.dispatch.cancel'].includes(op.type))continue;
+        demand(nativeDispatch&&typeof resolveTaskDispatchEvidence==='function','TASK_DISPATCH_UNVERIFIED','页面不能创建执行许可；需要受控本机运行库。',409);
+        let proof;try{proof=resolveTaskDispatchEvidence({phase:op.type==='task.dispatch.cancel'?'cancel':'reserve',taskId:op.taskId,runId:op.runId||current.host.tasks[op.taskId]?.dispatch?.runId,previousRunId:op.previousRunId??null});}catch(cause){throw new WorkbenchError('TASK_DISPATCH_UNCONFIRMED',String(cause.message||'原任务执行占用尚未核验。').replace(/[A-Za-z]:[\\/][^\s，。]+/g,'[本机路径]').slice(0,600),409);}
+        if(op.type==='task.dispatch.reserve'){
+          const payload=preparedTaskInput(current.host,op.taskId);
+          demand(sha(JSON.stringify(payload))===op.inputHash&&sha(stableJson(payload))===op.preparedInputHash,'TASK_INPUT_CHANGED','实际任务输入已变化，未创建运行。',409);
+        }
+        taskDispatchEvidence[op.taskId]={...proof,source:'native-owner',inputHash:op.inputHash,preparedInputHash:op.preparedInputHash};
+      }
+      const next = applyProductOperations(current.host, body.operations,{feedbackEvidence,activationEvidence,activationPlacements,taskDispatchEvidence});
+      canvasResources.verifyResources(next,body.operations.flatMap(op=>op.type==='resource.register'?[op.resource.id]:op.type==='material.create'&&op.value.resourceId?[op.value.resourceId]:op.type==='capability.package.receive'?[op.packetResourceId,...op.manifest.resources.map(r=>r.id)]:op.type==='capability.package.export'?[op.packetResourceId]:[]));
       persist(normalizeHost(next), fingerprint, body.commandId, revision);
       return productResult(body.commandId, {request_sha256: fingerprint, committed_revision: revision + 1}, revision + 1);
+    };
+    return withinTransaction?execute():transaction(execute);
+  }
+  function nativeDispatchReceipt(task,dispatch){
+    const known=db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(dispatch.commandId);
+    demand(known?.request_sha256.startsWith('product-v1:'),'STORAGE_CORRUPT','原派发回执缺失，未重复提交。',503);
+    return {dispatch:structuredClone(dispatch),receipt:productResult(dispatch.commandId,known,currentRevision()).receipt};
+  }
+  function preparedTaskInput(host,taskId,{forUse=true}={}){
+    const claim=host?.tasks?.[taskId]?.dispatch;
+    if(!claim)return taskInput(host,taskId,{forUse});
+    const inputCommandId=claim.inputCommandId||claim.commandId;
+    const known=db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(inputCommandId);
+    demand(known&&(claim.source==='native'?known.request_sha256.startsWith('product-v1:'):claim.source==='codex'&&known.request_sha256.startsWith('task-handoff-v2:approve:')),'STORAGE_CORRUPT','原派发输入快照缺失，未使用今天的标题重建。',503);
+    const original=readSnapshot(known.committed_revision).host,lockedClaim=original?.tasks?.[taskId]?.dispatch;
+    demand(lockedClaim?.commandId===inputCommandId&&(lockedClaim.inputCommandId||lockedClaim.commandId)===inputCommandId&&lockedClaim.inputVersion===claim.inputVersion&&lockedClaim.inputHash===claim.inputHash&&lockedClaim.preparedInputHash===claim.preparedInputHash,'TASK_DISPATCH_CONFLICT','原输入命令、任务或指纹身份不一致，未使用其它输入。',409);
+    const locked=taskInput(original,taskId,{forUse:false});
+    demand(sha(JSON.stringify(locked))===claim.inputHash&&sha(stableJson(locked))===claim.preparedInputHash,'STORAGE_CORRUPT','原派发输入完整性不一致。',503);
+    if(forUse)assertTaskInputUsable(host,taskId,locked);return locked;
+  }
+  function reserveNativeDispatch({taskId,requestId,runId,payload,projectDir,mode,previousRunId=null}){
+    demand(identity(taskId)&&identity(requestId)&&identity(runId)&&['read-only','workspace-write'].includes(mode),'INVALID_TASK_DISPATCH','任务派发身份或权限无效。',400);
+    const project=resolveCodexProjectDir(projectDir);
+    return transaction(()=>{
+      const revision=currentRevision(),host=readSnapshot(revision).host,task=host?.tasks?.[taskId],input=preparedTaskInput(host,taskId);
+      demand(stableJson(input)===stableJson(payload),'TASK_INPUT_CHANGED','任务或引用已变化，请重新核对实际输入。',409);
+      const inputHash=sha(JSON.stringify(input)),preparedInputHash=sha(stableJson(input));
+      if(task.dispatch?.requestId===requestId){
+        const old=task.dispatch;demand(!old.cancelledAt&&old.source==='native'&&old.inputHash===inputHash&&old.preparedInputHash===preparedInputHash&&old.projectIdentity===project.projectIdentity&&old.mode===mode&&(old.previousRunId===undefined||old.previousRunId===previousRunId),'TASK_DISPATCH_CONFLICT','同一派发请求的输入、项目、权限或上次运行已变化，原回执保留。',409);
+        return nativeDispatchReceipt(task,old);
+      }
+      demand(!task.dispatchHistory?.some(d=>d.requestId===requestId),'TASK_DISPATCH_SUPERSEDED','旧派发已有后续运行，只可核对原回执，不重新排队。',409);
+      const id='dispatch-'+sha(taskId+'\0'+requestId).slice(0,56),at=new Date().toISOString();
+      const op={type:'task.dispatch.reserve',taskId,id,commandId:id,inputCommandId:task.dispatch?.inputCommandId||task.dispatch?.commandId||id,source:'native',requestId,runId,inputVersion:1,inputHash,preparedInputHash,projectDir:project.projectDir,projectIdentity:project.projectIdentity,mode,previousRunId,at};
+      executeProduct({protocolVersion:1,commandId:id,expectedRevision:revision,operations:[op]},{nativeDispatch:true,withinTransaction:true});
+      return nativeDispatchReceipt(task,readSnapshot(currentRevision()).host.tasks[taskId].dispatch);
+    });
+  }
+  function cancelNativeDispatch({taskId,dispatchId}){
+    demand(identity(taskId)&&identity(dispatchId),'INVALID_TASK_DISPATCH','原派发身份无效。',400);
+    return transaction(()=>{
+      const revision=currentRevision(),task=readSnapshot(revision).host?.tasks?.[taskId],dispatch=task?.dispatch;
+      demand(dispatch?.id===dispatchId,'TASK_DISPATCH_UNAVAILABLE','没有这份原派发。',404);
+      const commandId='cancel-'+dispatchId;
+      if(dispatch.cancelledAt){const known=db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(commandId);demand(known,'STORAGE_CORRUPT','原取消回执缺失。',503);return productResult(commandId,known,revision);}
+      return executeProduct({protocolVersion:1,commandId,expectedRevision:revision,operations:[{type:'task.dispatch.cancel',taskId,dispatchId,at:new Date().toISOString()}]},{nativeDispatch:true,withinTransaction:true});
     });
   }
   function agentAdoptionResult(candidate, known, headRevision) {
@@ -556,6 +669,49 @@ export function createProductWorkspace({
       }
       persist(normalizeHost(outcome.host), fingerprint, body.commandId, revision);
       return codexResult(kind, body.commandId, { request_sha256: fingerprint, committed_revision: revision + 1 }, revision + 1);
+    });
+  }
+  function agentWorksiteResult(commandId, known, headRevision) {
+    const snapshot = readSnapshot(known.committed_revision);
+    const bridge = findAgentWorksiteResponse(snapshot.host, commandId);
+    const productReceipt = { protocolVersion: 1, receiptId: `product:${commandId}`, commandId,
+      status: 'committed', beforeRevision: snapshot.revision - 1, afterRevision: snapshot.revision,
+      requestHash: known.request_sha256.slice('agent-worksite-v1:'.length), hostDelivery: 'not_requested',
+      agentRunId: bridge.receipt.runId, resultHash: bridge.receipt.resultHash, effect: 'result-draft-only' };
+    return {
+      protocolVersion: 1,
+      revision: snapshot.revision,
+      headRevision,
+      ...snapshot,
+      receipt: {...bridge.receipt, beforeRevision: snapshot.revision - 1, afterRevision: snapshot.revision},
+      productReceipt,
+    };
+  }
+  function executeAgentWorksite(candidate) {
+    demand(plain(candidate) && identity(candidate.commandId) && identity(candidate.runId) && identity(candidate.workId)
+      && identity(candidate.matterId) && Number.isSafeInteger(candidate.expectedRevision) && candidate.expectedRevision >= 0,
+      'INVALID_WORKSITE_RETURN', 'Agent 工作现场回接请求无效。', 400);
+    const fingerprint = `agent-worksite-v1:${sha(stableJson(candidate))}`;
+    return transaction(() => {
+      const revision = currentRevision();
+      const current = readSnapshot(revision);
+      const known = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(candidate.commandId);
+      if (known) {
+        if (known.request_sha256 !== fingerprint) throw new WebStoreError(409, 'COMMAND_CONFLICT', '同一 Agent 工作现场命令不能对应不同结果。', revision);
+        demand(known.request_sha256.startsWith('agent-worksite-v1:'), 'COMMAND_CONFLICT', '命令 ID 已用于另一类操作。', 409);
+        return agentWorksiteResult(candidate.commandId, known, revision);
+      }
+      demand(candidate.expectedRevision === revision, 'REVISION_CONFLICT', '工作区已经变化；旧 Agent 结果没有覆盖当前内容。', 409);
+      const outcome = returnAgentWorksiteResult(current.host, candidate);
+      if (!outcome.changed) {
+        const original = db.prepare('SELECT request_sha256,committed_revision FROM web_commands WHERE command_id=?').get(outcome.receipt.commandId);
+        demand(original?.request_sha256.startsWith('agent-worksite-v1:'), 'STORAGE_CORRUPT', 'Agent 原始工作现场命令缺失。', 503);
+        return agentWorksiteResult(outcome.receipt.commandId, original, revision);
+      }
+      demand(outcome.changed === true, 'RESULT_REJECTED', 'Agent 结果未进入工作现场复核区。', 409);
+      persist(normalizeHost(outcome.host), fingerprint, candidate.commandId, revision);
+      const result = agentWorksiteResult(candidate.commandId, {request_sha256: fingerprint, committed_revision: revision + 1}, revision + 1);
+      return result;
     });
   }
   // Host-session receipts use their own append-only command table and never
@@ -646,6 +802,24 @@ export function createProductWorkspace({
     try {
       if (closed) throw new WebStoreError(503, 'STORE_CLOSED', '工作区存储已关闭。');
       checkOrigin(req, ['PUT', 'POST'].includes(req.method));
+      if(product&&await canvasResources.handle(req,res,rawPath,readBody))return true;
+      const taskHandoffKind=product?taskHandoffPath(rawPath):null;
+      if(taskHandoffKind!==null){
+        demand(taskHandoffBridge,'TASK_BRIDGE_UNAVAILABLE','当前内容owner未连接受控外部桥接；没有改用旧内容库。',409);
+        if(taskHandoffKind.startsWith('receipts/')){
+          demand(req.method==='GET','METHOD_NOT_ALLOWED','原回执只接受GET。',405);
+          let id;try{id=decodeURIComponent(taskHandoffKind.slice('receipts/'.length));}catch{throw new WebStoreError(400,'INVALID_COMMAND','命令身份编码不正确。');}
+          reply(res,200,taskHandoffBridge.readReceipt(id));return true;
+        }
+        if(taskHandoffKind==='configuration'){
+          demand(req.method==='GET','METHOD_NOT_ALLOWED','连接说明只接受GET。',405);
+          reply(res,200,{...taskHandoffBridge.configuration(),...(Number.isInteger(req.socket.localPort)?{baseUrl:'http://127.0.0.1:'+req.socket.localPort}:{})});return true;
+        }
+        demand(req.method==='POST','METHOD_NOT_ALLOWED','任务交接动作只接受POST。',405);
+        demand(/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(req.headers['content-type']||'')&&!req.headers['content-encoding'],'JSON_REQUIRED','任务交接只接受未压缩的JSON。',415);
+        const body=await readBody(req);
+        reply(res,200,taskHandoffBridge.execute(taskHandoffKind,body,req.headers));return true;
+      }
       if (product) {
         const commandMatch = /^\/api\/product\/commands\/([^/]+)$/.exec(rawPath);
         const codexKind = rawPath === '/api/product/codex/receive' ? 'receive' : rawPath === '/api/product/codex/return' ? 'return' : null;
@@ -751,11 +925,23 @@ export function createProductWorkspace({
     }
     return true;
   }
-  return { file,
+  return { file, handle,canvasResources,
     get identity() { return structuredClone(databaseIdentity); },
     getIdentity() { return structuredClone(databaseIdentity); },
     upgradeIdentity,
-    handle,
+    // Node composition seam only. No HTTP/IPC request can configure a resolver.
+    configureTaskHandoff({keyFile}){
+      demand(!closed&&!taskHandoffBridge,'TASK_BRIDGE_CONFIGURED','该owner的外部桥接已固定或已关闭。',409);
+      taskHandoffBridge=createTaskHandoff({file,keyFile,db,need:demand,transaction(fn){assertWritableIdentity();return transaction(fn);},currentRevision,readSnapshot,persist,preparedTaskInput,
+        assertNoNativeAttempt(taskId){demand(typeof resolveTaskDispatchEvidence==='function','TASK_DISPATCH_UNVERIFIED','尚未连接原生占用核验，未授权外部接续。',409);const proof=resolveTaskDispatchEvidence({phase:'external-reserve',taskId});demand(proof?.allowed===true,'TASK_DISPATCH_UNCONFIRMED','原生执行占用尚未核验。',409);}});
+      storage.features.push('task-handoff-v2');
+    },
+    configureFeedbackEvidenceResolver(resolver){demand(typeof resolver==='function','INVALID_FEEDBACK_RESOLVER','需要受控的本机运行来源读取器。');resolveFeedbackEvidence=resolver;if(!storage.features.includes('capability-feedback-result-v1'))storage.features.push('capability-feedback-result-v1');},
+    configureActivationEvidenceResolver(resolver){demand(typeof resolver==='function','INVALID_ACTIVATION_RESOLVER','需要受控的激活运行来源读取器。');resolveActivationEvidence=resolver;if(!storage.features.includes('activation-result-v1'))storage.features.push('activation-result-v1');},
+    configureTaskDispatchResolver(resolver){demand(typeof resolver==='function','INVALID_TASK_DISPATCH_RESOLVER','需要受控的本机运行库读取器。');resolveTaskDispatchEvidence=resolver;if(!storage.features.includes('task-dispatch-v1'))storage.features.push('task-dispatch-v1');},
+    reserveNativeDispatch(input){demand(!closed,'STORE_CLOSED','工作区存储已关闭。',503);return reserveNativeDispatch(input);},
+    cancelNativeDispatch(input){demand(!closed,'STORE_CLOSED','工作区存储已关闭。',503);return cancelNativeDispatch(input);},
+    readTaskInput(taskId){demand(!closed,'STORE_CLOSED','工作区存储已关闭。',503);return preparedTaskInput(readSnapshot(currentRevision()).host,taskId);},
     // User-level Codex host stream. These methods share the Product Workspace
     // SQLite handle but use independent append-only tables/revisions.
     hostSessions,
@@ -764,5 +950,6 @@ export function createProductWorkspace({
     read() { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return readSnapshot(currentRevision()); },
     execute(command) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return executeProduct(command); },
     adoptAgentCandidate(candidate) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return applyAgentCandidate(candidate); },
+    returnAgentWorksiteResult(candidate) { demand(!closed, 'STORE_CLOSED', '工作区存储已关闭。', 503); return executeAgentWorksite(candidate); },
     close() { if (closed) return; closed = true; db.close(); } };
 }

@@ -191,6 +191,27 @@ test('a selected Zhihu result keeps provider provenance and URL through import, 
   assert.equal(bad.status,422);
 });
 
+test('repeated provider result is idempotent across fetch times but changed content fails closed',async t=>{
+  const a=await fixture(t);const initial=await a.ok(capture());
+  const anchor=selectComparisonAnchor(initial.host,'m',{field:'originalText'});
+  await a.ok({type:'comparison.open',matterId:'m',sessionId:'repeat-source',anchor});
+  const material={id:'external:zhihu-repeat',provider:'zhihu',source:'zhihu',title:'同一份公开内容',author:'知乎作者',
+    url:'https://www.zhihu.com/question/1/answer/9',excerpt:'可核对的摘要。',context:'本次搜索结果。',sourceType:'知乎公开内容',
+    contentType:'answer',contentMode:'summary',fetchedAt:'2026-09-20T00:00:00.000Z'};
+  await a.ok(compare('IMPORT_MATERIAL',{material},'repeat-source'));
+  let state=await a.ok(compare('IMPORT_MATERIAL',{material:{...material,fetchedAt:'2026-09-20T00:01:00.000Z'}},'repeat-source'));
+  const model=state.host.comparisons['repeat-source'].model;
+  assert.equal(model.catalog.length,1);
+  assert.equal(model.catalog[0].fetchedAt,material.fetchedAt);
+  assert.equal(state.host.chain.sources.filter(item=>item.id===material.id).length,1);
+  assert.equal(state.host.chain.sources.find(item=>item.id===material.id).fetchedAt,material.fetchedAt);
+
+  const conflict=await a.execute(compare('IMPORT_MATERIAL',{material:{...material,excerpt:'相同身份下被改写的摘要。'}},'repeat-source'));
+  assert.equal(conflict.status,422);
+  state=await a.read();
+  assert.equal(state.host.chain.sources.find(item=>item.id===material.id).excerpt,material.excerpt);
+});
+
 test('comparison revision is server-evaluated and an old comparison cannot overwrite later understanding',async t=>{
   const a=await fixture(t);const initial=await a.ok([capture(),...saveUnderstanding('原来的句子。\n另一段')]);
   const anchor=selectComparisonAnchor(initial.host,'m',{field:'understanding',start:0,end:6});

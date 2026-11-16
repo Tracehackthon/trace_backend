@@ -1,10 +1,11 @@
 // Shared command contract. The server always evaluates it against its own stored
 // snapshot. Browser evaluation is only a preview; it cannot issue commit receipts.
 import * as B from './bridge.mjs';
+import {isWorkbenchOperation,validateWorkbenchOperation,applyWorkbenchOperations,WorkbenchError} from './workbench-model.mjs';
 import { createDemoWorkspace } from './demo-workspace.mjs';
 import { SCREENS as CHAIN_SCREENS } from './chain-model.mjs';
 import { SCREENS as WORK_SCREENS } from './worksite-model.mjs';
-import { DIRECTION_OPTIONS, SCOPE_OPTIONS, RELATION_OPTIONS } from './comparison-model.mjs';
+import { DIRECTION_OPTIONS, SCOPE_OPTIONS, RELATION_OPTIONS, classifyMaterialImport } from './comparison-model.mjs';
 
 export class ProductCommandError extends Error {
   constructor(code, message, status = 422) { super(message); this.code = code; this.status = status; }
@@ -29,14 +30,24 @@ const destination = x => shape(x, { agent: optional(text), project: optional(tex
 const anchor = x => shape(x, { field: oneOf('understanding', 'originalText', 'discussion', 'source'), start: version, end: version, text,
   baseVersion: version, objectId: optional(id), expressionId: optional(id), sourceId: optional(id) });
 const target = x => shape(x, { field: optional(oneOf('understanding')), start: version, end: version, text });
-const route = x => shape(x, { view: text, matterId: optional(id), workId: optional(id), sessionId: optional(id), screen: optional(text), q: optional(text), kind: optional(text), recordId: optional(text),
+const route = x => shape(x, { view: text, matterId: optional(id), workId: optional(id), sessionId: optional(id), screen: optional(text), q: optional(text), kind: optional(text), recordId: optional(text), findingId: optional(id),
   contextMode: optional(oneOf('fresh','resume')), anchor: optional(x => x === null || anchor(x)), returnTarget: optional(x => x === null || route(x)),
   scroll: optional(x => Array.isArray(x) && x.length <= 50 && x.every(item => shape(item, {key: optional(text), className: optional(text), top: version}))),
   anchorStatus: optional(text), currentUnderstandingVersion: optional(version) });
 const handoffPatch = x => shape(x, { destination: optional(destination), selectedText: optional(text), note: optional(text), role: optional(oneOf('reference','trial','exclude')), scope: optional(oneOf('current-task')) });
+const nullableText = optional(x => x === null || text(x));
+const optionalCount = optional(x => x === null || version(x));
+const publicSource = x => shape(x, {
+  id, provider: oneOf('zhihu'), source: oneOf('zhihu','global'), excerpt: text, url: webUrl, fetched_at: text,
+  title: nullableText, author: nullableText, content_id: nullableText, content_type: nullableText,
+  content_mode: optional(x => x === null || oneOf('', 'summary', 'metadata', 'excerpt', 'unknown')(x)), authority_level: nullableText, edited_at: nullableText,
+  vote_up_count: optionalCount, comment_count: optionalCount,
+});
+const sourceProvenance = x => shape(x, {provider: oneOf('zhihu'), author: text, query: text, fetchedAt: text, url: webUrl});
 const noArgs = {};
 const CHAIN = {
   OPEN: {id, screen: optional(oneOf(...CHAIN_SCREENS))}, NAVIGATE: {screen: oneOf(...CHAIN_SCREENS)}, BACK: noArgs, CLEAR_NOTICE: noArgs,
+  CAPTURE_DRAFT: {text}, CAPTURE_EXCERPT: {sourceId: id, text}, TOGGLE_SOURCE: {id},
   COMPOSER_DRAFT: {text}, SEND: noArgs,
   FOCUS: {field: oneOf('understanding','discussion'), start: version, end: version, text, objectId: optional(id)}, CLEAR_FOCUS: noArgs,
   BRANCH: noArgs, FOCUS_TO_UNDERSTANDING: noArgs, FRESH_CONTEXT: noArgs, RESUME_CONTEXT: noArgs,
@@ -51,7 +62,7 @@ const COMPARISON = {
   ADJUST_SEARCH: noArgs, IMPORT_MATERIAL: {material: x => shape(x, {
     id: optional(id), title: optional(text), excerpt: text, context: optional(text), sourceType: optional(text), url: optional(webUrl),
     provider: optional(text), source: optional(oneOf('zhihu', 'global', 'authorized')), author: optional(text),
-    contentType: optional(text), contentMode: optional(oneOf('summary', 'metadata', 'excerpt')), fetchedAt: optional(text),
+    contentType: optional(text), contentMode: optional(oneOf('summary', 'metadata', 'excerpt', 'unknown')), fetchedAt: optional(text),
   })},
   OPEN_CANDIDATE: {id}, BACK_TO_CANDIDATES: noArgs, COMPARISON_DRAFT: {text}, SAVE_COMPARISON_NOTE: noArgs,
   RELATION_PATCH: {patch: x => shape(x, {type: optional(oneOf(...RELATION_OPTIONS.map(x=>x.value))), target: optional(text)})},
@@ -61,7 +72,7 @@ const COMPARISON = {
 const WORK = {
   NAVIGATE: {screen: oneOf(...WORK_SCREENS)}, BACK: noArgs, CLEAR_NOTICE: noArgs, OPEN_INTAKE: {id},
   SET_INTAKE_ROLE: {id, role: oneOf('reference','trial','contrast','exclude')}, SET_INTAKE_NOTE: {id, text},
-  COMPOSER_DRAFT: {text}, OPEN_FINDING: noArgs, FINDING_DRAFT: {patch: x => shape(x, {text: optional(text), note: optional(text)})},
+  COMPOSER_DRAFT: {text}, OPEN_FINDING: noArgs, OPEN_SAVED_FINDING: {id}, FINDING_DRAFT: {patch: x => shape(x, {text: optional(text), note: optional(text)})},
   SET_FINDING_RELATION: {decision: oneOf('linked','unrelated'), matterId: optional(id)}, KEEP_FINDING: noArgs, USE_FINDING_IN_WORK: noArgs, DISPUTE_IMPACT: {text},
   RESULT_DRAFT: {patch: x => shape(x, {matterId: optional(id), fact: optional(text), interpretation: optional(text), unconfirmed: optional(text), proposedUnderstanding: optional(text), relation: optional(oneOf('support','limit','challenge','unknown'))})},
   KEEP_RESULT_ONLY: noArgs, OPEN_REVISION_REVIEW: noArgs, REVISION_DRAFT: {text}, CANCEL_REVISION_REVIEW: noArgs,
@@ -71,6 +82,8 @@ const actionShape = catalog => action => plain(action) && Object.hasOwn(catalog,
 const OPERATION = {
   'capture.draft': {text},
   'capture.create': {matterId: id, text, source: optional(x => shape(x, {id, excerpt: text, title: optional(text), context: optional(text)}))},
+  'source.keep-public': {matterId: id, source: publicSource, query: text},
+  'source.provenance.attach': {matterId: id, sourceId: id, provenance: sourceProvenance},
   'chain.action': {matterId: id, action: actionShape(CHAIN), expectedUnderstandingVersion: optional(version)},
   'comparison.open': {sessionId: id, matterId: id, anchor, returnTarget: optional(route)},
   'comparison.action': {sessionId: id, action: actionShape(COMPARISON)},
@@ -93,7 +106,10 @@ export function validateProductOperations(operations) {
     }
   }
   requireThat(Array.isArray(operations) && operations.length > 0 && operations.length <= 256, '每次提交需要 1—256 个明确动作。');
-  for (const op of operations) requireThat(plain(op) && Object.hasOwn(OPERATION, op.type) && shape(op, {type: text, ...OPERATION[op.type]}), '不支持的动作、字段或字段值。');
+  for (const op of operations) {
+    if (isWorkbenchOperation(op)) validateWorkbenchOperation(op);
+    else requireThat(plain(op) && Object.hasOwn(OPERATION, op.type) && shape(op, {type: text, ...OPERATION[op.type]}), '不支持的动作、字段或字段值。');
+  }
   requireThat(!operations.some(op => op.type === 'workspace.reset') || operations.length === 1, '重置必须独立确认，不能混入普通提交。');
   return operations;
 }
@@ -113,6 +129,16 @@ function chain(host, op) {
   const item = host.chain.matters.find(m => m.id === op.matterId), session = host.chain.sessions[op.matterId];
   if (!item || !session) fail('UNKNOWN_MATTER', '没有找到这件事。', 404);
   const action = op.action;
+  if (['CAPTURE_EXCERPT','TOGGLE_SOURCE'].includes(action.type)) {
+    const sourceId = action.type === 'CAPTURE_EXCERPT' ? action.sourceId : action.id;
+    const source = host.chain.sources.find(source => source.id === sourceId);
+    requireThat(source && (!source.ownerMatterId || source.ownerMatterId === item.id || item.sourceIds.includes(sourceId)),
+      '这份来源不在当前可引用范围内。', 'SOURCE_UNAVAILABLE');
+    requireThat(!source.ownerMatterId || host.chain.matters.some(matter => matter.id === source.ownerMatterId),
+      '来源原始事项不存在；未保存不明来处的选段。', 'SOURCE_UNAVAILABLE');
+    if (action.type === 'CAPTURE_EXCERPT') requireThat(action.text === '' || typeof source.excerpt === 'string' && source.excerpt.includes(action.text),
+      '选段与原材料不一致；未改写原件或保存伪造定位。', 'SOURCE_CONFLICT');
+  }
   if (action.type === 'SEND' && !session.composer.text.trim()) invalid('空白表达不能提交。');
   if (['BRANCH','FOCUS_TO_UNDERSTANDING'].includes(action.type) && !session.focus) invalid('请先选择准确的一处。');
   const next = checked(B.dispatchChain(host, op)), after = next.chain.sessions[op.matterId];
@@ -128,12 +154,14 @@ function comparison(host, op) {
   const local = host.comparisons[op.sessionId];
   if (!local) fail('UNKNOWN_SESSION', '没有找到本次对照。', 404);
   if (local.model.request) fail('PENDING_REQUEST', '请先恢复上次未确认的请求。', 409);
+  const importDisposition = op.action.type === 'IMPORT_MATERIAL'
+    ? classifyMaterialImport(local.model, B.resolveComparisonMaterial(host, op.action.material)) : null;
   let next = checked(B.dispatchComparison(host, op));
   const model = next.comparisons[op.sessionId].model;
   if (['LINK','CONFIRM_REVISION','UNDO_REVISION'].includes(op.action.type)) {
     if (!model.request) invalid(model.notice || '没有可提交的对照动作。');
     next = checked(B.commitComparison(next, {sessionId: op.sessionId, requestId: model.request.id}));
-  } else if (op.action.type === 'IMPORT_MATERIAL' && model.catalog.length === local.model.catalog.length) invalid(model.notice);
+  } else if (op.action.type === 'IMPORT_MATERIAL' && model.catalog.length === local.model.catalog.length && importDisposition !== 'same') invalid(model.notice);
   else if (op.action.type === 'OPEN_REVISION' && !model.revision.open) invalid(model.notice);
   return next;
 }
@@ -149,8 +177,12 @@ function worksite(host, op) {
   return next;
 }
 
-export function applyProductOperations(previous, operations) {
+export function applyProductOperations(previous, operations, options = {}) {
   validateProductOperations(operations);
+  if (previous?.schemaVersion === 2 || operations.some(isWorkbenchOperation)) {
+    if (!operations.every(isWorkbenchOperation)) throw new WorkbenchError('LEGACY_COMMAND_REQUIRES_ADAPTER','旧动作尚未映射到新内容协议；未改写工作区。',409);
+    return applyWorkbenchOperations(previous,operations,options);
+  }
   let host = structuredClone(previous || B.createBridge());
   // A historical view error is not a new command failure.
   host.error = null;
@@ -158,6 +190,8 @@ export function applyProductOperations(previous, operations) {
     switch (op.type) {
       case 'capture.draft': host.chain.capture.text = op.text; break;
       case 'capture.create': host = checked(B.captureInput(host, op)); break;
+      case 'source.keep-public': host = checked(B.keepPublicSource(host, op)); break;
+      case 'source.provenance.attach': host = checked(B.attachProviderSourceProvenance(host, op)); break;
       case 'chain.action': host = chain(host, op); break;
       case 'comparison.open': host = checked(B.openComparison(host, op)); break;
       case 'comparison.action': host = comparison(host, op); break;

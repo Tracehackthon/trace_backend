@@ -175,3 +175,31 @@ test('native Codex rejects an unknown app-server protocol before account or thre
     assert.equal(calls.filter(x => x.method === 'thread/start').length, 0);
   } finally { fs.rmSync(project, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
+
+test('native Codex binds every worksite run and resume to the configured canonical project identity', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-native-binding-'));
+  const projectA = path.join(root, 'same-name');
+  const projectB = path.join(root, 'other-parent', 'same-name');
+  fs.mkdirSync(projectA, { recursive: true }); fs.mkdirSync(projectB, { recursive: true });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const canonical = value => path.normalize(fs.realpathSync.native(value)).toLocaleLowerCase();
+  const calls = [], adapter = adapterFor(projectA, 'complete', calls, []);
+  const base = { workId: 'work-a', matterId: 'matter-a', role: 'trial', project: 'same-name' };
+  await assert.rejects(adapter.execute({ request: request(base), context,
+    signal: new AbortController().signal, isCurrent: () => true, onEvent: () => {} }),
+  error => error.code === 'CODEX_PROJECT_SCOPE_MISMATCH');
+  assert.equal(calls.length, 0, 'missing worksite identity must not spawn native Codex');
+  await assert.rejects(adapter.execute({ request: request({ ...base, projectIdentity: canonical(projectB) }), context,
+    signal: new AbortController().signal, isCurrent: () => true, onEvent: () => {} }),
+  error => error.code === 'CODEX_PROJECT_SCOPE_MISMATCH');
+  assert.equal(calls.length, 0, 'mismatched worksite must not spawn native Codex');
+
+  const first = await adapter.execute({ request: request({ ...base, projectIdentity: canonical(projectA) }), context,
+    signal: new AbortController().signal, isCurrent: () => true, onEvent: () => {} });
+  assert.equal(first.threadId, 'native-thread');
+  calls.length = 0;
+  await assert.rejects(adapter.execute({ request: request({ ...base, projectIdentity: canonical(projectB), threadId: first.threadId }), context,
+    signal: new AbortController().signal, isCurrent: () => true, onEvent: () => {} }),
+  error => error.code === 'CODEX_PROJECT_SCOPE_MISMATCH');
+  assert.equal(calls.length, 0, 'resume identity mismatch must fail before thread/resume');
+});

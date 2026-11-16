@@ -71,7 +71,6 @@ export function mountComparisonScreen({root,view,onAction=()=>{},onReturn=()=>{}
   let priorFocus = null;
   let scopeOpen = false;
   let glass = [];
-  let animation = null;
   let adjustDraft = '';
   const composing = new WeakSet();
   const fonts = [];
@@ -122,11 +121,6 @@ export function mountComparisonScreen({root,view,onAction=()=>{},onReturn=()=>{}
     if(typeof services.mountSceneGlass!=='function')return;
     all('[data-glass]').forEach(host=>{try{glass.push(services.mountSceneGlass({host,scene:root,backgroundUrl:assets.background,path:GLASS_PATH,width:host.clientWidth,height:host.clientHeight,tone:'cool'}));}catch{host.dataset.material='fallback';}});
   }
-  function animateScreen() {
-    animation?.cancel?.();
-    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches || typeof services.animate!=='function')return;
-    animation=services.animate(main,{opacity:[0,1],translateY:[6,0],duration:380,ease:'outQuad'});
-  }
   function setBirds() { all('[data-bird]').forEach(el=>{const url=el.dataset.bird==='fly'?assets.birdTakeoff:assets.birdPerched;if(url){el.src=url;el.hidden=false;}else{el.hidden=true;}}); }
   function renderCandidates() {
     const list=$('.compare-candidate-list');if(!list)return;
@@ -176,7 +170,7 @@ export function mountComparisonScreen({root,view,onAction=()=>{},onReturn=()=>{}
   }
   function openLink() {
     const item=candidate();if(!item)return;
-    modal('关联位置与关系',`<p class="compare-dialog-help">接入材料，不会自动修改你的理解。</p><h3>具体位置</h3><blockquote data-modal="target"></blockquote><label for="compare-relation">关系</label><select id="compare-relation" data-field="relation"></select><p class="compare-dialog-help" data-modal="reason"></p><div class="compare-dialog-actions">${button('close-modal','保持当前理解不变')}${button('confirm-link','接到这件事','compare-primary')}</div>`, 'link');
+    modal('关联位置与关系',`<p class="compare-dialog-help">确认关联只记录材料与这件事的关系；不会修改你的理解。</p><h3>具体位置</h3><blockquote data-modal="target"></blockquote><label for="compare-relation">关系</label><select id="compare-relation" data-field="relation"></select><p class="compare-dialog-help" data-modal="reason"></p><div class="compare-dialog-actions">${button('close-modal','暂不关联')}${button('confirm-link','确认关联材料','compare-primary')}</div>`, 'link');
     $('[data-modal="target"]').textContent=asText(current.matter?.focus?.text);
     $('[data-modal="reason"]').textContent=item.relationship?.reason || '关系由你决定，材料本身保持不变。';
     options($('#compare-relation'),current.relationOptions || Object.entries(relationLabels).filter(([key])=>!['limitation','uncertain'].includes(key)).map(([value,label])=>({value,label})),item.relationship?.type);
@@ -208,7 +202,7 @@ export function mountComparisonScreen({root,view,onAction=()=>{},onReturn=()=>{}
     const nextScreen=templates[current?.screen]?current.screen:'search';
     const changed=screen!==nextScreen;
     const changedCandidate=selectedId!==current.selectedId;
-    if(changed){closeModal();glass.forEach(g=>g.destroy());glass=[];screen=nextScreen;main.innerHTML=templates[screen];root.dataset.screen=screen;setBirds();setupGlass();animateScreen();}
+    if(changed){closeModal();glass.forEach(g=>g.destroy());glass=[];screen=nextScreen;main.innerHTML=templates[screen];root.dataset.screen=screen;setBirds();setupGlass();}
     selectedId=current.selectedId;
     const item=candidate();
     $('[data-shell="first"]').textContent=screen==='returned'?'在意的事':asText(current.matter?.title);
@@ -252,8 +246,8 @@ export function mountComparisonScreen({root,view,onAction=()=>{},onReturn=()=>{}
       $('[data-action="revision"]').disabled=!!current.pending;
       $('[data-action="revision"] span').textContent=current.matter?.understanding?'补进我的理解':'写进我的理解';
       $('[data-action="revision"]').title=current.matter?.understanding&&current.matter?.basis?.field!=='understanding'?'请先回到我的理解选择要修改的片段；原表达不改动。':'';
-      $('.compare-suggestion-label h2').textContent=current.isDemo?'Trace 的关系建议 · 尚未确认':'关系核对 · 尚未确认';
-      $('.compare-suggestion-label p').textContent='结合原表达与材料核对，是否接入由你决定。';
+      $('.compare-suggestion-label h2').textContent=item?.decision==='linked'?'关系已关联 · 理解未修改':current.isDemo?'Trace 的关系建议 · 尚未确认':'关系核对 · 尚未确认';
+      $('.compare-suggestion-label p').textContent=item?.decision==='linked'?'这份材料已接到当前问题；若要改变理解，需要另行确认。':'结合原表达与材料核对，是否接入由你决定。';
       $('.compare-note-form [type="submit"]').disabled=!current.comparisonDraft?.trim() || !!current.pending;
     }
     if(screen==='returned'){
@@ -280,7 +274,19 @@ export function mountComparisonScreen({root,view,onAction=()=>{},onReturn=()=>{}
     $('.compare-notice').hidden=!notice;$('.compare-notice > span').textContent=asText(notice);
     if(current.revision?.open)revisionModal();else if(modalType==='revision')closeModal();
     if(modalType==='link' && current.pending)$('[data-action="confirm-link"]').disabled=true;
-    if(changed)resize();
+    if(changed){
+      resize();
+      if(!dialog.open){
+        const heading=main.querySelector('h1[tabindex="-1"]');
+        heading?.focus({preventScroll:true});
+        // Closing a dialog can restore focus after this update finishes.
+        requestAnimationFrame(()=>{
+          if(!dead && heading?.isConnected && !dialog.open && document.activeElement===document.body){
+            heading.focus({preventScroll:true});
+          }
+        });
+      }
+    }
   }
   function click(event) {
     const direction=event.target.closest('[data-direction]');if(direction){emit({type:'QUERY_PATCH',patch:{direction:direction.dataset.direction}});return;}
@@ -327,5 +333,5 @@ export function mountComparisonScreen({root,view,onAction=()=>{},onReturn=()=>{}
   function cancel(event){event.preventDefault();closeModal(true);}
   root.addEventListener('click',click);root.addEventListener('input',input);root.addEventListener('change',change);root.addEventListener('submit',submit);root.addEventListener('compositionstart',compositionStart);root.addEventListener('compositionend',compositionEnd);root.addEventListener('keydown',keydown);dialog.addEventListener('cancel',cancel);
   update(view);resize();
-  return {update,destroy(){if(dead)return;dead=true;observer?.disconnect();animation?.cancel?.();glass.forEach(g=>g.destroy());fonts.forEach(f=>document.fonts.delete(f));root.removeEventListener('click',click);root.removeEventListener('input',input);root.removeEventListener('change',change);root.removeEventListener('submit',submit);root.removeEventListener('compositionstart',compositionStart);root.removeEventListener('compositionend',compositionEnd);root.removeEventListener('keydown',keydown);dialog.removeEventListener('cancel',cancel);if(dialog.open)dialog.close();root.replaceChildren();root.classList.remove('compare-root','compare-compact');root.style.removeProperty('background-image');delete root.dataset.screen;delete root.dataset.environment;delete root.dataset.fontFallback;}};
+  return {update,destroy(){if(dead)return;dead=true;observer?.disconnect();glass.forEach(g=>g.destroy());fonts.forEach(f=>document.fonts.delete(f));root.removeEventListener('click',click);root.removeEventListener('input',input);root.removeEventListener('change',change);root.removeEventListener('submit',submit);root.removeEventListener('compositionstart',compositionStart);root.removeEventListener('compositionend',compositionEnd);root.removeEventListener('keydown',keydown);dialog.removeEventListener('cancel',cancel);if(dialog.open)dialog.close();root.replaceChildren();root.classList.remove('compare-root','compare-compact');root.style.removeProperty('background-image');delete root.dataset.screen;delete root.dataset.environment;delete root.dataset.fontFallback;}};
 }

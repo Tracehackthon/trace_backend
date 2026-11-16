@@ -30,6 +30,8 @@ export function createExternalAgentAdapter({ profile, env = process.env, fetchIm
           operation: 'start',
           executorContractVersion: EXECUTOR_CONTRACT_VERSION,
           request: { requestId: request.requestId, purpose: request.purpose, input: request.input,
+            ...(request.workId === undefined ? {} : {worksite: {workId: request.workId, matterId: request.matterId, role: request.role,
+              project: request.project, projectIdentity: request.projectIdentity, intake: request.intake, findings: request.findings, selection: request.selection}}),
             ...(sensemaking ? {instructions: TRACE_SENSEMAKING_INSTRUCTIONS, outputSchema: SENSEMAKING_OUTPUT_SCHEMA,
               maxSteps: request.maxSteps, maxOutputBytes: request.maxOutputBytes} : {}) },
           context: contextManifest(context),

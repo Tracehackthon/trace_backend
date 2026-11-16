@@ -28,7 +28,7 @@ export {
 
 const API_SURFACE = Object.freeze({
   protocol: 'trace.desktop.runtime-api@0.2.0',
-  runtime: ['/api/runtime/identity'],
+  runtime: ['/api/runtime/identity', '/api/runtime/heartbeat'],
   product: ['/api/product/identity', '/api/product/workspace', '/api/product/commands', '/api/product/codex/receive', '/api/product/codex/return'],
   agent: ['/api/agent/capabilities', '/api/agent/check', '/api/agent/runs', '/api/agent/runs/:id', '/api/agent/runs/:id/events', '/api/agent/runs/:id/approval', '/api/agent/runs/:id/input', '/api/agent/runs/:id/cancel', '/api/agent/runs/:id/adoption', '/api/agent/requests/:id', '/api/agent/sensemaking/health', '/api/agent/sensemaking/drain'],
   zhihu: ['/api/search/capabilities', '/api/search/zhihu', '/api/search/global', '/api/zhihu/status', '/api/zhihu/oauth/start', '/api/zhihu/oauth/check', '/api/zhihu/oauth/disconnect', '/api/zhihu/oauth/connect', '/api/zhihu/oauth/result', '/api/zhihu/search', '/api/zhihu/user/read'],

@@ -93,11 +93,11 @@ test('idempotent replay is exact, survives reopen and does not overwrite later r
   const replay = await a.put({ ...firstHost, route: { view: 'home' }, error: null }, 0, 'unique-command');
   assert.deepEqual(replay.json, first.json);
   assert.equal((await a.put(sample('后来修改'), 1, 'later-command')).json.revision, 2);
-  assert.deepEqual((await a.put(firstHost, 0, 'unique-command')).json, first.json);
+  assert.deepEqual((await a.put(firstHost, 0, 'unique-command')).json, { ...first.json, headRevision: 2 });
   const collision = await a.put(sample('不同正文'), 0, 'unique-command');
   assert.equal(collision.status, 409); assert.equal(collision.json.error.code, 'COMMAND_CONFLICT');
   await a.close(); const b = await serve(t, file);
-  assert.deepEqual((await b.put(firstHost, 0, 'unique-command')).json, first.json);
+  assert.deepEqual((await b.put(firstHost, 0, 'unique-command')).json, { ...first.json, headRevision: 2 });
   assert.equal((await b.request('/api/web/workspace')).json.revision, 2);
 });
 
